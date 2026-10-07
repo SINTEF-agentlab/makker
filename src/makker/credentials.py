@@ -92,7 +92,8 @@ def provider_by_name(name: str) -> ProviderInfo | None:
     needle = name.strip().lower()
     for info in PROVIDERS.values():
         env_prefix = (info.key_env_var or "").lower().removesuffix("_api_key")
-        if needle in {info.name.lower(), info.label.lower(), env_prefix} - {""}:
+        names = {info.name, info.label, env_prefix, *info.aliases}
+        if needle in {n.lower() for n in names} - {""}:
             return info
     return None
 
