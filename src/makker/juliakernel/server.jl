@@ -34,6 +34,15 @@ using Sockets
 # signal-atomic hold-back in the pumps for a collision no real output hits.
 const MARKER = codeunits("\x1e\x1eJK-EVAL-DONE\x1e\x1e")
 
+# How many trailing bytes of `tail` could be the start of a marker. Only those
+# wait for the next chunk; everything before them is output and goes out now.
+function marker_prefix(tail)
+    for k in min(length(tail), length(MARKER) - 1):-1:1
+        view(tail, length(tail)-k+1:length(tail)) == view(MARKER, 1:k) && return k
+    end
+    return 0
+end
+
 # Keep the process's original stdio objects alive. After the redirect nothing
 # else references them, and GC would finalize them — closing the inherited
 # pipes the parent tails, which reads as the process dying.
@@ -177,7 +186,6 @@ function main()
     drained = Dict("stdout" => Channel{Nothing}(Inf), "stderr" => Channel{Nothing}(Inf))
 
     function pump(p::Pipe, stream::String)
-        hold = length(MARKER) - 1
         tail = UInt8[]
         finished = false
         while !finished
@@ -195,7 +203,7 @@ function main()
                             deleteat!(tail, 1:last(r))
                             put!(drained[stream], nothing)
                         end
-                        n = length(tail) - hold   # hold back a possible marker prefix
+                        n = length(tail) - marker_prefix(tail)
                         if n > 0
                             sendframe("OUT", (stream,), tail[1:n])
                             deleteat!(tail, 1:n)

@@ -60,3 +60,20 @@ def test_render_terminal_output_fast_path_trims_like_the_screen_model() -> None:
     # Plain text (no cursor control) takes the fast path; it must trim trailing
     # whitespace per line and drop trailing blank lines, same as the screen model.
     assert render_terminal_output("a  \nb \n\n") == "a\nb"
+
+
+def test_render_terminal_output_bounds_cursor_moves_with_huge_counts() -> None:
+    # A real screen is finite. Without a bound, one short escape grows the buffer
+    # by its count: `ESC[4000000B` used to produce four million rows.
+    assert render_terminal_output("\x1b[4000000Bx").count("\n") < 1000
+    assert len(render_terminal_output("\x1b[9999999999Cx")) <= 513
+    assert render_terminal_output("\x1b[999999999;999999999Hx").count("\n") < 1000
+    # Repeating a bounded move does not add up either.
+    assert render_terminal_output("\x1b[1000B" * 5000 + "x").count("\n") < 1000
+    # A count too long for `int()` is not a cursor move at all; it must not raise.
+    render_terminal_output("\x1b[" + "9" * 5000 + "Hx")
+
+
+def test_render_terminal_output_still_moves_within_the_screen() -> None:
+    assert render_terminal_output("a\x1b[2Bb\x1b[2Ac") == "a c\n\n b"
+    assert render_terminal_output("ab\x1b[5Cz") == "ab     z"

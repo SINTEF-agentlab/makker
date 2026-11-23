@@ -43,6 +43,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from makker.agent.approval import (
+    SUPPORTED_APPROVAL_DECISIONS,
     ToolAllowlist,
     build_resume_payload,
     categories_for_interrupt,
@@ -924,7 +925,8 @@ def create_app(
             raise HTTPException(status_code=404, detail="no such session")
         return {"ok": True}
 
-    @app.get("/sessions/{session_id}/artifacts/{path:path}")
+    # HEAD too: the canvas probes a plot's URL with it before mounting the frame.
+    @app.api_route("/sessions/{session_id}/artifacts/{path:path}", methods=["GET", "HEAD"])
     def get_artifact(session_id: str, path: str) -> FileResponse:
         # Resolve against the live session when it's loaded, else its on-disk output
         # dir — the same fallback get_transcript uses — so a plot or report stays
@@ -1848,7 +1850,11 @@ class _StreamState:
         if not self._pending:
             await _safe_send(self._ws, protocol.error_to_wire("no approval is pending"))
             return
-        kind = str(message.get("decision") or "approve")
+        kind = str(message.get("decision") or "")
+        if kind not in (*SUPPORTED_APPROVAL_DECISIONS, "always_allow"):
+            # Never read a missing or misspelt decision as an approval.
+            await _safe_send(self._ws, protocol.error_to_wire(f"unknown decision {kind!r}"))
+            return
         # "always_allow" is approve plus a session policy: remember this interrupt's
         # categories so future matching ones auto-approve (see _run_turn's loop).
         if kind == "always_allow":

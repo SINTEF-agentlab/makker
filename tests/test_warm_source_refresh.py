@@ -106,6 +106,24 @@ def test_recopy_skips_user_owned_env(tmp_path, template, shared_pkg):
     assert recopy_warm_sources(env, template) is False
 
 
+def test_recopy_ignores_paths_the_env_names_itself(tmp_path, template, shared_pkg):
+    # The env's Project.toml sits in the workspace, so its paths are not trusted:
+    # "../.." once resolved to the workspace, which the re-copy then removed.
+    ws = tmp_path / "ws"
+    env = ws / ".makker" / "julia-env"
+    env.mkdir(parents=True)
+    (ws / "precious.txt").write_text("the user's work\n", encoding="utf-8")
+    (env / "Project.toml").write_text(
+        '[sources]\nMakkerSim = {path = "../.."}\nOther = {path = "../.."}\n', encoding="utf-8"
+    )
+
+    assert recopy_warm_sources(env, template) is True
+
+    assert (ws / "precious.txt").read_text() == "the user's work\n"
+    # The package the env declares is still refreshed, at the template's own path.
+    assert (env / "MakkerSim" / "src" / "warm.jl").read_text() == "# warm v1\n"
+
+
 def test_failed_refresh_restores_previous_sources_and_markers(
     tmp_path: Path, template: Path, shared_pkg: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

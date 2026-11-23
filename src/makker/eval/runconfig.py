@@ -72,7 +72,8 @@ def build_runconfig(adapter: Any, *, julia_project: Path | None = None) -> dict[
         "makker": {
             "version": __version__,
             "commit": _git(["rev-parse", "HEAD"]),
-            "dirty": bool(_git(["status", "--porcelain"]) or None),
+            # Tracked files only: a scratch folder beside the code is not a change to it.
+            "dirty": bool(_git(["status", "--porcelain", "--untracked-files=no"]) or None),
         },
         "prompt_sha256": _sha256_text(assemble_session_prompt(adapter, open_windows=False)),
         "skills_sha256": _skill_hashes(adapter),

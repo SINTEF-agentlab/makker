@@ -97,6 +97,21 @@ async def test_remember_updates_existing_note_without_duplicating_index(tmp_path
     assert index.count("(file: `quirk-x.md`)") == 1
 
 
+async def test_remember_never_writes_over_the_index(tmp_path: Path) -> None:
+    # A note titled "Memory" would be memory.md, which is MEMORY.md itself on a
+    # case-insensitive filesystem (macOS, Windows): the index would be replaced.
+    memory_dir = tmp_path / "memory"
+    remember = make_remember_tool(memory_dir)
+    await remember.ainvoke({"content": "an earlier note", "title": "Quirk X"})
+
+    await remember.ainvoke({"content": "about memory", "title": "Memory"})
+
+    assert "about memory" in (memory_dir / "memory-note.md").read_text(encoding="utf-8")
+    index = (memory_dir / MEMORY_INDEX_FILENAME).read_text(encoding="utf-8")
+    assert "(file: `quirk-x.md`)" in index
+    assert "(file: `memory-note.md`)" in index
+
+
 async def test_remember_falls_back_to_project_for_unknown_kind(tmp_path: Path) -> None:
     memory_dir = tmp_path / "memory"
     remember = make_remember_tool(memory_dir)

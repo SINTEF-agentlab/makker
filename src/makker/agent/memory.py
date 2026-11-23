@@ -193,8 +193,10 @@ def render_memory_overview(memory_dir: Path) -> str:
 
 
 def _slugify(title: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", title.strip().lower()).strip("-")
-    return (slug or "note")[:48]
+    slug = (re.sub(r"[^a-z0-9]+", "-", title.strip().lower()).strip("-") or "note")[:48]
+    # The index is MEMORY.md. On a case-insensitive filesystem a note saved as
+    # "memory.md" is that same file, and writing it would replace the index.
+    return f"{slug}-note" if f"{slug}.md" == MEMORY_INDEX_FILENAME.lower() else slug
 
 
 def _index_hook(content: str) -> str:

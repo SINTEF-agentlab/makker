@@ -39,11 +39,16 @@ def image_data_uri(path: str, artifact_dirs: Sequence[Path]) -> str | None:
     """A ``data:`` URI for a contained artifact, or ``None`` when it must not inline.
 
     ``None`` means the path escaped the run dirs, the file is missing or
-    unreadable, or it is too large to inline; the caller decides the fallback
-    (keep the path, or show a missing-plot note).
+    unreadable, it is not an image, or it is too large to inline; the caller
+    decides the fallback (keep the path, or show a missing-plot note).
     """
     resolved = resolve_artifact_file(path, artifact_dirs)
     if resolved is None:
+        return None
+    # Images only. The workspace is one of a report's run dirs, so without this a
+    # reference such as `![fig](.env)` would copy that file into a shared document.
+    mime = mimetypes.guess_type(resolved.name)[0] or ""
+    if not mime.startswith("image/"):
         return None
     try:
         if resolved.stat().st_size > MAX_INLINE_BYTES:
@@ -51,5 +56,4 @@ def image_data_uri(path: str, artifact_dirs: Sequence[Path]) -> str | None:
         data = base64.standard_b64encode(resolved.read_bytes()).decode("ascii")
     except OSError:
         return None
-    mime = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
     return f"data:{mime};base64,{data}"

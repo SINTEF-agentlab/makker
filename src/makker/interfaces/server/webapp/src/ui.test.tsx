@@ -37,6 +37,19 @@ describe("model picker", () => {
   });
 });
 
+describe("composer", () => {
+  it("keeps the draft when Enter is pressed while a turn is running", () => {
+    const { store } = renderWithStore(<Composer />);
+    act(() => store.setState({ busy: true }));
+
+    const composer = screen.getByPlaceholderText("Message Makker…") as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: "and then plot the pressure" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+
+    expect(composer.value).toBe("and then plot the pressure");
+  });
+});
+
 describe("Thread rendering", () => {
   it("shows the welcome screen when empty", () => {
     renderWithStore(<Thread />);

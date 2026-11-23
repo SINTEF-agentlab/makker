@@ -43,6 +43,20 @@ def test_check_julia_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "PATH" in (check.error or "")
 
 
+def test_check_julia_reports_a_timeout_instead_of_raising(monkeypatch: pytest.MonkeyPatch) -> None:
+    # `julia --version` through the juliaup launcher can stall on its update check.
+    def stalled(*args, **kwargs):
+        raise requirements.subprocess.TimeoutExpired(cmd="julia", timeout=30)
+
+    monkeypatch.setattr(requirements.shutil, "which", lambda _: "julia")
+    monkeypatch.setattr(requirements.subprocess, "run", stalled)
+
+    check = requirements.check_julia()
+    assert check.found
+    assert not check.ok
+    assert "timed out" in (check.error or "")
+
+
 def test_check_julia_parses_arbitrary_version(monkeypatch: pytest.MonkeyPatch) -> None:
     # A made-up version string, just to confirm the regex parses major/minor/patch.
     _fake_julia(monkeypatch, "9.8.7")

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage
+from textual.content import Content
 from textual.widgets import Footer
 
 from _tui import submit_prompt, wait_until_ready
@@ -1399,10 +1400,14 @@ async def test_typed_reply_marks_tool_block_rejected(session: Session) -> None:
 
         # Typing while approval is pending declines the action with the text as
         # the reason ("No, and tell the agent what to do differently").
-        await submit_prompt(pilot, "use the chen cell")
+        # Brackets are the user's words, not markup: "[/tmp]" used to raise and
+        # take the app down, and "arr[i]" lost its index.
+        await submit_prompt(pilot, "use the chen cell, write to [/tmp] and keep arr[i]")
+        await pilot.pause()
 
         assert blocks[0].status == "rejected"
-        assert "use the chen cell" in (blocks[0].border_subtitle or "")
+        shown = Content.from_markup(blocks[0].border_subtitle or "").plain
+        assert shown == "rejected: use the chen cell, write to [/tmp] and keep arr[i]"
 
 
 async def test_compact_updates_context_figure_immediately(session: Session, monkeypatch) -> None:

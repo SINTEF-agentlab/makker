@@ -532,25 +532,28 @@ export class Controller {
 
   // --- composing / sending --------------------------------------------------
 
-  send(text: string): void {
+  /** Send what the user typed. False when it was not taken (a turn is running),
+   *  so the composer keeps the draft instead of discarding it. */
+  send(text: string): boolean {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed) return false;
     if (trimmed.startsWith("/")) {
       this.runSlash(trimmed);
-      return;
+      return true;
     }
-    if (this.s.busy) return;
+    if (this.s.busy) return false;
     if (this.s.pending) {
       this.s.addUser(trimmed);
       this.s.pinBottom();
       this.sendDecision("respond", trimmed);
-      return;
+      return true;
     }
     this.s.startTurn(trimmed);
     this.s.pinBottom();
     this.pushPrompt(trimmed);
     this.requestNotifyPermission();
     this.deliver({ type: "prompt", text: trimmed });
+    return true;
   }
 
   retry(text: string): void {
