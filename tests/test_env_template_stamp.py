@@ -9,7 +9,6 @@ from makker.simulators.base import SimulatorAdapter
 from makker.workspace import (
     TEMPLATE_STAMP_FILENAME,
     bootstrap_julia_env,
-    ensure_env_template_stamp,
     env_template_drifted,
     read_env_template_stamp,
     template_fingerprint,
@@ -58,11 +57,12 @@ def test_stamp_roundtrip(tmp_path: Path) -> None:
     template = module_dir / "julia_env"
     env_dir = tmp_path / "env"
     env_dir.mkdir()
-    write_env_template_stamp(env_dir, template)
+    write_env_template_stamp(env_dir, template, simulator="test")
 
     stamp = read_env_template_stamp(env_dir)
     assert stamp is not None
     assert stamp["fingerprint"] == template_fingerprint(template)
+    assert stamp["simulator"] == "test"
     assert "version" in stamp
 
 
@@ -84,23 +84,6 @@ def test_drift_detected_after_template_change(tmp_path: Path) -> None:
 
     (template / "Project.toml").write_text(_TEMPLATE_PROJECT + 'Baz = "z"\n', encoding="utf-8")
     assert env_template_drifted(env_dir, template) is True
-
-
-def test_ensure_stamp_only_writes_when_missing(tmp_path: Path) -> None:
-    module_dir = _make_template(tmp_path)
-    template = module_dir / "julia_env"
-    env_dir = tmp_path / "env"
-    env_dir.mkdir()
-
-    ensure_env_template_stamp(env_dir, template)
-    first = read_env_template_stamp(env_dir)
-    assert first is not None
-
-    # Change the template, then ensure again: an existing stamp is left intact
-    # (so a healthy env keeps its baseline rather than silently re-baselining).
-    (template / "Project.toml").write_text(_TEMPLATE_PROJECT + 'Q = "q"\n', encoding="utf-8")
-    ensure_env_template_stamp(env_dir, template)
-    assert read_env_template_stamp(env_dir) == first
 
 
 def test_bootstrap_writes_stamp(tmp_path: Path) -> None:
@@ -129,6 +112,7 @@ def test_reconcile_restamps_a_changed_template_quietly(tmp_path: Path, capsys) -
     env_setup._reconcile_env_template(_adapter(module_dir), workspace, env_dir)
     assert capsys.readouterr().err == ""
     assert not env_template_drifted(env_dir, template)
+    assert read_env_template_stamp(env_dir)["simulator"] == "test"
 
 
 def test_reconcile_silent_when_current(tmp_path: Path, capsys) -> None:
