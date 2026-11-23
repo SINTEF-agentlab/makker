@@ -192,9 +192,9 @@ makker tui
 | `Shift+Tab` | Cycle approval mode |
 | `Ctrl+P` / `↑` | Previous history entry |
 
-Approval modes: `ask` (default) prompts before shell commands and file edits,
-`workspace` auto-allows file writes inside the workspace, `auto` allows all
-side-effecting tools.
+Approval modes: `ask` (default) prompts before shell commands, file edits and
+deletes, `workspace` auto-allows file edits inside the workspace, `auto` allows
+all side-effecting tools. A change applies from the agent's next tool call.
 
 ## Resuming a session
 

@@ -176,6 +176,18 @@ async def test_chat_app_renders_approval_card_for_pending_interrupt(session: Ses
         assert app.query_one("#approval-menu", ApprovalMenu).visible
 
 
+async def test_mode_changes_reach_the_policy_the_agent_reads(session: Session) -> None:
+    # Shift+Tab and /approval-mode both set the host's one approval policy, which
+    # the agent graph reads per tool call, so a change needs no rebuild to apply.
+    app = TUIApp(agent=_stub_agent(), session=session, approval_mode="auto")
+    async with app.run_test() as pilot:
+        await pilot.press("shift+tab")
+        assert app._host.approval_mode == "ask"
+        await submit_prompt(pilot, "/approval-mode workspace")
+        assert app._host.approval_mode == "workspace"
+        assert app._host.agent is app._agent  # no rebuild
+
+
 async def test_chat_app_approves_pending_interrupt(session: Session) -> None:
     agent = interrupt_agent()
     app = TUIApp(agent=agent, session=session)

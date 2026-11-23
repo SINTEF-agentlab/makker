@@ -7,34 +7,43 @@ against.
 
 ## What is gated
 
-Three tools require approval (`agent/approval.py`):
+Four tools require approval (`agent/approval.py`):
 
 | Tool | Action |
 |---|---|
 | `execute` | run a shell command |
 | `write_file` | write a file |
 | `edit_file` | edit a file |
+| `delete` | delete a file or directory (directories recursively) |
 
 The gate is implemented as a langgraph interrupt: when the agent calls a
-gated tool, the graph pauses, the pending call (tool name and arguments)
-surfaces as an approval request, and the turn resumes with the decision.
-In the TUI this is the approval card. An approved category can be added to
-a per-session allowlist ("always allow file edits / shell commands for
-this session"), so repetitive approvals do not pile up. Every request and
-decision is recorded in the trace (`hitl_request`, `hitl_response`).
+gated tool, the session's approval policy decides whether this call needs a
+person. If it does, the graph pauses, the pending call (tool name and
+arguments) surfaces as an approval request, and the turn resumes with the
+decision. Calls the policy allows run without a pause, so an approval card
+only ever holds what needs a decision. In the TUI this is the approval card.
+Every request and decision is recorded in the trace (`hitl_request`,
+`hitl_response`).
+
+A card that holds only edits to files inside the workspace offers "always
+allow file edits" for the rest of the session. Nothing else can be always
+allowed: each shell command and each delete gets its own prompt, and so does
+an edit to a file outside the workspace.
 
 ## Modes
 
 | Mode | Behavior |
 |---|---|
-| `ask` (default) | prompt for all three tools |
-| `workspace` | auto-allow `write_file`/`edit_file`, still prompt for `execute` |
-| `auto` | auto-allow all three |
+| `ask` (default) | prompt for all four tools |
+| `workspace` ("accept edits") | allow `write_file`/`edit_file` inside the workspace; prompt for the rest |
+| `auto` | allow all four |
 
 Set it at launch (`--approval-mode`), in the workspace config, with
-`/approval-mode` in the TUI, or cycle with `Shift+Tab`. Headless runs
-cannot prompt, so a gated call under `ask` ends the turn with an error;
-scripts and the bench run with `auto`.
+`/approval-mode` in the TUI and web UI, or cycle with `Shift+Tab` in the TUI.
+A change applies from the agent's next tool call, mid-turn included, and a
+pending approval the new mode allows is resumed at once. Headless runs cannot
+prompt, so a gated call under `ask` ends the turn with an error; scripts and
+the bench run with `auto`.
 
 ## What approval is not
 

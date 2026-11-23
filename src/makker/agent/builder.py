@@ -31,7 +31,7 @@ from deepagents.backends import CompositeBackend
 from langchain.agents.middleware import TodoListMiddleware
 
 from makker.agent.added_dirs import add_dir
-from makker.agent.approval import ApprovalMode, interrupt_on_for_mode, parse_approval_mode
+from makker.agent.approval import ApprovalMode, ApprovalPolicy, interrupt_on_config
 from makker.agent.backend import WorkspaceCompositeBackend, WorkspaceShellBackend
 from makker.agent.capabilities import (
     Capability,
@@ -425,7 +425,7 @@ def build_agent(
     *,
     model: Any | None = None,
     checkpointer: Any | None = None,
-    approval_mode: ApprovalMode | str | None = None,
+    approval_mode: ApprovalPolicy | ApprovalMode | str | None = None,
     package_sources: Sequence[PackageSource] | None = None,
     added_dirs: Sequence[str | Path] | None = None,
     surface: str | None = None,
@@ -440,7 +440,8 @@ def build_agent(
     element.
 
     ``surface`` defaults to ``session.surface``; pass it explicitly only to
-    override what the session was created with.
+    override what the session was created with. ``approval_mode`` is a mode, or
+    the session's live :class:`ApprovalPolicy` when a front end changes it later.
     """
     if surface is None:
         surface = session.surface
@@ -472,10 +473,10 @@ def build_agent(
         make_remember_tool(memory_dir),
         *collect_tools(active, session),
     ]
-    mode = (
+    policy = (
         approval_mode
-        if isinstance(approval_mode, ApprovalMode)
-        else parse_approval_mode(approval_mode)
+        if isinstance(approval_mode, ApprovalPolicy)
+        else ApprovalPolicy(approval_mode)
     )
     subagents = [
         factory(session) for factory in session.simulator.subagent_factories
@@ -498,7 +499,7 @@ def build_agent(
         ),
         skills=skills,
         subagents=subagents,
-        interrupt_on=interrupt_on_for_mode(mode),
+        interrupt_on=interrupt_on_config(policy),
         # Auto-compaction is deepagents' stock SummarizationMiddleware (installed
         # by create_deep_agent); its trigger is sized from the model profile,
         # which _set_profile_window points at the real loaded window. The

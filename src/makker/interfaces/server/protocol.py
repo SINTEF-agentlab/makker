@@ -19,11 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from makker.agent.approval import (
-    SupportsInterrupt,
-    allowed_decisions_for_interrupt,
-    always_allow_categories,
-)
+from makker.agent.approval import SupportsInterrupt, allowed_decisions_for_interrupt
 from makker.agent.turns import (
     TurnReasoningDelta,
     TurnTextDelta,
@@ -107,8 +103,14 @@ def to_wire(event: Any) -> dict[str, Any] | None:
     return None
 
 
-def interrupt_to_wire(interrupt: SupportsInterrupt) -> dict[str, Any]:
-    """Serialize a pending approval interrupt: its id, actions, and allowed decisions."""
+def interrupt_to_wire(
+    interrupt: SupportsInterrupt, *, always_allow: frozenset[str] = frozenset()
+) -> dict[str, Any]:
+    """Serialize a pending approval interrupt: its id, actions, and allowed decisions.
+
+    ``always_allow`` is what the session's policy lets this card offer to always
+    allow (``ApprovalPolicy.always_allow_offer``).
+    """
 
     value = interrupt.value if isinstance(interrupt.value, dict) else {}
     raw_actions = value.get("action_requests")
@@ -146,9 +148,9 @@ def interrupt_to_wire(interrupt: SupportsInterrupt) -> dict[str, Any]:
         "interrupt_id": interrupt.interrupt_id,
         "actions": actions,
         "allowed_decisions": sorted(allowed_decisions_for_interrupt(interrupt.value)),
-        # Categories a front end may offer to "always allow" this session (empty for
-        # one-off-only interrupts like shell). The client turns these into a button.
-        "allowlist": sorted(always_allow_categories(interrupt.value)),
+        # Categories a front end may offer to "always allow" this session: file
+        # edits in the workspace, or nothing. The client turns these into a button.
+        "allowlist": sorted(always_allow),
     }
 
 

@@ -9,12 +9,7 @@ from textual.containers import Vertical
 from textual.message import Message
 from textual.widgets import Static
 
-from makker.agent.approval import (
-    ALLOWLIST_FILE_EDITS,
-    ALLOWLIST_SHELL,
-    SUPPORTED_APPROVAL_DECISIONS,
-    categories_for_interrupt,
-)
+from makker.agent.approval import SUPPORTED_APPROVAL_DECISIONS
 
 
 @dataclass(frozen=True)
@@ -29,10 +24,13 @@ class ApprovalOption:
 def build_approval_options(
     *,
     allowed_decisions: frozenset[str],
-    tool_names: list[str],
-    interrupt_values: list[dict],
+    always_allow: frozenset[str] = frozenset(),
 ) -> list[ApprovalOption]:
-    """Build Approve / always-allow / Reject options for the current interrupt."""
+    """Build Approve / always-allow / Reject options for the current interrupt.
+
+    ``always_allow`` is what the policy lets this card offer to always allow
+    (``ApprovalPolicy.always_allow_offer``): file edits in the workspace, or nothing.
+    """
 
     supported = allowed_decisions & SUPPORTED_APPROVAL_DECISIONS
     options: list[ApprovalOption] = []
@@ -41,16 +39,12 @@ def build_approval_options(
         options.append(
             ApprovalOption(label="Yes", decision={"type": "approve"}),
         )
-        always_label = _always_allow_label(tool_names, interrupt_values)
-        if always_label:
-            categories: set[str] = set()
-            for value in interrupt_values:
-                categories.update(categories_for_interrupt(value))
+        if always_allow:
             options.append(
                 ApprovalOption(
-                    label=always_label,
+                    label="Yes, and always allow file edits in this workspace",
                     decision={"type": "approve"},
-                    allowlist_categories=frozenset(categories),
+                    allowlist_categories=always_allow,
                 ),
             )
 
@@ -63,23 +57,6 @@ def build_approval_options(
         )
 
     return options
-
-
-def _always_allow_label(tool_names: list[str], interrupt_values: list[dict]) -> str | None:
-    categories: set[str] = set()
-    for value in interrupt_values:
-        categories.update(categories_for_interrupt(value))
-    if not categories:
-        return None
-    # Shell approvals are always one-off; no broad "always allow shell" policy.
-    if categories == {ALLOWLIST_SHELL}:
-        return None
-    if categories == {ALLOWLIST_FILE_EDITS}:
-        return "Yes, and always allow file edits in this workspace"
-    if len(categories) == 1:
-        name = next(iter(categories)).replace("_", " ")
-        return f"Yes, and always allow {name} in this workspace"
-    return "Yes, and always allow these actions in this workspace"
 
 
 class ApprovalMenu(Vertical):

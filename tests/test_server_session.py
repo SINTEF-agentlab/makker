@@ -631,10 +631,10 @@ def test_reattach_leaves_the_live_host_as_is(tmp_path: Path) -> None:
 
 
 def test_reconfigure_keeps_state_consistent_when_build_fails(tmp_path: Path, monkeypatch) -> None:
-    # If build_agent rejects a value (e.g. an unknown approval mode), reconfigure
-    # must leave the host reporting its previous, still-running model/approval —
-    # not the rejected value, which a same-value reattach would later read as
-    # "unchanged" and silently skip, stranding the desync.
+    # If build_agent fails, reconfigure must leave the host reporting its
+    # previous, still-running model — not the rejected value, which a same-value
+    # reattach would later read as "unchanged" and silently skip, stranding the
+    # desync. An unknown approval mode is refused the same way, with no rebuild.
     import pytest
 
     adapter = make_fake_adapter(tmp_path)
@@ -646,11 +646,13 @@ def test_reconfigure_keeps_state_consistent_when_build_fails(tmp_path: Path, mon
     )
 
     def boom(*args, **kwargs):
-        raise ValueError("unknown approval mode 'bogus'")
+        raise ValueError("model 'prov:b' is not available")
 
     monkeypatch.setattr("makker.agent.builder.build_agent", boom)
     with pytest.raises(ValueError):
-        host.reconfigure(approval_mode="bogus")
+        host.reconfigure(model="prov:b")
+    with pytest.raises(ValueError):
+        host.set_approval_mode("bogus")
 
     assert host.approval_mode == "ask"  # not poisoned to the rejected value
     assert host.model == "prov:a"
@@ -793,7 +795,11 @@ def test_ws_always_allow_auto_approves_future_interrupts(tmp_path: Path) -> None
     # "Always allow" approves now and remembers the category, so a later interrupt
     # of the same kind auto-approves without asking the user again (like the TUI).
     def agent() -> Any:
-        return interrupt_agent(tool_name="write_file", allowed_decisions=["approve", "reject"])
+        return interrupt_agent(
+            tool_name="write_file",
+            tool_args={"file_path": "a.jl", "content": "x = 1"},
+            allowed_decisions=["approve", "reject"],
+        )
 
     with _client(agent, tmp_path) as client:
         sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
@@ -812,6 +818,26 @@ def test_ws_always_allow_auto_approves_future_interrupts(tmp_path: Path) -> None
             second = _drain_turn(ws)
             assert second[-1]["type"] == "turn_end"
             assert not any(e["type"] == "interrupt" for e in second)
+
+
+def test_ws_always_allow_never_allows_shell(tmp_path: Path) -> None:
+    # A shell card offers no "always allow"; a client that sends it anyway gets a
+    # one-off approval, and the next shell command asks again.
+    def agent() -> Any:
+        return interrupt_agent(tool_name="execute", allowed_decisions=["approve", "reject"])
+
+    with _client(agent, tmp_path) as client:
+        sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
+        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+            ws.send_json({"type": "prompt", "text": "run ls"})
+            interrupt = _drain_turn(ws)[-1]
+            assert interrupt["allowlist"] == []
+
+            ws.send_json({"type": "decision", "decision": "always_allow"})
+            assert _drain_turn(ws)[-1]["type"] == "turn_end"
+
+            ws.send_json({"type": "prompt", "text": "run ls again"})
+            assert _drain_turn(ws)[-1]["type"] == "interrupt"
 
 
 def test_ws_unknown_session(tmp_path: Path) -> None:
@@ -1398,21 +1424,23 @@ async def test_replot_refused_while_busy(tmp_path: Path) -> None:
 
 
 def test_command_reconfigures_session(tmp_path: Path) -> None:
-    # A `command` message rebuilds the agent in place (model / approval policy).
-    # reconfigure is stubbed here (the real one rebuilds a provider-backed agent);
-    # a following unknown command, whose error we read, proves the first was
-    # processed in order.
+    # A `command` message rebuilds the agent in place for a new model, and sets
+    # the approval mode on the live policy without a rebuild. reconfigure is
+    # stubbed here (the real one rebuilds a provider-backed agent); a following
+    # unknown command, whose error we read, proves the first were processed in order.
     manager = _manager(echo_agent, tmp_path)
     with TestClient(create_app(manager)) as client:
         sid = client.post("/sessions", json={"sim": "jutuldarcy"}).json()["session_id"]
+        host = manager.get(sid)
         calls: list[dict] = []
-        manager.get(sid).reconfigure = lambda **kw: calls.append(kw)  # type: ignore[method-assign]
+        host.reconfigure = lambda **kw: calls.append(kw)  # type: ignore[method-assign]
         with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
             ws.send_json({"type": "command", "command": "set_model", "arg": "anthropic:c"})
             ws.send_json({"type": "command", "command": "set_approval", "arg": "auto"})
             ws.send_json({"type": "command", "command": "bogus"})
             err = ws.receive_json()
-    assert calls == [{"model": "anthropic:c"}, {"approval_mode": "auto"}]
+    assert calls == [{"model": "anthropic:c"}]
+    assert host.approval_mode == "auto"
     assert err["type"] == "error" and "bogus" in err["message"]
 
 
@@ -2161,12 +2189,6 @@ def test_set_approval_auto_resolves_a_pending_interrupt(tmp_path: Path) -> None:
     manager = _manager(interrupt_agent, tmp_path)
     with TestClient(create_app(manager)) as client:
         sid = client.post("/sessions", json={"sim": "jutuldarcy"}).json()["session_id"]
-        host = manager.get(sid)
-
-        def fake_reconfigure(**kwargs) -> None:  # the real one rebuilds via build_agent
-            host._approval_mode = kwargs.get("approval_mode")
-
-        host.reconfigure = fake_reconfigure  # type: ignore[method-assign]
         with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
             ws.send_json({"type": "prompt", "text": "run it"})
             assert _drain_turn(ws)[-1]["type"] == "interrupt"
