@@ -62,6 +62,15 @@ PROVIDERS: dict[str, ProviderInfo] = {
 }
 
 
+def provider_key_vars() -> frozenset[str]:
+    """The environment variables that hold a model provider's API key.
+
+    The agent's shell and Julia kernel run without them, so a command that prints
+    its environment cannot put a key into the trace and the transcripts.
+    """
+    return frozenset(info.key_env_var for info in PROVIDERS.values() if info.key_env_var)
+
+
 def provider_of(model_id: str) -> str:
     prefix, sep, _ = model_id.partition(":")
     return prefix if sep else ""

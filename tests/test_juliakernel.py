@@ -50,6 +50,15 @@ def test_build_launch_assembles_flags(tmp_path: Path) -> None:
     assert "JK_TOKEN" in env
 
 
+def test_build_launch_leaves_out_removed_variables(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAKKER_TEST_SECRET", "sk-do-not-leak")
+    monkeypatch.setenv("MAKKER_TEST_KEPT", "yes")
+    kernel = JuliaKernel(KernelConfig(env_remove=("MAKKER_TEST_SECRET",)))
+    _command, _args, env = kernel._build_launch(54321)
+    assert "MAKKER_TEST_SECRET" not in env
+    assert env["MAKKER_TEST_KEPT"] == "yes"
+
+
 def test_thread_flag_always_reserves_an_interactive_thread() -> None:
     """The eval loop must end up alone on the interactive thread (SIGINT routing)."""
     assert _thread_flag(None) == "1,1"
@@ -193,6 +202,16 @@ async def test_relative_include_resolves_in_workspace(tmp_path: Path) -> None:
         r = await k.eval('include("snippet.jl")')
         assert r.error is None, r.error
         assert "loaded snippet" in r.output
+
+
+@pytest.mark.integration
+@needs_julia
+async def test_julia_never_sees_a_removed_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAKKER_TEST_SECRET", "sk-do-not-leak")
+    async with JuliaKernel(KernelConfig(env_remove=("MAKKER_TEST_SECRET",))) as k:
+        r = await k.eval('haskey(ENV, "MAKKER_TEST_SECRET")')
+        assert r.error is None, r.error
+        assert r.output == "false"
 
 
 @pytest.mark.integration

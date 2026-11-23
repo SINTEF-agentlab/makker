@@ -458,7 +458,7 @@ class JuliaKernel:
         args.extend(cfg.extra_args)
         args.extend([str(_SERVER_JL), str(port)])
 
-        env = dict(os.environ)
+        env = {key: value for key, value in os.environ.items() if key not in cfg.env_remove}
         if cfg.env:
             env.update(cfg.env)
         env["JK_TOKEN"] = self._token

@@ -28,6 +28,9 @@ class KernelConfig:
     # a helper process, which would merge the stdout/stderr the protocol keeps on
     # separate pipes.
     env: Mapping[str, str] | None = None
+    # Inherited variables to leave out, such as secrets the Julia code has no
+    # business seeing.
+    env_remove: tuple[str, ...] = ()
     # Capture the Julia process's own stderr to a file so a startup crash (a
     # package-load failure, a bad project) can be replayed in the error message.
     stderr_file: Path | None = None

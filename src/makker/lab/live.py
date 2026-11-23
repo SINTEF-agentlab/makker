@@ -78,6 +78,7 @@ async def _live_render(
     from makker.agent.builder import build_agent, resolve_package_sources
     from makker.interfaces.tui import TUIApp
     from makker.juliakernel import JuliaKernel, KernelConfig
+    from makker.models import provider_key_vars
     from makker.paths import set_workspace_root
     from makker.session import Session
     from makker.simulators import registry
@@ -89,7 +90,11 @@ async def _live_render(
     julia_project = resolve_julia_project(workspace)
     scratch = Path(tempfile.mkdtemp(prefix="makker-live-"))
 
-    config = KernelConfig(julia_project=julia_project, cwd=workspace)
+    config = KernelConfig(
+        julia_project=julia_project,
+        cwd=workspace,
+        env_remove=tuple(sorted(provider_key_vars())),
+    )
     async with JuliaKernel(config) as julia:
         session = Session.create(
             julia=julia, simulator=adapter, state_root=scratch, ephemeral_memory=True
