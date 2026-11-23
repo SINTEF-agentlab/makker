@@ -107,8 +107,7 @@ export function Composer() {
       openModelMenu();
       return;
     }
-    controller.send(text);
-    setValue("");
+    if (controller.send(text)) setValue("");
   };
 
   const completeSlash = (cmd: SlashCommand) => {

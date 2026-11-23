@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from markdown_it import MarkdownIt
 from rich.text import Text
 from textual.containers import Vertical
+from textual.markup import escape
 from textual.widgets import Markdown, Static
 
 from makker.agent.tool_output import is_interrupt_payload, normalize_tool_output
@@ -753,6 +754,8 @@ def _status_style(message: str) -> str:
 
 
 def _status_text(status: str, reject_reason: str | None) -> str:
+    """A tool card's border subtitle. Subtitles parse markup, so the reason (the
+    user's own words) is escaped: "[/tmp]" would raise and "arr[i]" lose its index."""
     if status == "running":
         return "running"
     if status == "success":
@@ -761,15 +764,15 @@ def _status_text(status: str, reject_reason: str | None) -> str:
         return "waiting for approval"
     if status == "rejected":
         if reject_reason:
-            return f"rejected: {reject_reason}"
+            return f"rejected: {escape(reject_reason)}"
         return "rejected"
     if status == "cancelled":
         if reject_reason:
-            return f"cancelled: {reject_reason}"
+            return f"cancelled: {escape(reject_reason)}"
         return "cancelled"
     if status == "responded":
         if reject_reason:
-            return f"answered by user: {shorten_single_line(reject_reason, 72)}"
+            return f"answered by user: {escape(shorten_single_line(reject_reason, 72))}"
         return "answered by user"
     if status == "error":
         return "tool error"

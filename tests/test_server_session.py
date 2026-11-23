@@ -734,6 +734,41 @@ def test_ws_interrupt_then_approve(tmp_path: Path) -> None:
     assert resumed[-1]["type"] == "turn_end"
 
 
+def test_ws_decision_must_name_a_decision(tmp_path: Path) -> None:
+    # A message with no decision (or a misspelt one) is refused, never read as an
+    # approval, and the approval stays pending to be answered properly.
+    with _client(interrupt_agent, tmp_path) as client:
+        sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
+        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+            ws.send_json({"type": "prompt", "text": "please run"})
+            assert _drain_turn(ws)[-1]["type"] == "interrupt"
+
+            for bad in ({"type": "decision"}, {"type": "decision", "decision": "aprove"}):
+                ws.send_json(bad)
+                assert ws.receive_json()["type"] == "error"
+
+            ws.send_json({"type": "decision", "decision": "approve"})
+            resumed = _drain_turn(ws)
+    assert any(e["type"] == "text" and "approval handled" in e["text"] for e in resumed)
+
+
+def test_artifact_route_answers_head(tmp_path: Path) -> None:
+    # The canvas probes a static plot's URL with HEAD before mounting its frame; a
+    # 405 there made every such plot wait out the probe's retries (about 7 s).
+    manager = _manager(echo_agent, tmp_path)
+    with TestClient(create_app(manager)) as client:
+        sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
+        artifacts = manager.get(sid).session.output_dir / "artifacts"  # type: ignore[union-attr]
+        artifacts.mkdir(parents=True, exist_ok=True)
+        (artifacts / "scene.html").write_text("<p>plot</p>", encoding="utf-8")
+
+        url = f"/sessions/{sid}/artifacts/scene.html"
+        assert client.get(url).text == "<p>plot</p>"
+        head = client.head(url)
+        assert head.status_code == 200
+        assert head.content == b""
+
+
 def test_ws_reconnect_resurfaces_a_pending_approval(tmp_path: Path) -> None:
     # If the connection drops while an approval is pending, a fresh connection to the
     # same live session re-surfaces the interrupt (read from the persisted graph state)

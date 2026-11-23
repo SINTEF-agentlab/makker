@@ -313,7 +313,7 @@ class ApiKeyModal(ModalScreen[str | None]):
                 f"Enter {self._env_var}. It's saved for future runs and used right away.",
                 id="api-key-desc",
             )
-            yield Input(placeholder=self._env_var, id="api-key-input")
+            yield Input(placeholder=self._env_var, password=True, id="api-key-input")
             yield Static("Enter to save · Esc to cancel", id="api-key-hint")
 
     def on_mount(self) -> None:
@@ -370,9 +370,11 @@ class OllamaPullModal(ModalScreen[bool]):
 
     def compose(self):
         with Vertical(id="ollama-pull"):
-            yield Static(f"Pulling {self._model_name} from Ollama…", id="ollama-pull-title")
+            yield Static(
+                f"Pulling {self._model_name} from Ollama…", id="ollama-pull-title", markup=False
+            )
             yield ProgressBar(total=100, show_eta=False, id="ollama-pull-bar")
-            yield Static("Starting…", id="ollama-pull-status")
+            yield Static("Starting…", id="ollama-pull-status", markup=False)
             yield Static(
                 "This can take a while for large models · Esc to cancel", id="ollama-pull-hint"
             )

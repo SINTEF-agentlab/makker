@@ -64,7 +64,8 @@ def check_julia(executable: str = "julia") -> JuliaCheck:
             timeout=30,
             check=False,
         )
-    except OSError as exc:
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        # A timeout too: the juliaup launcher can stall for minutes on its update check.
         return JuliaCheck(found=True, path=path, error=f"could not run `{executable}`: {exc}")
 
     match = _VERSION_RE.search(proc.stdout or "")

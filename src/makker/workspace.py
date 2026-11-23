@@ -216,6 +216,15 @@ def warm_source_is_current(env_dir: Path, template_path: Path) -> bool:
         return False
 
 
+def _declared_sources(project_dir: Path) -> dict[str, object]:
+    """The ``[sources]`` table of ``project_dir/Project.toml`` (empty when unreadable)."""
+    try:
+        project = tomllib.loads((project_dir / "Project.toml").read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+    return project.get("sources", {})
+
+
 def recopy_warm_sources(env_dir: Path, template_path: Path) -> bool:
     """Re-copy the warm packages from the install into a managed env.
 
@@ -227,15 +236,16 @@ def recopy_warm_sources(env_dir: Path, template_path: Path) -> bool:
     next launch retries.
     """
 
-    try:
-        sources = tomllib.loads((env_dir / "Project.toml").read_text(encoding="utf-8")).get(
-            "sources", {}
-        )
-    except (OSError, tomllib.TOMLDecodeError):
+    declared = _declared_sources(env_dir)
+    if not declared:
         return False
-    if not sources:
-        return False
-    _copy_source_packages(template_path, env_dir, sources)
+    # Refresh the packages this env declares, but take each path from the template.
+    # The env's own file sits in the workspace, and a path such as "../.." there
+    # would aim the removal in `_copy_source_packages` at the workspace itself.
+    trusted = {
+        name: spec for name, spec in _declared_sources(template_path).items() if name in declared
+    }
+    _copy_source_packages(template_path, env_dir, trusted)
     with contextlib.suppress(OSError):
         (env_dir / PRECOMPILE_MARKER).unlink()
     return True
@@ -1127,12 +1137,7 @@ def bootstrap_julia_env(
     # and version-specific, so the workspace resolves its own at instantiate time.
     shutil.copytree(template_path, target, ignore=shutil.ignore_patterns("Manifest.toml"))
     sync_shared_julia_package(target)
-    template_proj = template_path / "Project.toml"
-    try:
-        template = tomllib.loads(template_proj.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
-        template = {}
-    _copy_source_packages(template_path, target, template.get("sources", {}))
+    _copy_source_packages(template_path, target, _declared_sources(template_path))
     # Stamp the template Project.toml (drives the rebuild-staleness warning) and
     # fingerprint the warm-package source (drives the auto re-copy when the bundled
     # Makker runtime itself changes); see env_template_drifted / warm_source_is_current.

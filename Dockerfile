@@ -23,6 +23,11 @@ ENV PATH="/root/.juliaup/bin:${PATH}"
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --extra eval --no-install-project
+# The version normally comes from git tags, and .git is not in the build context
+# (see .dockerignore), so name it here. Pass the real one to record it in eval
+# logs: docker compose build --build-arg MAKKER_VERSION=0.3.0
+ARG MAKKER_VERSION=0.0.0+docker
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${MAKKER_VERSION}
 COPY . .
 RUN uv sync --locked --extra eval
 

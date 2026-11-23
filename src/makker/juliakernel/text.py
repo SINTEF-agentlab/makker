@@ -14,8 +14,10 @@ import re
 from collections.abc import Callable
 from typing import ClassVar
 
-# CSI (Control Sequence Introducer): ESC '[' params final
-_CSI_RE = re.compile(r"\x1b\[([0-9;?]*)([A-Za-z])")
+# CSI (Control Sequence Introducer): ESC '[' params final. Real parameters are a
+# few digits; the length limit keeps a run of thousands out of `int()`, which
+# refuses to parse it.
+_CSI_RE = re.compile(r"\x1b\[([0-9;?]{0,32})([A-Za-z])")
 # OSC (Operating System Command): ESC ']' ... BEL or ESC '\'
 _OSC_RE = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 # Standalone single-character escapes (ESC followed by one byte that isn't `[` or `]`)
@@ -23,6 +25,11 @@ _OTHER_ESC_RE = re.compile(r"\x1b[^\[\]]")
 # Cursor-control bytes that need the screen model. Plain output has none of these,
 # so it skips the per-character emulation below entirely.
 _NEEDS_SCREEN_RE = re.compile("[\r\x1b\b\t]")
+# How far a cursor move may go past the text already on screen. A real screen is
+# finite; without a limit, one escape with a huge count (`ESC[4000000B`) grows the
+# buffer by that many rows or columns.
+_SCREEN_ROWS = 1000
+_SCREEN_COLS = 512
 
 
 def render_terminal_output(text: str) -> str:
@@ -115,13 +122,16 @@ class _Screen:
         handler = self._CSI_HANDLERS.get(final)
         if handler is not None:
             handler(self, params, n)
+            # A move stops at the screen's edge, whatever its count.
+            self._row = min(self._row, max(len(self._lines), _SCREEN_ROWS) - 1)
+            self._ensure_row(self._row)
+            self._col = min(self._col, max(len(self._lines[self._row]), _SCREEN_COLS))
 
     def _csi_up(self, _params: str, n: int) -> None:
         self._row = max(0, self._row - n)
 
     def _csi_down(self, _params: str, n: int) -> None:
         self._row += n
-        self._ensure_row(self._row)
 
     def _csi_right(self, _params: str, n: int) -> None:
         self._col += n
@@ -132,7 +142,6 @@ class _Screen:
     def _csi_next_line(self, _params: str, n: int) -> None:
         self._row += n
         self._col = 0
-        self._ensure_row(self._row)
 
     def _csi_prev_line(self, _params: str, n: int) -> None:
         self._row = max(0, self._row - n)
@@ -147,7 +156,6 @@ class _Screen:
         c = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
         self._row = max(0, r - 1)
         self._col = max(0, c - 1)
-        self._ensure_row(self._row)
 
     def _csi_erase_display(self, params: str, _n: int) -> None:
         mode = int(params) if params and params.isdigit() else 0

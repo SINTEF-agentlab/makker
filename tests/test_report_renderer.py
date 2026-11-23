@@ -304,6 +304,22 @@ def test_render_report_embeds_narrative_figure(tmp_path) -> None:
     assert 'src="fit.png"' not in doc  # the dangling path was inlined, not left
 
 
+def test_render_report_inlines_images_only(tmp_path) -> None:
+    """The workspace is one of a report's run dirs, so a figure reference must not
+    be able to copy another file from it (a `.env`, a config) into the document."""
+    (tmp_path / "secrets.env").write_text("API_KEY=not-a-real-key\n", encoding="utf-8")
+
+    doc = render_report(
+        [make_event(1, "session_start", {"session_id": "abc", "simulator": "battmo"})],
+        tmp_path / "report.html",
+        narrative_markdown="![fig](secrets.env)\n",
+        session_id="abc",
+        simulator="BattMo",
+        artifact_dirs=[tmp_path],
+    )
+    assert "base64," not in doc
+
+
 def test_render_report_single_attempt_omits_best_suffix_and_exploration(tmp_path) -> None:
     events = [
         make_event(1, "session_start", {"session_id": "abc", "simulator": "battmo"}),

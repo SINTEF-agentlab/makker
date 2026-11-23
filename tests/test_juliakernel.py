@@ -226,6 +226,24 @@ async def test_eval_persistence_streaming_and_error() -> None:
 
 @pytest.mark.integration
 @needs_julia
+async def test_a_short_line_streams_before_the_eval_ends() -> None:
+    # The pump used to hold back the last 17 bytes of all output in case they began
+    # the end-of-eval marker, so a short progress line only appeared with the result.
+    async with JuliaKernel(KernelConfig()) as k:
+        loop = asyncio.get_running_loop()
+        seen: list[tuple[float, str]] = []
+        r = await k.eval(
+            'println("Starting"); flush(stdout); sleep(1.5)',
+            on_chunk=lambda c: seen.append((loop.time(), c.text)),
+        )
+        finished = loop.time()
+        assert r.output == "Starting"
+        live = "".join(text for at, text in seen if finished - at > 1.0)
+        assert live == "Starting\n"
+
+
+@pytest.mark.integration
+@needs_julia
 async def test_huge_error_frame_does_not_kill_session() -> None:
     """A giant error payload comes back as a normal error, not a false death.
 

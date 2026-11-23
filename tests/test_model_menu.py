@@ -154,7 +154,9 @@ async def test_api_key_modal_returns_value() -> None:
             ApiKeyModal(env_var="OPENAI_API_KEY", provider_label="OpenAI"), results.append
         )
         await pilot.pause()
-        app.screen.query_one("#api-key-input", Input).value = "sk-xyz"
+        key_input = app.screen.query_one("#api-key-input", Input)
+        assert key_input.password  # the key is not echoed on screen
+        key_input.value = "sk-xyz"
         await pilot.press("enter")
         await pilot.pause()
 
