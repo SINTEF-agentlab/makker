@@ -14,6 +14,7 @@ This module wires everything ``create_deep_agent`` needs in one place:
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -61,7 +62,7 @@ from makker.agent.tools import (
     make_run_julia_tool,
     make_write_report_tool,
 )
-from makker.models import PROVIDERS, provider_of
+from makker.models import PROVIDERS, provider_key_vars, provider_of
 from makker.paths import SHARED_SKILLS_DIR, workspace_memory_dir, workspace_root
 from makker.session import Session
 from makker.simulators.base import SimulatorAdapter
@@ -388,7 +389,9 @@ def build_backend(
         default=WorkspaceShellBackend(
             root_dir=ws,
             virtual_mode=False,
-            inherit_env=True,
+            # The user's environment, minus the model provider keys: a command
+            # like `env` would otherwise print them into the trace.
+            env={k: v for k, v in os.environ.items() if k not in provider_key_vars()},
             readonly_roots=_depot_readonly_roots(package_sources),
         ),
         routes={},

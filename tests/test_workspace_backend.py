@@ -7,6 +7,7 @@ checkout is writable, and a type-filtered grep recurses into subdirectories.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -183,3 +184,26 @@ def test_execute_refuses_shell_julia_only(tmp_path) -> None:
     # Only the head token of a shell segment counts as an invocation.
     for command in ("python3 -c 'print(1)'", "grep -r julia . || true"):
         assert backend.execute(command).exit_code != 2, command
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell syntax")
+def test_shell_commands_never_see_provider_keys(tmp_path: Path, monkeypatch) -> None:
+    from makker.models import provider_key_vars
+
+    for name in provider_key_vars():
+        monkeypatch.setenv(name, "sk-do-not-leak")
+    monkeypatch.setenv("MAKKER_TEST_KEPT", "yes")
+    backend = build_backend(workspace=tmp_path)
+
+    output = backend.execute("env").output
+
+    assert "sk-do-not-leak" not in output
+    assert "MAKKER_TEST_KEPT=yes" in output  # the rest of the environment is kept
+
+
+def test_provider_key_vars_cover_every_keyed_provider() -> None:
+    from makker.models import PROVIDERS, provider_key_vars
+
+    keyed = {info.key_env_var for info in PROVIDERS.values() if info.key_env_var}
+    assert provider_key_vars() == keyed
+    assert "OPENAI_API_KEY" in provider_key_vars()
