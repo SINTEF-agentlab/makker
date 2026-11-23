@@ -74,7 +74,9 @@ from a `Project.toml` when it can.
 One simulator per workspace. Different simulators have incompatible Julia
 dependencies, so use a separate folder for each. Pointing an existing
 workspace at another simulator rebuilds the env from the new template on the
-next run.
+next run, unless one builds on the other (Fimbul on JutulDarcy), which share
+an env. Packages added to the env in a session, another simulator's included,
+are kept.
 
 ## Upgrading
 

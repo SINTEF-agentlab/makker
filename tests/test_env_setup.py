@@ -495,6 +495,64 @@ def test_prepare_workspace_env_rebuilds_foreign_managed_env(
     assert "JutulDarcy" not in text
 
 
+def _stamp(env: Path, template: Path, simulator: str) -> None:
+    """Stamp ``env`` as prepared for ``simulator`` from ``template``."""
+    import json
+
+    from makker.workspace import TEMPLATE_STAMP_FILENAME, template_fingerprint
+
+    payload = {"fingerprint": template_fingerprint(template), "simulator": simulator}
+    (env / TEMPLATE_STAMP_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_prepare_keeps_an_env_the_agent_added_another_simulator_to(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A package added in a session (``Pkg.add("JutulDarcy")``) is not a reason to rebuild."""
+    module_dir = _make_template(tmp_path)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    env = workspace_julia_env(workspace)
+    env.mkdir(parents=True)
+    (env / "Project.toml").write_text('[deps]\nFoo = "uuid"\nJutulDarcy = "u2"\n', encoding="utf-8")
+    (env / "Manifest.toml").write_text("[deps.Foo]\n", encoding="utf-8")
+    _stamp(env, module_dir / "julia_env", "test")
+    rebuilds: list[str] = []
+    monkeypatch.setattr(
+        env_setup, "_rebuild_managed_env", lambda *a, reason, **k: rebuilds.append(reason)
+    )
+    monkeypatch.setattr(env_setup, "resolve_and_instantiate", lambda *a, **k: None)
+
+    env_setup.prepare_workspace_env(_adapter(module_dir), workspace=workspace, julia_project=env)
+
+    assert rebuilds == []
+    assert "JutulDarcy" in (env / "Project.toml").read_text(encoding="utf-8")
+
+
+def test_foreign_env_is_judged_by_the_simulator_it_was_built_for(tmp_path: Path) -> None:
+    from makker.simulators import registry
+
+    env = tmp_path / "env"
+    env.mkdir()
+    (env / "Project.toml").write_text('[deps]\nFimbul = "u"\nJutulDarcy = "u2"\n', encoding="utf-8")
+    template = registry.get("jutuldarcy").julia_env_template_path
+    jutuldarcy, fimbul = registry.get("jutuldarcy"), registry.get("fimbul")
+
+    # Fimbul builds on JutulDarcy, so they share an env whichever built it.
+    _stamp(env, template, "fimbul")
+    assert env_setup._foreign_simulator(env, jutuldarcy) is None
+    _stamp(env, template, "jutuldarcy")
+    assert env_setup._foreign_simulator(env, fimbul) is None
+    # BattMo shares nothing with JutulDarcy.
+    _stamp(env, template, "battmo")
+    assert env_setup._foreign_simulator(env, jutuldarcy) == "BattMo"
+    # An env stamped before the stamp named its simulator: judged by its packages,
+    # either way round too.
+    (env / ".makker-template").unlink()
+    assert env_setup._foreign_simulator(env, jutuldarcy) is None
+    assert env_setup._foreign_simulator(env, registry.get("battmo")) == "Fimbul"
+
+
 def test_prepare_workspace_env_leaves_user_root_project_alone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

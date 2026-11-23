@@ -34,8 +34,8 @@ WORKSPACE_CONFIG_FILENAME = "config.toml"
 WORKSPACE_JULIA_ENV_DIRNAME = "julia-env"
 
 # Records which env template (and Makker version) a workspace env was built
-# from, so an upgrade that changes the template can be flagged as "rebuild me".
-# See ``env_template_drifted`` and the launch/doctor checks that use it.
+# from, and for which simulator. See ``env_template_drifted`` and the launch
+# checks that use it.
 TEMPLATE_STAMP_FILENAME = ".makker-template"
 
 # The shared, simulator-agnostic Makker package: one source copy in the repo,
@@ -326,8 +326,15 @@ def template_fingerprint(template_path: Path) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def write_env_template_stamp(env_dir: Path, template_path: Path) -> None:
-    """Record the template fingerprint (and Makker version) that built ``env_dir``."""
+def write_env_template_stamp(
+    env_dir: Path, template_path: Path, *, simulator: str | None = None
+) -> None:
+    """Record the template fingerprint (and Makker version) that built ``env_dir``.
+
+    ``simulator`` names the simulator the env was prepared for; launch compares
+    it to tell an env built for another simulator from one the agent added a
+    package to.
+    """
 
     from makker import __version__
 
@@ -335,6 +342,8 @@ def write_env_template_stamp(env_dir: Path, template_path: Path) -> None:
     if not fingerprint:
         return
     payload = {"fingerprint": fingerprint, "version": __version__}
+    if simulator is not None:
+        payload["simulator"] = simulator
     with contextlib.suppress(OSError):
         (env_dir / TEMPLATE_STAMP_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
 
@@ -352,9 +361,7 @@ def env_template_drifted(env_dir: Path, template_path: Path) -> bool:
     """Whether ``env_dir`` was built from a *different* template than the current one.
 
     Only ever ``True`` when a stamp exists and its fingerprint differs from the
-    installed template's — a missing stamp (a pre-existing env from before this
-    feature) is treated as "unknown, don't nag", and baselined by
-    :func:`ensure_env_template_stamp`.
+    installed template's; a missing stamp is "unknown", and launch writes one.
     """
 
     stamp = read_env_template_stamp(env_dir)
@@ -362,13 +369,6 @@ def env_template_drifted(env_dir: Path, template_path: Path) -> bool:
         return False
     current = template_fingerprint(template_path)
     return bool(current) and stamp.get("fingerprint") != current
-
-
-def ensure_env_template_stamp(env_dir: Path, template_path: Path) -> None:
-    """Write a baseline stamp when one is missing, so existing envs aren't nagged."""
-
-    if read_env_template_stamp(env_dir) is None:
-        write_env_template_stamp(env_dir, template_path)
 
 
 # ---------------------------------------------------------------------------
@@ -1107,6 +1107,7 @@ def bootstrap_julia_env(
     *,
     workspace: Path | None = None,
     force: bool = False,
+    simulator: str | None = None,
 ) -> Path:
     """Copy the simulator's template env into the workspace.
 
@@ -1141,7 +1142,7 @@ def bootstrap_julia_env(
     # Stamp the template Project.toml (drives the rebuild-staleness warning) and
     # fingerprint the warm-package source (drives the auto re-copy when the bundled
     # Makker runtime itself changes); see env_template_drifted / warm_source_is_current.
-    write_env_template_stamp(target, template_path)
+    write_env_template_stamp(target, template_path, simulator=simulator)
     mark_warm_source(target, template_path)
     return target
 

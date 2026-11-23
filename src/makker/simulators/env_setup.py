@@ -39,7 +39,6 @@ from makker.workspace import (
     WorkspaceBootstrapError,
     bootstrap_julia_env,
     dependency_source_is_current,
-    ensure_env_template_stamp,
     ensure_workspace_dir,
     env_declares_warm_packages,
     env_precompile_is_current,
@@ -49,6 +48,7 @@ from makker.workspace import (
     mark_warm_source,
     newer_env_packages,
     outdated_env_packages,
+    read_env_template_stamp,
     recopy_warm_sources,
     record_warm_failure,
     resolve_julia_project,
@@ -339,7 +339,12 @@ def _bootstrap_workspace_unlocked(
 ) -> Path:
 
     try:
-        bootstrap_julia_env(adapter.julia_env_template_path, workspace=workspace, force=force)
+        bootstrap_julia_env(
+            adapter.julia_env_template_path,
+            workspace=workspace,
+            force=force,
+            simulator=adapter.name,
+        )
     except WorkspaceBootstrapError as exc:
         raise EnvSetupError(str(exc)) from exc
 
@@ -739,25 +744,40 @@ def upgrade_env(
                 f"could not upgrade the environment in place ({exc}). Rebuild it "
                 f"from scratch instead:\n    {rebuild}"
             ) from exc
-        write_env_template_stamp(julia_project, template)
+        write_env_template_stamp(julia_project, template, simulator=adapter.name)
 
 
 def _foreign_simulator(julia_project: Path, adapter: SimulatorAdapter) -> str | None:
-    """Display name of another simulator whose package this env declares.
+    """Display name of the simulator this env was built for, when ``adapter`` can't share it.
 
-    Shared Jutul-stack packages (e.g. JutulDarcy for Fimbul) are in the active
-    adapter's ``package_imports`` and don't count; only a different
-    simulator's primary package marks the env as built for something else.
+    The template stamp names the simulator that last prepared the env, so a
+    package added since (the agent's ``Pkg.add("Fimbul")``) never counts.
+    Simulators where one builds on the other (Fimbul on JutulDarcy) share an
+    env either way round. An env whose stamp predates the name is judged by the
+    simulator packages it declares, until this launch stamps it.
     """
 
     from makker.simulators import registry
 
-    for name in registry.names():
-        other = registry.get(name)
-        if other.name == adapter.name or other.primary_package in adapter.package_imports:
+    stamp = read_env_template_stamp(julia_project) or {}
+    if "simulator" in stamp:
+        built_for = [stamp["simulator"]]
+    else:
+        built_for = [
+            name
+            for name in registry.names()
+            if project_has_package(julia_project, registry.get(name).primary_package)
+        ]
+    for name in built_for:
+        if name == adapter.name or name not in registry.names():
             continue
-        if project_has_package(julia_project, other.primary_package):
-            return other.display_name
+        other = registry.get(name)
+        if (
+            other.primary_package in adapter.package_imports
+            or adapter.primary_package in other.package_imports
+        ):
+            continue
+        return other.display_name
     return None
 
 
@@ -828,7 +848,9 @@ def _sync_workspace_env(
         resolve_and_instantiate(julia_project, precompile=False, capture=True)
         # The env now matches the current template; refresh the stamp so the
         # drift check below doesn't then flag the very change we just healed.
-        write_env_template_stamp(julia_project, adapter.julia_env_template_path)
+        write_env_template_stamp(
+            julia_project, adapter.julia_env_template_path, simulator=adapter.name
+        )
     except EnvSetupError as exc:
         if before is not None:
             project_toml.write_text(before, encoding="utf-8")
@@ -1011,10 +1033,9 @@ def _reconcile_env_template(adapter: SimulatorAdapter, ws: Path, julia_project: 
     if user_owns_root_project(ws) or not env_declares_warm_packages(julia_project):
         return
     template = adapter.julia_env_template_path
-    if env_template_drifted(julia_project, template):
-        write_env_template_stamp(julia_project, template)
-    else:
-        ensure_env_template_stamp(julia_project, template)
+    stamp = read_env_template_stamp(julia_project) or {}
+    if env_template_drifted(julia_project, template) or stamp.get("simulator") != adapter.name:
+        write_env_template_stamp(julia_project, template, simulator=adapter.name)
 
 
 def _ensure_env_warmed(
