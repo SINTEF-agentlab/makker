@@ -25,7 +25,6 @@ from inspect_ai.scorer import (
 from inspect_ai.solver import TaskState
 
 from makker.eval.solver import STORE_OUTPUT_DIR, STORE_TRACE_DB, STORE_WORKSPACE
-from makker.paths import is_host_path
 from makker.trace import Event, schema
 
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?")
@@ -573,6 +572,12 @@ _BARE_PATH = re.compile(r"(?<![\w./'\"-])(/\w[\w./\-]*)")
 _LINE_COMMENT = re.compile(r"#[^\n]*")
 
 
+def _starts_at_a_root_folder(path: str) -> bool:
+    """Whether a leading-slash path begins with a real top-level folder (``/home``, ``/tmp``)."""
+    first = path.lstrip("/").split("/", 1)[0]
+    return bool(first) and Path("/" + first).is_dir()
+
+
 @scorer(metrics=[accuracy()])
 def no_unresolvable_path_in_julia(
     tools: tuple[str, ...] = ("run_julia", "plot_julia", "execute"),
@@ -587,9 +592,7 @@ def no_unresolvable_path_in_julia(
 
     A leading-slash literal that names a real host location (``/home/...``,
     ``/tmp/...``) is fine. The check flags only leading-slash paths whose first
-    segment is not a real top-level directory. It shares
-    :func:`makker.paths.is_host_path` with the workspace backend so grader
-    and tool agree on which paths resolve.
+    segment is not a real top-level directory.
     """
 
     def _unresolvable_paths(text: str, *, shell: bool) -> list[str]:
@@ -597,7 +600,7 @@ def no_unresolvable_path_in_julia(
         found = [match.group(2) for match in _QUOTED_PATH.finditer(text)]
         if shell:
             found += [match.group(1) for match in _BARE_PATH.finditer(text)]
-        return [candidate for candidate in found if not is_host_path(candidate)]
+        return [candidate for candidate in found if not _starts_at_a_root_folder(candidate)]
 
     async def score(state: TaskState, target: Target) -> Score:
         offenders: list[str] = []

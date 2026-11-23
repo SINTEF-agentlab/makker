@@ -32,11 +32,15 @@ def test_langgraph_tool_call_writer_still_exposed() -> None:
 
 def test_deepagents_validate_path_still_patchable() -> None:
     import deepagents.backends.utils as backend_utils
+    from deepagents.middleware import _skill_tools
+    from deepagents.middleware import filesystem as fs_middleware
 
-    assert callable(getattr(backend_utils, "validate_path", None)), (
-        "deepagents moved backends.utils.validate_path; the Windows drive-path "
-        "shim in agent/windows_paths.py silently no-ops. Re-point the patch."
-    )
+    for module in (backend_utils, fs_middleware, _skill_tools):
+        assert callable(getattr(module, "validate_path", None)), (
+            f"{module.__name__} no longer binds validate_path; the real-path shim in "
+            "agent/real_paths.py misses it, and relative paths may land at '/'. "
+            "Re-point the patch."
+        )
 
 
 def test_deepagents_harness_profile_resolver_still_exists() -> None:

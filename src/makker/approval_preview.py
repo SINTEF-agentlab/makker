@@ -18,7 +18,7 @@ from makker.agent.approval import (
     allowed_decisions_for_interrupt,
     review_config_map,
 )
-from makker.paths import resolve_in_workspace
+from makker.paths import resolve_agent_path
 from makker.preview import fenced_block, truncate_preview
 from makker.tool_labels import tool_label
 
@@ -130,7 +130,7 @@ def _write_file_sections(tool_args: dict[str, Any], *, workspace_root: Path) -> 
     sections: list[str] = []
     path_str = str(tool_args.get("file_path") or tool_args.get("path") or "")
     content = str(tool_args.get("content") or "")
-    physical_path = resolve_in_workspace(path_str, workspace=workspace_root)
+    physical_path = resolve_agent_path(path_str, workspace=workspace_root)
     existing_text = _safe_read(physical_path) if physical_path and physical_path.exists() else None
 
     if existing_text is None:
@@ -151,11 +151,11 @@ def _write_file_sections(tool_args: dict[str, Any], *, workspace_root: Path) -> 
 
 def _edit_file_sections(tool_args: dict[str, Any], *, workspace_root: Path) -> list[str]:
     path_str = str(tool_args.get("file_path") or tool_args.get("path") or "")
-    physical_path = resolve_in_workspace(path_str, workspace=workspace_root)
+    physical_path = resolve_agent_path(path_str, workspace=workspace_root)
     if physical_path is None:
-        return ["> Preview unavailable: unable to resolve the target path inside the workspace."]
+        return ["> Preview unavailable: no file path given."]
     if not physical_path.exists():
-        return ["> Preview unavailable: the target file does not exist in the workspace."]
+        return ["> Preview unavailable: the target file does not exist."]
 
     existing_text = _safe_read(physical_path)
     if existing_text is None:

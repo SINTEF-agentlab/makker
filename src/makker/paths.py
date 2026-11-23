@@ -73,62 +73,34 @@ def user_config_path() -> Path:
     return state_home() / "config.toml"
 
 
-def is_host_path(text: str) -> bool:
-    """Whether ``text`` names a real host location rather than a virtual workspace path.
+def resolve_agent_path(raw: str | Path, *, workspace: Path | None = None) -> Path | None:
+    """The real file a path from the agent names, or ``None`` for an empty path.
 
-    A Windows drive (``C:\\...``) is unambiguous. On POSIX a leading-slash path
-    can still be virtual (``/model.jl`` means a workspace file), so it only
-    counts as a host path when its first segment is a real top-level directory
-    (``/etc``, ``/home``, ``/tmp``, …).
+    The one rule every tool follows (file tools, ``execute``, ``run_julia``): an
+    absolute path is itself, and a relative one is under the workspace. So
+    ``model.jl`` is ``<workspace>/model.jl`` and ``/model.jl`` is a file at the
+    filesystem root.
     """
 
-    if Path(text).drive:
-        return True
-    first = text.lstrip("/").split("/", 1)[0] if text.startswith("/") else ""
-    return bool(first) and Path("/" + first).is_dir()
-
-
-def resolve_in_workspace(raw: str | Path, *, workspace: Path | None = None) -> Path | None:
-    """Map an agent-visible path to the real path inside the workspace, or ``None``.
-
-    The one place that knows the agent's path model. Accepts every form the
-    agent uses (workspace-relative ``model.jl``, virtual absolute ``/model.jl``
-    or ``/workspace/model.jl``, and the file's real absolute path) and returns
-    the corresponding real path. Returns ``None`` when the path points outside
-    the workspace (a real host path like ``/tmp/x``, or a ``..`` escape): the
-    same rule the workspace file tools enforce, so previews and tools agree
-    about which file a path means.
-
-    Cross-platform note: on POSIX a leading-slash string is host-absolute and
-    ``Path.is_absolute()`` catches it; on Windows the same string is *not*
-    absolute (no drive letter), so leading-slash strings are routed through the
-    virtual-path branch explicitly.
-    """
-
-    ws = (workspace or workspace_root()).resolve()
     text = str(raw)
     if not text:
         return None
-    p = Path(text)
+    # Joining keeps an absolute path as it is, the same as the backend does.
+    return (workspace or workspace_root()).resolve() / text
 
-    if p.is_absolute():
-        try:
-            p.resolve().relative_to(ws)
-            return p  # the file's real path, already inside the workspace
-        except (ValueError, OSError):
-            pass
-        if is_host_path(text):
-            return None  # a real machine path outside the workspace
 
-    rel = text.lstrip("/")
-    if rel.startswith("workspace/"):
-        rel = rel[len("workspace/") :]
-    candidate = ws / rel
+def resolve_in_workspace(raw: str | Path, *, workspace: Path | None = None) -> Path | None:
+    """Like :func:`resolve_agent_path`, but ``None`` unless the file is in the workspace."""
+
+    ws = (workspace or workspace_root()).resolve()
+    path = resolve_agent_path(raw, workspace=ws)
+    if path is None:
+        return None
     try:
-        candidate.resolve().relative_to(ws)
+        path.resolve().relative_to(ws)
     except (ValueError, OSError):
-        return None  # `..` escape
-    return candidate
+        return None
+    return path
 
 
 def workspace_hash(workspace: Path | None = None) -> str:
@@ -186,8 +158,8 @@ def workspace_memory_dir(workspace: Path | None = None) -> Path:
 
     Lives alongside ``sessions/`` under the workspace's state dir so memory
     is automatically scoped to the workspace path the user invokes
-    Makker from. The agent maintains the contents via ``edit_file`` /
-    ``write_file`` tools mounted at ``/memory/`` in the agent backend.
+    Makker from. The agent maintains the contents with ``edit_file`` /
+    ``write_file`` at this folder's real path.
     """
     return workspace_state_dir(workspace) / "memory"
 

@@ -20,7 +20,7 @@ from deepagents.backends.protocol import (
     WriteResult,
 )
 
-from makker.agent.windows_paths import split_windows_glob
+from makker.agent.real_paths import split_windows_glob
 
 _BLOCKED_INTERPRETERS = frozenset({"julia"})
 
