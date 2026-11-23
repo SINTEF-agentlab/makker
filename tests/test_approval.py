@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from makker.approval_preview import (
     _apply_edit_preview,
     allowed_decisions_for_interrupt,
@@ -42,7 +44,7 @@ def test_render_write_file_card_for_new_file(tmp_path: Path) -> None:
             "action_requests": [
                 {
                     "name": "write_file",
-                    "args": {"file_path": "/notes.txt", "content": "hello\n"},
+                    "args": {"file_path": "notes.txt", "content": "hello\n"},
                     "description": "Write a file in the Makker workspace.",
                 }
             ],
@@ -54,7 +56,7 @@ def test_render_write_file_card_for_new_file(tmp_path: Path) -> None:
     )
 
     assert len(cards) == 1
-    assert "`/notes.txt`" in cards[0].body  # the target path (title already names the tool)
+    assert "`notes.txt`" in cards[0].body  # the target path (title already names the tool)
     assert "#### Content Preview" in cards[0].body
     assert "hello" in cards[0].body
 
@@ -69,7 +71,7 @@ def test_render_write_file_card_for_existing_file_shows_diff(tmp_path: Path) -> 
             "action_requests": [
                 {
                     "name": "write_file",
-                    "args": {"file_path": "/notes.txt", "content": "new\n"},
+                    "args": {"file_path": "notes.txt", "content": "new\n"},
                     "description": "Write a file in the Makker workspace.",
                 }
             ],
@@ -86,8 +88,13 @@ def test_render_write_file_card_for_existing_file_shows_diff(tmp_path: Path) -> 
     assert "+new" in cards[0].body
 
 
-def test_render_edit_file_card_shows_diff(tmp_path: Path) -> None:
-    target = tmp_path / "notes.txt"
+@pytest.mark.parametrize("inside", [True, False], ids=["relative", "outside-workspace"])
+def test_render_edit_file_card_shows_diff(tmp_path: Path, inside: bool) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    # A relative path is a workspace file; an absolute one outside the workspace
+    # (an added folder, a dev checkout) gets the same diff.
+    target = (workspace if inside else tmp_path) / "notes.txt"
     target.write_text("hello\nworld\n", encoding="utf-8")
 
     cards = render_interrupt_cards(
@@ -97,7 +104,7 @@ def test_render_edit_file_card_shows_diff(tmp_path: Path) -> None:
                 {
                     "name": "edit_file",
                     "args": {
-                        "file_path": "/notes.txt",
+                        "file_path": "notes.txt" if inside else str(target),
                         "old_string": "world",
                         "new_string": "battmo",
                     },
@@ -108,7 +115,7 @@ def test_render_edit_file_card_shows_diff(tmp_path: Path) -> None:
                 {"action_name": "edit_file", "allowed_decisions": ["approve", "reject"]}
             ],
         },
-        workspace_root=tmp_path,
+        workspace_root=workspace,
     )
 
     assert len(cards) == 1

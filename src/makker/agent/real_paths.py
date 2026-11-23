@@ -1,29 +1,21 @@
-"""Let the deepagents filesystem tools accept real Windows absolute paths.
+"""Let the deepagents file tools take real paths, the way the shell and REPL do.
 
-The agent runs its filesystem backend in real-path mode (``virtual_mode=False``;
-see :mod:`makker.agent.backend`), so every path a tool receives is a real OS
-path — the same string the shell and the Julia REPL use. But deepagents'
-``FilesystemMiddleware`` routes each path through ``validate_path`` *before* the
-backend sees it, and that helper is written for *virtual* paths: it rejects
-anything matching a Windows drive letter (``C:\\...``) outright.
+The agent's filesystem backend runs in real-path mode (``virtual_mode=False``;
+see :mod:`makker.agent.backend`): an absolute path is used as it is and a
+relative one resolves against the workspace, the same as in ``execute`` and
+``run_julia``. But deepagents' ``FilesystemMiddleware`` passes each path through
+``validate_path`` before the backend sees it, and that helper is written for
+virtual paths. It turns ``model.jl`` into ``/model.jl``, a file at the
+filesystem root, and it rejects a Windows drive path (``C:\\...``) outright.
 
-On POSIX this is invisible — a real absolute path starts with ``/``, which
-``validate_path`` accepts — so the mismatch only bites on Windows, where real
-paths start with ``C:\\``. There it breaks the workflow the agent depends on:
-``pkgdir(JutulDarcy)`` returns ``C:\\Users\\...\\.julia\\packages\\...``, and every
-``read_file``/``grep``/``ls`` of installed package source is rejected, forcing the
-model to shell out to PowerShell ``Get-Content`` for everything.
+So we wrap ``validate_path``: a relative path stays relative and a drive path
+passes through, both for the backend to resolve. Everything else, and the
+traversal checks (``..``, ``~``), stays with the original. The middleware looks
+``validate_path`` up as a module global at call time, so replacing the name on
+each module that imported it reaches every file tool already built.
 
-The fix wraps ``validate_path`` so a Windows drive-absolute path passes through
-unchanged (the real-path backend resolves it directly, exactly as it already does
-for the shell and REPL), while every other path keeps the original virtual-path
-validation — traversal guards and POSIX normalization included. The middleware
-looks ``validate_path`` up as a module global at call time, so replacing the name
-on the middleware module reaches every file tool it builds.
-
-This is a targeted shim over a deepagents internal; it can be dropped once
-deepagents stops rejecting real Windows paths in real-path mode (e.g. gating
-``validate_path`` on ``virtual_mode``).
+This is a shim over a deepagents internal; it can go once ``validate_path``
+honours ``virtual_mode=False``.
 """
 
 from __future__ import annotations
@@ -36,15 +28,15 @@ from collections.abc import Callable
 # path. ``validate_path`` rejects exactly this; we let it through instead.
 _WIN_DRIVE = re.compile(r"^[A-Za-z]:")
 # Marks an already-wrapped callable so installation is idempotent.
-_PATCH_FLAG = "_makker_real_windows_paths"
+_PATCH_FLAG = "_makker_real_paths"
 
 
 def _wrap_validate_path(original: Callable[..., str]) -> Callable[..., str]:
-    """Return a ``validate_path`` that passes real Windows absolute paths through.
+    """Return a ``validate_path`` that leaves real paths for the backend to resolve.
 
-    A drive-absolute path is handed back verbatim for the real-path backend to
-    resolve; anything else defers to ``original`` (unchanged traversal checks and
-    normalization). Already-wrapped callables are returned as-is.
+    A drive-absolute path is handed back verbatim, and a relative path comes back
+    normalized but still relative; ``original`` checks everything for traversal
+    and normalizes the rest. Already-wrapped callables are returned as-is.
     """
 
     if getattr(original, _PATCH_FLAG, False):
@@ -53,7 +45,10 @@ def _wrap_validate_path(original: Callable[..., str]) -> Callable[..., str]:
     def validate_path(path: str, *, allowed_prefixes=None) -> str:
         if isinstance(path, str) and _WIN_DRIVE.match(path):
             return path
-        return original(path, allowed_prefixes=allowed_prefixes)
+        normalized = original(path, allowed_prefixes=allowed_prefixes)
+        if isinstance(path, str) and not path.startswith(("/", "\\")):
+            return normalized.lstrip("/") or "."
+        return normalized
 
     validate_path.__wrapped__ = original  # type: ignore[attr-defined]
     setattr(validate_path, _PATCH_FLAG, True)
@@ -61,32 +56,30 @@ def _wrap_validate_path(original: Callable[..., str]) -> Callable[..., str]:
 
 
 def _install() -> None:
-    """Replace ``validate_path`` with the Windows-aware wrapper everywhere it's bound.
+    """Replace ``validate_path`` with the wrapper everywhere it's bound.
 
-    Patches the source module and the filesystem middleware that imported the
-    name into its own namespace. Idempotent.
+    Patches the source module and each deepagents module that imported the name
+    into its own namespace: the file tools, and the skill loader, which matches a
+    ``read_file`` path the way the tool does. Idempotent.
     """
 
     from deepagents.backends import utils
+    from deepagents.middleware import _skill_tools
     from deepagents.middleware import filesystem as fs_middleware
 
-    for module in (utils, fs_middleware):
+    for module in (utils, fs_middleware, _skill_tools):
         current = getattr(module, "validate_path", None)
         if current is not None:
             module.validate_path = _wrap_validate_path(current)
 
 
-def enable_windows_real_paths() -> None:
-    """On Windows, let the deepagents file tools accept real absolute paths.
+def enable_real_paths() -> None:
+    """Let the deepagents file tools take real relative and Windows drive paths.
 
-    A no-op off Windows (POSIX real paths already validate) and idempotent, so it
-    is safe to call on every agent build. Call before the filesystem tools run —
-    the middleware resolves ``validate_path`` at call time, so patching the module
-    global reaches tools already constructed.
+    Idempotent, so it is safe to call on every agent build. Call before the
+    filesystem tools run.
     """
 
-    if os.name != "nt":
-        return
     _install()
 
 

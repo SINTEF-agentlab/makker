@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-import os
 from pathlib import Path
 
 from makker.paths import (
+    resolve_agent_path,
     resolve_in_workspace,
     set_state_home,
     set_workspace_root,
@@ -53,41 +53,38 @@ def test_workspace_state_dir_under_state_home(tmp_path: Path) -> None:
     assert workspace_state_dir() == state / "workspaces" / workspace_hash(ws)
 
 
-def test_resolve_in_workspace_handles_virtual_paths(tmp_path: Path) -> None:
+def test_agent_paths_follow_one_rule(tmp_path: Path) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()
     set_workspace_root(ws)
 
-    # Relative paths stay relative to the workspace.
+    # Relative paths are under the workspace.
+    assert resolve_agent_path("experiments/report.html") == ws / "experiments/report.html"
+    # An absolute path is itself, inside the workspace or not. A leading slash is
+    # the filesystem root, as in the shell and the REPL, not the workspace.
+    inside = ws / "x" / "y.html"
+    assert resolve_agent_path(str(inside)) == inside
+    elsewhere = tmp_path / "elsewhere.txt"
+    assert resolve_agent_path(str(elsewhere)) == elsewhere
+    assert resolve_agent_path("/model.jl") == Path(ws.anchor) / "model.jl"
+    # Empty input resolves to nothing rather than the workspace root.
+    assert resolve_agent_path("") is None
+
+
+def test_resolve_in_workspace_keeps_only_workspace_files(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    set_workspace_root(ws)
+
     assert resolve_in_workspace("experiments/report.html") == ws / "experiments/report.html"
-
-    # Leading-slash virtual paths (from the agent's view) map to workspace root.
-    assert resolve_in_workspace("/experiments/report.html") == ws / "experiments/report.html"
-    assert (
-        resolve_in_workspace("/workspace/experiments/report.html") == ws / "experiments/report.html"
-    )
-
-    # Real absolute paths inside the workspace are preserved.
     inside = ws / "x" / "y.html"
     assert resolve_in_workspace(str(inside)) == inside
 
-
-def test_resolve_in_workspace_rejects_outside_paths(tmp_path: Path) -> None:
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    set_workspace_root(ws)
-
-    # Real host paths outside the workspace are rejected, matching the file
-    # tools' rule, rather than silently rerooted under the workspace. The
-    # /tmp literal is host-absolute only on POSIX; on Windows a leading-slash
-    # string has no drive letter and is a virtual path by design.
-    if os.name == "posix":
-        assert resolve_in_workspace("/tmp/random.html") is None
+    # The old virtual forms are no longer workspace files.
+    assert resolve_in_workspace("/experiments/report.html") is None
+    assert resolve_in_workspace("/workspace/experiments/report.html") is None
     assert resolve_in_workspace(str(tmp_path / "elsewhere.txt")) is None
-
     # `..` escapes are rejected whatever their form.
     assert resolve_in_workspace("../outside/secret.txt") is None
     assert resolve_in_workspace("/../outside/secret.txt") is None
-
-    # Empty input resolves to nothing rather than the workspace root.
     assert resolve_in_workspace("") is None

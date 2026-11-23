@@ -76,8 +76,8 @@ and check on staged `.py` files. To verify the whole tree like CI:
 
 - `src/makker/paths.py`: the three runtime anchors (`PACKAGE_ROOT`
   (install), `workspace_root()` (CWD), `state_home()` (sessions)) and the path
-  policy (`resolve_in_workspace`, `is_host_path`), the one place that maps
-  agent-visible paths to real files.
+  rule (`resolve_agent_path`: absolute as itself, relative under the
+  workspace), the one place that maps agent-visible paths to real files.
 - `src/makker/workspace.py`: workspace config
   (`.makker/config.toml`), simulator auto-detect, Julia-env bootstrap.
 - `src/makker/session.py`: `Session`, the unit of work for one
@@ -176,6 +176,11 @@ silently at runtime. The contacts:
   forward `**kwargs`. After the real-paths refactor nothing routes through a
   mount, so `added_dirs.py` only records the added folders; every tool already
   reaches them by absolute path.
+- `agent/real_paths.py`: wraps `deepagents.backends.utils.validate_path` (and
+  the copies the filesystem middleware and skill loader import) so a relative
+  path stays relative for the backend to resolve, instead of being rooted at
+  `/`, and a Windows drive path is accepted. `tests/test_real_paths.py` drives
+  the real file tools through it.
 - `tests/test_builder.py`: imports
   `deepagents.profiles.harness.harness_profiles._harness_profile_for_model`
   to assert our profile resolves for built model instances. It also pins the

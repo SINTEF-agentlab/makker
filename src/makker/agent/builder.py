@@ -53,6 +53,7 @@ from makker.agent.plot_julia import (
     make_recapture_tool,
 )
 from makker.agent.prompts import assemble_session_prompt
+from makker.agent.real_paths import enable_real_paths
 from makker.agent.recovery import InvalidToolCallRecoveryMiddleware
 from makker.agent.tools import (
     make_record_attempt_tool,
@@ -60,7 +61,6 @@ from makker.agent.tools import (
     make_run_julia_tool,
     make_write_report_tool,
 )
-from makker.agent.windows_paths import enable_windows_real_paths
 from makker.models import PROVIDERS, provider_of
 from makker.paths import SHARED_SKILLS_DIR, workspace_memory_dir, workspace_root
 from makker.session import Session
@@ -446,9 +446,9 @@ def build_agent(
         surface = session.surface
 
     register_provider_profiles()
-    # The file tools run on real paths; on Windows, let deepagents' path validation
-    # accept real ``C:\\...`` paths instead of rejecting them as "not virtual".
-    enable_windows_real_paths()
+    # The file tools run on real paths: stop deepagents' path validation from
+    # rooting a relative path at "/" or rejecting a Windows ``C:\\...`` path.
+    enable_real_paths()
 
     memory_dir = ensure_memory_dir(session.memory_dir(workspace_memory=workspace_memory_dir()))
     backend = build_backend(

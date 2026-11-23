@@ -291,8 +291,9 @@ def make_write_report_tool(session: Session, *, surface: str | None = None):
             blocks: Optional ordered building blocks to compose the report body.
             custom_css: Optional extra CSS appended to the report's stylesheet,
                 for restyling or styling your own ``html`` blocks.
-            output_path: Where to write the HTML. Defaults to the session output
-                directory (``makker-output/sessions/<id>/report.html``).
+            output_path: Where to write the HTML, inside the workspace. Defaults
+                to the session output directory
+                (``makker-output/sessions/<id>/report.html``).
         """
         from makker.open_file import open_path
         from makker.transcript.report import render_report
