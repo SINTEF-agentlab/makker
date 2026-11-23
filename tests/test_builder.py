@@ -291,7 +291,7 @@ def test_agent_tool_surface_is_pinned(tmp_path) -> None:
     stop installing one without a line of our code changing. Pinning the set
     turns either into a failure here instead of a surprise in a live session.
     """
-    from makker.agent.approval import ApprovalMode, interrupt_on_for_mode
+    from makker.agent.approval import interrupt_on_config
     from makker.agent.builder import build_agent
     from makker.lab.fakes import (
         FakeJulia,
@@ -332,9 +332,7 @@ def test_agent_tool_surface_is_pinned(tmp_path) -> None:
         "task",
     }
     # Everything that mutates the filesystem or spawns a process asks first.
-    assert {"write_file", "edit_file", "delete", "execute"} == set(
-        interrupt_on_for_mode(ApprovalMode.ASK)
-    )
+    assert {"write_file", "edit_file", "delete", "execute"} == set(interrupt_on_config())
     # No tool reaches a person as its raw agent-facing id.
     from makker.tool_labels import tool_label
 

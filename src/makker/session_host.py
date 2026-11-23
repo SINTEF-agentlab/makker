@@ -20,6 +20,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
+from makker.agent.approval import ApprovalPolicy, parse_approval_mode
 from makker.agent.turns import TurnRunner
 
 if TYPE_CHECKING:
@@ -43,7 +44,7 @@ class SessionHost:
         exit_stack: AsyncExitStack | None = None,
         checkpointer: Any | None = None,
         model: str | None = None,
-        approval_mode: str | None = None,
+        approval_mode: ApprovalPolicy | str | None = None,
         surface: str = "web",
         extensions: Sequence[Capability] = (),
         workspace: Path | None = None,
@@ -59,12 +60,18 @@ class SessionHost:
         self._add_dirs = list(add_dirs)
         self._exit_stack = exit_stack
         self._runner: TurnRunner | None = None
-        # Kept so the agent can be rebuilt in place (e.g. /model, /approval-mode)
-        # without restarting the kernel; the same checkpointer keeps the history
-        # and the same session keeps the live Julia state.
+        # Kept so the agent can be rebuilt in place (e.g. /model) without
+        # restarting the kernel; the same checkpointer keeps the history and the
+        # same session keeps the live Julia state.
         self._checkpointer = checkpointer
         self._model = model
-        self._approval_mode = approval_mode
+        # The one approval policy the agent graph reads; front ends change the mode
+        # and "always allow" here, and it applies from the next tool call.
+        self.approval = (
+            approval_mode
+            if isinstance(approval_mode, ApprovalPolicy)
+            else ApprovalPolicy(approval_mode, workspace=workspace)
+        )
         self._surface = surface
         self._extensions = list(extensions)
         # The resolved env package sources: kept so an in-place rebuild keeps the
@@ -136,9 +143,16 @@ class SessionHost:
         return self._model
 
     @property
-    def approval_mode(self) -> str | None:
-        """The session's human-in-the-loop policy, or ``None`` for the default."""
-        return self._approval_mode
+    def approval_mode(self) -> str:
+        """The session's approval mode (``ask``, ``workspace`` or ``auto``)."""
+        return self.approval.mode.value
+
+    def set_approval_mode(self, mode: str) -> None:
+        """Change the approval mode; it applies from the next tool call, no rebuild.
+
+        Raises ``ValueError`` for an unknown mode, leaving the current one.
+        """
+        self.approval.mode = parse_approval_mode(mode)
 
     @property
     def branding(self):
@@ -163,8 +177,8 @@ class SessionHost:
             self._model = model
         self._runner = None
 
-    def reconfigure(self, *, model: str | None = None, approval_mode: str | None = None) -> None:
-        """Rebuild the agent in place with a new model and/or approval policy.
+    def reconfigure(self, *, model: str | None = None) -> None:
+        """Rebuild the agent in place with a new model.
 
         The kernel, checkpointer, and session are untouched, so conversation
         history and the live Julia REPL survive the switch; only the agent graph
@@ -173,7 +187,6 @@ class SessionHost:
         from makker.agent.builder import build_agent
 
         new_model = model if model is not None else self._model
-        new_approval = approval_mode if approval_mode is not None else self._approval_mode
         # Rebuilding makes a fresh backend, so carry the added folders (launch
         # --add-dir and any runtime /add-dir) over or the switch would silently
         # drop the agent's access to them. Without a live backend (a session
@@ -183,22 +196,22 @@ class SessionHost:
             if self.backend
             else list(self._add_dirs)
         )
-        # Build first, then commit the new values, only once it succeeds. A value
-        # build_agent rejects (e.g. an unknown approval mode) must leave the host
-        # consistent with the agent still running, not reporting a model/approval it
-        # never applied (which a same-value reattach would then take as "unchanged").
+        # Build first, then commit the new model, only once it succeeds. A build
+        # that fails must leave the host consistent with the agent still running,
+        # not reporting a model it never applied (which a same-value reattach would
+        # then take as "unchanged").
         agent, backend = build_agent(
             self.session,
             model=new_model,
             checkpointer=self._checkpointer,
-            approval_mode=new_approval,
+            approval_mode=self.approval,
             surface=self._surface,
             extensions=self._extensions,
             added_dirs=carried or None,
             package_sources=self._package_sources or None,
         )
         self.agent, self.backend = agent, backend
-        self._model, self._approval_mode = new_model, new_approval
+        self._model = new_model
         self._runner = None  # rebuilt lazily against the new agent
 
     def set_host_context(self, context: dict[str, Any] | None, *, rebuild: bool = True) -> bool:
@@ -311,35 +324,21 @@ class SessionHost:
         self,
         start_turn: Callable[[], Awaitable[Any]],
         *,
-        approval_mode: Any = None,
-        allowlist: Any = None,
         on_message: Any = None,
     ) -> Any:
         """Run one turn to its resting point, applying the approval policy.
 
-        Starts the turn, then keeps resuming past interrupts the policy already
-        allows (the mode, or a category the user marked "always allow" this
-        session) until the turn completes or an interrupt genuinely needs a
+        The graph only pauses for calls the policy says need a person. If the
+        policy changed while the turn ran (say, to auto), a pause it now allows
+        is resumed here, until the turn completes or a pause genuinely needs a
         human. When the turn settles with nothing pending, the end-of-turn
         duties run. Every front end drives turns through here so the policy
         loop and the settle hooks cannot drift between them.
         """
-        from makker.agent.approval import (
-            build_resume_payload,
-            parse_approval_mode,
-            should_auto_approve_interrupt,
-        )
+        from makker.agent.approval import build_resume_payload
 
-        mode = parse_approval_mode(str(approval_mode) if approval_mode is not None else None)
         result = await start_turn()
-        while result.interrupts and all(
-            should_auto_approve_interrupt(
-                interrupt.value,
-                mode,
-                allowlist=allowlist,
-            )
-            for interrupt in result.interrupts
-        ):
+        while result.interrupts and self.approval.approves(result.interrupts):
             payload = build_resume_payload(result.interrupts, {"type": "approve"})
             result = await self.runner.resume(payload, on_message=on_message)
         if not result.interrupts:
@@ -352,6 +351,7 @@ class SessionHost:
         Rewrites any report's sidecar transcript so it includes the model's
         closing message (``write_report`` runs mid-turn).
         """
+        self.approval.settled()
         with contextlib.suppress(Exception):
             self.session.refresh_report_transcripts()
 
@@ -627,6 +627,9 @@ class SessionHost:
             from makker.agent.builder import resolve_package_sources
 
             package_sources = await asyncio.to_thread(resolve_package_sources, project)
+            # One policy for the graph and the host, so the front end's changes reach
+            # the graph (an unknown mode fails here, before anything starts).
+            approval = ApprovalPolicy(approval_mode, workspace=ws)
             if allow_missing_credential and missing_credential(resolved_model) is not None:
                 # The provider key isn't set, so building the model would crash.
                 # Come up without an agent; the front end collects the key and
@@ -637,7 +640,7 @@ class SessionHost:
                     session,
                     model=resolved_model,
                     checkpointer=checkpointer,
-                    approval_mode=approval_mode,
+                    approval_mode=approval,
                     surface=surface,
                     extensions=all_extensions,
                     added_dirs=add_dirs or None,
@@ -654,7 +657,7 @@ class SessionHost:
             exit_stack=stack,
             checkpointer=checkpointer,
             model=resolved_model,
-            approval_mode=approval_mode,
+            approval_mode=approval,
             surface=surface,
             extensions=all_extensions,
             workspace=ws,

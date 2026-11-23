@@ -100,16 +100,18 @@ def test_interrupt_wire() -> None:
     }
 
 
-def test_interrupt_wire_offers_always_allow_for_file_edits() -> None:
-    # A file-edit interrupt carries its allowlist category, so a front end can offer
-    # "always allow" (shell does not — see test_interrupt_wire).
+def test_interrupt_wire_carries_what_the_policy_offers_to_always_allow() -> None:
+    # The session's policy decides the offer (file edits in the workspace); the
+    # wire carries it so a front end can show the button.
     value = {
         "action_requests": [{"name": "write_file", "args": {"file_path": "a.jl"}}],
         "review_configs": [
             {"action_name": "write_file", "allowed_decisions": ["approve", "reject"]}
         ],
     }
-    wire = protocol.interrupt_to_wire(TurnInterrupt(interrupt_id="i2", value=value))
+    interrupt = TurnInterrupt(interrupt_id="i2", value=value)
+    assert protocol.interrupt_to_wire(interrupt)["allowlist"] == []
+    wire = protocol.interrupt_to_wire(interrupt, always_allow=frozenset({"file_edits"}))
     assert wire["allowlist"] == ["file_edits"]
 
 

@@ -1,41 +1,40 @@
-"""Human-in-the-loop approval modes for workspace file and shell tools."""
+"""Human-in-the-loop approval for the workspace file and shell tools.
+
+Every gated tool sits in the graph's ``interrupt_on`` map with a ``when`` check
+that asks the session's :class:`ApprovalPolicy` whether this one call needs a
+person. The policy is live, so a change of mode or of "always allow" applies to
+the next tool call, mid-turn included, with no rebuild; and an approval card
+only ever holds the calls the policy could not allow.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from copy import deepcopy
 from enum import StrEnum
+from pathlib import Path
 from typing import Any, Protocol
 
 from langchain.agents.middleware import InterruptOnConfig
+
+from makker.paths import resolve_in_workspace
 
 # Tools that require human approval. Action name → human-readable description
 # shown in the approval card. All entries use approve/reject only.
 _APPROVAL_TOOLS: dict[str, str] = {
     "execute": "Run a shell command in the workspace.",
-    "write_file": "Write a file in the workspace.",
-    "edit_file": "Edit a file in the workspace.",
+    "write_file": "Write a file.",
+    "edit_file": "Edit a file.",
     "delete": "Delete a file or directory (directories go recursively).",
 }
 
-# Deliberately excludes `delete`: these are the tools "accept edits" mode and the
-# session allowlist wave through in bulk, and a recursive delete is not something
-# a blanket "always allow file edits" should cover. It stays one prompt per call.
-_WORKSPACE_EDIT_TOOLS = frozenset({"write_file", "edit_file"})
-_SHELL_TOOLS = frozenset({"execute"})
+# The only calls "accept edits" and "always allow" wave through, and only when
+# the file is inside the workspace. A recursive delete and a shell command always
+# get their own prompt outside auto mode.
+_EDIT_TOOLS = frozenset({"write_file", "edit_file"})
 
-# Session allowlist categories.
+# The one category a session can "always allow".
 ALLOWLIST_FILE_EDITS = "file_edits"
-ALLOWLIST_SHELL = "shell"
-
-
-def interrupt_on_config() -> dict[str, InterruptOnConfig]:
-    """``interrupt_on`` map keyed by tool name (used by `create_deep_agent`)."""
-
-    return {
-        name: {"allowed_decisions": ["approve", "reject"], "description": description}
-        for name, description in _APPROVAL_TOOLS.items()
-    }
 
 
 class ApprovalMode(StrEnum):
@@ -45,10 +44,10 @@ class ApprovalMode(StrEnum):
     """Prompt before every gated tool (default)."""
 
     WORKSPACE = "workspace"
-    """Auto-allow workspace write_file and edit_file; still prompt for the rest."""
+    """Auto-allow write_file and edit_file inside the workspace; prompt for the rest."""
 
     AUTO = "auto"
-    """Auto-allow all configured approval tools (non-interactive trust mode)."""
+    """Auto-allow all gated tools (non-interactive trust mode)."""
 
     def display_label(self) -> str:
         return {
@@ -61,69 +60,6 @@ class ApprovalMode(StrEnum):
         order = (ApprovalMode.ASK, ApprovalMode.WORKSPACE, ApprovalMode.AUTO)
         index = order.index(self)
         return order[(index + 1) % len(order)]
-
-
-class ToolAllowlist:
-    """Per-session categories the user chose to always allow."""
-
-    def __init__(self) -> None:
-        self._categories: set[str] = set()
-
-    def add(self, category: str) -> None:
-        self._categories.add(category)
-
-    def contains(self, category: str) -> bool:
-        return category in self._categories
-
-    def __bool__(self) -> bool:
-        return bool(self._categories)
-
-    def categories(self) -> frozenset[str]:
-        return frozenset(self._categories)
-
-
-def tool_allowlist_category(tool_name: str) -> str | None:
-    if tool_name in _WORKSPACE_EDIT_TOOLS:
-        return ALLOWLIST_FILE_EDITS
-    if tool_name in _SHELL_TOOLS:
-        return ALLOWLIST_SHELL
-    return None
-
-
-def categories_for_interrupt(value: Any) -> frozenset[str]:
-    if not isinstance(value, dict):
-        return frozenset()
-    action_requests = value.get("action_requests")
-    if not isinstance(action_requests, list):
-        return frozenset()
-    categories: set[str] = set()
-    for action in action_requests:
-        if not isinstance(action, dict):
-            continue
-        category = tool_allowlist_category(str(action.get("name") or ""))
-        if category:
-            categories.add(category)
-    return frozenset(categories)
-
-
-def interrupt_matches_allowlist(value: Any, allowlist: ToolAllowlist) -> bool:
-    categories = categories_for_interrupt(value)
-    if not categories:
-        return False
-    return all(allowlist.contains(category) for category in categories)
-
-
-def always_allow_categories(value: Any) -> frozenset[str]:
-    """Categories a front end may offer to 'always allow' for this interrupt.
-
-    Mirrors the TUI's policy so every interface behaves the same: shell approvals
-    are deliberately one-off (a blanket 'always allow shell' is too broad), so a
-    shell-only interrupt offers nothing; file edits and other categories do.
-    """
-    categories = categories_for_interrupt(value)
-    if not categories or categories == {ALLOWLIST_SHELL}:
-        return frozenset()
-    return categories
 
 
 def parse_approval_mode(value: str | None) -> ApprovalMode:
@@ -139,49 +75,114 @@ def parse_approval_mode(value: str | None) -> ApprovalMode:
     )
 
 
-def interrupt_on_for_mode(mode: ApprovalMode) -> dict[str, InterruptOnConfig]:
-    """Map an approval mode to Deep Agents ``interrupt_on`` configuration."""
+def _actions(value: Any) -> list[dict[str, Any]]:
+    """The ``action_requests`` of an interrupt payload (empty when malformed)."""
 
-    if mode == ApprovalMode.AUTO:
-        return {}
-    if mode == ApprovalMode.WORKSPACE:
-        # "Accept edits" auto-allows exactly the workspace edit tools; anything
-        # else that is gated at all stays gated, so a newly gated tool is not
-        # silently waved through by this mode.
-        full = interrupt_on_config()
-        return {name: cfg for name, cfg in full.items() if name not in _WORKSPACE_EDIT_TOOLS}
-    return interrupt_on_config()
+    actions = value.get("action_requests") if isinstance(value, dict) else None
+    if not isinstance(actions, list):
+        return []
+    return [action for action in actions if isinstance(action, dict)]
 
 
-def interrupt_is_workspace_edits_only(value: Any) -> bool:
-    """True when every action in an interrupt is write_file or edit_file."""
+class ApprovalPolicy:
+    """Decides, for each gated tool call, whether a person must approve it.
 
-    if not isinstance(value, dict):
-        return False
-    action_requests = value.get("action_requests")
-    if not isinstance(action_requests, list) or not action_requests:
-        return False
-    for action in action_requests:
-        if not isinstance(action, dict):
+    One per session, held by the session host and read by the agent graph, so
+    front ends change the mode and "always allow" here and nowhere else.
+    """
+
+    def __init__(
+        self, mode: ApprovalMode | str | None = None, *, workspace: Path | None = None
+    ) -> None:
+        self.mode = mode if isinstance(mode, ApprovalMode) else parse_approval_mode(mode)
+        self._workspace = workspace
+        self._allow_edits = False
+        self._frozen: dict[str, bool] = {}
+
+    @property
+    def allowlist(self) -> frozenset[str]:
+        """The categories this session always allows."""
+        return frozenset({ALLOWLIST_FILE_EDITS}) if self._allow_edits else frozenset()
+
+    def allow(self, category: str) -> None:
+        """Always allow ``category`` for the rest of the session (file edits only)."""
+        if category == ALLOWLIST_FILE_EDITS:
+            self._allow_edits = True
+
+    def needs_approval(self, name: str, args: Any) -> bool:
+        """Whether a call to tool ``name`` with ``args`` must wait for a person."""
+        if name not in _APPROVAL_TOOLS or self.mode is ApprovalMode.AUTO:
             return False
-        if action.get("name") not in _WORKSPACE_EDIT_TOOLS:
-            return False
-    return True
+        if name in _EDIT_TOOLS and (self.mode is ApprovalMode.WORKSPACE or self._allow_edits):
+            return not self._in_workspace(args)
+        return True
+
+    def _in_workspace(self, args: Any) -> bool:
+        path = args.get("file_path") if isinstance(args, dict) else None
+        return isinstance(path, str) and (
+            resolve_in_workspace(path, workspace=self._workspace) is not None
+        )
+
+    def gate(self, request: Any) -> bool:
+        """The ``when`` check on every gated tool: interrupt for this call?
+
+        The answer is frozen per tool call. Resuming a paused turn runs the check
+        again for the same model message, and the calls it picks must match the
+        decisions sent, or deepagents raises; worse, a call it now lets through
+        would run whatever the decision was.
+        """
+        call = request.tool_call
+        call_id = call.get("id")
+        if not call_id:
+            return self.needs_approval(call["name"], call.get("args"))
+        if call_id not in self._frozen:
+            self._frozen[call_id] = self.needs_approval(call["name"], call.get("args"))
+        return self._frozen[call_id]
+
+    def settled(self) -> None:
+        """Forget the frozen answers once a turn ends with nothing pending."""
+        self._frozen.clear()
+
+    def approves(self, interrupts: Iterable[SupportsInterrupt]) -> bool:
+        """Whether every action of these pending interrupts is now allowed.
+
+        True after a change such as switching to auto, so the front end can
+        resume a card that no longer needs anyone.
+        """
+        actions = [action for interrupt in interrupts for action in _actions(interrupt.value)]
+        return bool(actions) and not any(
+            self.needs_approval(str(action.get("name") or ""), action.get("args"))
+            for action in actions
+        )
+
+    def always_allow_offer(self, value: Any) -> frozenset[str]:
+        """What a card may offer to "always allow": file edits, when that is all it holds.
+
+        Offered only when every action is an edit inside the workspace, so the
+        choice never covers a delete, a shell command, or a file elsewhere.
+        """
+        actions = _actions(value)
+        if actions and all(
+            action.get("name") in _EDIT_TOOLS and self._in_workspace(action.get("args"))
+            for action in actions
+        ):
+            return frozenset({ALLOWLIST_FILE_EDITS})
+        return frozenset()
 
 
-def should_auto_approve_interrupt(
-    value: Any,
-    mode: ApprovalMode,
-    *,
-    allowlist: ToolAllowlist | None = None,
-) -> bool:
-    if allowlist is not None and interrupt_matches_allowlist(value, allowlist):
-        return True
-    if mode == ApprovalMode.AUTO:
-        return True
-    if mode == ApprovalMode.WORKSPACE:
-        return interrupt_is_workspace_edits_only(value)
-    return False
+def interrupt_on_config(policy: ApprovalPolicy | None = None) -> dict[str, InterruptOnConfig]:
+    """``interrupt_on`` map keyed by tool name (used by `create_deep_agent`).
+
+    With a ``policy``, each tool interrupts only for the calls the policy says
+    need a person; without one, every call interrupts.
+    """
+
+    config: dict[str, InterruptOnConfig] = {}
+    for name, description in _APPROVAL_TOOLS.items():
+        config[name] = {"allowed_decisions": ["approve", "reject"], "description": description}
+        if policy is not None:
+            config[name]["when"] = policy.gate
+    return config
 
 
 # ---------------------------------------------------------------------------

@@ -42,12 +42,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from makker.agent.approval import (
-    SUPPORTED_APPROVAL_DECISIONS,
-    ToolAllowlist,
-    build_resume_payload,
-    categories_for_interrupt,
-)
+from makker.agent.approval import SUPPORTED_APPROVAL_DECISIONS, build_resume_payload
 from makker.agent.capabilities import (
     HttpToolSpec,
     host_context_capability,
@@ -1651,9 +1646,6 @@ class _StreamState:
         self._tool_render_at: dict[str, float] = {}
         self._tool_delta_wire: dict[str, dict[str, Any]] = {}
         self._tool_flush: dict[str, asyncio.Task[None]] = {}
-        # Tool categories the user chose to "always allow" this session; future
-        # matching interrupts auto-approve without asking again (like the TUI).
-        self._allowlist = ToolAllowlist()
         # This connection's popout views: live URL -> route id, so a close can
         # only release a route this connection's own popouts created.
         self._popouts: dict[str, str] = {}
@@ -1817,7 +1809,7 @@ class _StreamState:
                     return
                 self._host.reconfigure(model=arg)
             elif command == "set_approval":
-                self._host.reconfigure(approval_mode=arg)
+                self._host.set_approval_mode(arg)
                 # A pending approval the new policy already allows resumes now
                 # instead of waiting for a decision that is a foregone conclusion.
                 await self._auto_resolve_pending()
@@ -1855,12 +1847,13 @@ class _StreamState:
             # Never read a missing or misspelt decision as an approval.
             await _safe_send(self._ws, protocol.error_to_wire(f"unknown decision {kind!r}"))
             return
-        # "always_allow" is approve plus a session policy: remember this interrupt's
-        # categories so future matching ones auto-approve (see _run_turn's loop).
+        # "always_allow" is approve plus a session policy: remember what these cards
+        # offered (file edits in the workspace), so later ones go through unasked.
         if kind == "always_allow":
-            for interrupt in self._pending:
-                for category in categories_for_interrupt(interrupt.value):
-                    self._allowlist.add(category)
+            approval = self._host.approval
+            offers = [approval.always_allow_offer(i.value) for i in self._pending]
+            for category in frozenset.intersection(*offers):
+                approval.allow(category)
             kind = "approve"
         decision: dict[str, str] = {"type": kind}
         text = message.get("message")
@@ -2126,23 +2119,15 @@ class _StreamState:
             return
         self._pending = list(pending)
         for interrupt in pending:
-            await _safe_send(self._ws, protocol.interrupt_to_wire(interrupt))
+            await self._send_interrupt(interrupt)
+
+    async def _send_interrupt(self, interrupt: Any) -> None:
+        offer = self._host.approval.always_allow_offer(interrupt.value)
+        await _safe_send(self._ws, protocol.interrupt_to_wire(interrupt, always_allow=offer))
 
     async def _auto_resolve_pending(self) -> None:
         """Resume a paused approval the (changed) policy now auto-allows."""
-        from makker.agent.approval import (
-            build_resume_payload,
-            parse_approval_mode,
-            should_auto_approve_interrupt,
-        )
-
-        if self._busy() or not self._pending:
-            return
-        mode = parse_approval_mode(self._host.approval_mode)
-        if not all(
-            should_auto_approve_interrupt(i.value, mode, allowlist=self._allowlist)
-            for i in self._pending
-        ):
+        if self._busy() or not self._host.approval.approves(self._pending):
             return
         payload = build_resume_payload(self._pending, {"type": "approve"})
         self._pending = []
@@ -2212,12 +2197,7 @@ class _StreamState:
             # The host owns the policy loop (auto-resume past interrupts the
             # mode or the session allowlist already allows) and the settle
             # hooks, shared with the TUI.
-            result = await self._host.drive_turn(
-                factory,
-                approval_mode=self._host.approval_mode,
-                allowlist=self._allowlist,
-                on_message=self._on_message,
-            )
+            result = await self._host.drive_turn(factory, on_message=self._on_message)
         finally:
             # A cancelled/errored turn can leave a tool mid-stream; clear streaming
             # state so a stale trailing flush can't fire on a later turn.
@@ -2232,7 +2212,7 @@ class _StreamState:
             # decision; the turn ends only once it runs to completion.
             self._turn_ended = True
             for interrupt in self._pending:
-                await _safe_send(self._ws, protocol.interrupt_to_wire(interrupt))
+                await self._send_interrupt(interrupt)
             return
         with contextlib.suppress(Exception):
             usage = protocol.usage_to_wire(result.messages)

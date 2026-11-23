@@ -224,7 +224,7 @@ async def test_write_file_requires_approval(tmp_path: Path) -> None:
             {
                 "name": "write_file",
                 "args": {"file_path": "/notes.txt", "content": "hello\n"},
-                "description": "Write a file in the workspace.",
+                "description": "Write a file.",
             }
         ]
         assert interrupt["review_configs"] == [
@@ -276,7 +276,7 @@ async def test_edit_file_requires_approval(tmp_path: Path) -> None:
                     "old_string": "hello",
                     "new_string": "goodbye",
                 },
-                "description": "Edit a file in the workspace.",
+                "description": "Edit a file.",
             }
         ]
         assert interrupt["review_configs"] == [

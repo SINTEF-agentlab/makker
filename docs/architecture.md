@@ -42,7 +42,7 @@ lifecycle has its own page: [turns](turns.md).
 A `Session` (`session.py`) is the unit of one invocation: a session id, a
 state directory, the trace log, and a handle to the Julia kernel. A
 `SessionHost` wraps it with everything needed to take a turn (the agent, the
-turn runner, rebuild-in-place for `/model` and `/approval-mode`, compaction,
+turn runner, the approval policy, rebuild-in-place for `/model`, compaction,
 titling), so front ends stay presentation-only.
 
 `build_agent` (`agent/builder.py`) assembles a

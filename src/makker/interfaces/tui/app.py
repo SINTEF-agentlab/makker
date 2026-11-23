@@ -41,11 +41,9 @@ from textual.widgets import Markdown, Static
 from makker.agent.added_dirs import AddDirError, add_dir, added_dirs
 from makker.agent.approval import (
     ApprovalMode,
-    ToolAllowlist,
+    ApprovalPolicy,
     build_resume_payload,
-    parse_approval_mode,
     pending_allowed_decisions,
-    should_auto_approve_interrupt,
 )
 from makker.agent.turns import (
     TurnInterrupt,
@@ -265,23 +263,19 @@ class TUIApp(App[None]):
         self._agent_factory = agent_factory
         self._warmup_task = warmup_task
         self._warming = warmup_task is not None and not warmup_task.done()
-        self._approval_mode = (
-            approval_mode
-            if isinstance(approval_mode, ApprovalMode)
-            else parse_approval_mode(approval_mode)
-        )
-        self._tool_allowlist = ToolAllowlist()
         # All turn driving goes through the host (the shared policy loop and
-        # settle hooks). A caller that only has the raw pieces (tests) gets a
-        # host wrapped around them.
+        # settle hooks), and the host holds the approval policy. A caller that
+        # only has the raw pieces (tests) gets a host wrapped around them.
         self._host = host or SessionHost(
             session=session,
             agent=agent,
             backend=backend,
             model=model_label,
-            approval_mode=str(self._approval_mode),
+            approval_mode=approval_mode,
             surface="tui",
         )
+        if host is not None and approval_mode is not None:
+            host.set_approval_mode(str(approval_mode))
         # Held so the fire-and-forget titling task isn't garbage-collected mid-run.
         self._title_task: Any | None = None
         self._turn_worker: Any = None
@@ -624,29 +618,17 @@ class TUIApp(App[None]):
             return True
         return False
 
+    @property
+    def _approval(self) -> ApprovalPolicy:
+        """The session's approval policy, held by the host and read by the agent."""
+        return self._host.approval
+
     async def action_cycle_approval_mode(self) -> None:
-        self._approval_mode = self._approval_mode.cycle_next()
-        label = self._approval_mode.display_label()
+        self._approval.mode = self._approval.mode.cycle_next()
+        label = self._approval.mode.display_label()
         await self._note(f"Permission mode: {label}")
         self._refresh_prompt_guide()
         await self._auto_approve_pending_if_allowed()
-        self._rebuild_for_approval_mode()
-
-    def _rebuild_for_approval_mode(self) -> None:
-        """Bake the new mode into the agent graph when it is safe to rebuild.
-
-        Mid-turn or under a pending approval the client-side policy loop
-        already applies the new mode; the rebuild happens on the next safe
-        occasion a mode change lands while idle.
-        """
-        if self._busy or self._pending_interrupts or self._agent is None:
-            return
-        try:
-            self._host.reconfigure(approval_mode=str(self._approval_mode))
-        except Exception:
-            return  # the client-side loop still applies the mode
-        self._agent = self._host.agent
-        self._backend = self._host.backend
 
     async def action_interrupt(self) -> None:
         """Ctrl+C: interrupt → copy → double-press to exit.
@@ -715,7 +697,7 @@ class TUIApp(App[None]):
             return
         option = event.option
         for category in option.allowlist_categories:
-            self._tool_allowlist.add(category)
+            self._approval.allow(category)
             label = category.replace("_", " ")
             await self._note(f"Always allow {label} for this session.")
         self._hide_approval_menu()
@@ -773,7 +755,7 @@ class TUIApp(App[None]):
             pending_count=len(self._pending_interrupts),
             tool_toggle_available=any(block.expandable for block in self._tool_blocks),
             tools_expanded=self._tools_expanded,
-            approval_mode_label=self._approval_mode.display_label(),
+            approval_mode_label=self._approval.mode.display_label(),
         )
         self._refresh_prompt_guide()
 
@@ -927,19 +909,16 @@ class TUIApp(App[None]):
     async def _command_approval_mode(self, arg: str) -> None:
         if not arg:
             await self._note(
-                f"approval mode is `{self._approval_mode.value}`. "
+                f"approval mode is `{self._approval.mode.value}`. "
                 "Usage: /approval-mode ask|workspace|auto"
             )
             return
         try:
-            self._approval_mode = parse_approval_mode(arg)
+            self._host.set_approval_mode(arg)
         except ValueError as exc:
             await self._note(str(exc))
             return
-        await self._note(
-            f"approval mode set to `{self._approval_mode.value}` for this session. "
-            "Restart Makker to change which tools interrupt at build time."
-        )
+        await self._note(f"approval mode set to `{self._approval.mode.value}` for this session.")
         await self._auto_approve_pending_if_allowed()
         self._refresh_prompt_guide()
 
@@ -1224,8 +1203,6 @@ class TUIApp(App[None]):
         try:
             result = await self._host.drive_turn(
                 lambda: self._host.runner.run_prompt(prompt, on_message=self._render_message),
-                approval_mode=self._approval_mode,
-                allowlist=self._tool_allowlist,
                 on_message=self._render_message,
             )
             await self._apply_turn_result(result)
@@ -1245,8 +1222,6 @@ class TUIApp(App[None]):
         try:
             result = await self._host.drive_turn(
                 lambda: self._host.runner.resume(resume_payload, on_message=self._render_message),
-                approval_mode=self._approval_mode,
-                allowlist=self._tool_allowlist,
                 on_message=self._render_message,
             )
             await self._apply_turn_result(result)
@@ -1331,16 +1306,7 @@ class TUIApp(App[None]):
             )
 
     def _should_auto_approve_pending(self) -> bool:
-        if not self._pending_interrupts:
-            return False
-        return all(
-            should_auto_approve_interrupt(
-                interrupt.value,
-                self._approval_mode,
-                allowlist=self._tool_allowlist,
-            )
-            for interrupt in self._pending_interrupts
-        )
+        return self._approval.approves(self._pending_interrupts)
 
     async def action_approve_pending(self) -> None:
         if not self._pending_interrupts or self._busy:
@@ -1386,15 +1352,10 @@ class TUIApp(App[None]):
 
     def _show_approval_menu(self) -> None:
         allowed = self._pending_allowed_decisions()
-        tool_names = self._pending_tool_names()
-        interrupt_values = [
-            interrupt.value if isinstance(interrupt.value, dict) else {}
-            for interrupt in self._pending_interrupts
-        ]
+        offers = [self._approval.always_allow_offer(i.value) for i in self._pending_interrupts]
         options = build_approval_options(
             allowed_decisions=allowed,
-            tool_names=tool_names,
-            interrupt_values=interrupt_values,
+            always_allow=frozenset.intersection(*offers) if offers else frozenset(),
         )
         self._approval_menu.set_options(options)
         self._approval_menu.show_menu()
@@ -1404,20 +1365,6 @@ class TUIApp(App[None]):
     def _hide_approval_menu(self) -> None:
         if self._approval_menu is not None:
             self._approval_menu.hide_menu()
-
-    def _pending_tool_names(self) -> list[str]:
-        names: list[str] = []
-        for interrupt in self._pending_interrupts:
-            value = interrupt.value if isinstance(interrupt.value, dict) else {}
-            action_requests = value.get("action_requests")
-            if not isinstance(action_requests, list):
-                continue
-            for action in action_requests:
-                if isinstance(action, dict):
-                    name = str(action.get("name") or "")
-                    if name:
-                        names.append(name)
-        return names
 
     async def _render_message(self, msg: Any) -> None:
         # TurnRunner emits exactly these four event types (see agent/turns.py);
