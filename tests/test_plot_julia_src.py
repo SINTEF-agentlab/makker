@@ -42,6 +42,7 @@ from makker.agent.plot_julia_src import (
     SCREEN_PREFERENCE_MARKER,
     WEB_LIVE_ROUTE_CAP,
     close_web_plots_call,
+    viz_route,
     web_live_call,
     web_render_call,
     web_server_start,
@@ -49,18 +50,31 @@ from makker.agent.plot_julia_src import (
 
 
 def test_web_server_start_reports_the_actual_bound_port() -> None:
-    code = web_server_start(12345, "2026-01-01-0000-abcd")
+    code = web_server_start(12345, "2026-01-01-0000-abcd", secret="s3cret")
     assert "__MAKKER_WEB_PORT__ = __MAKKER_WEB_SERVER__.port" in code
     assert "__MAKKER_WEB_PORT__ = 12345" not in code
 
 
+def test_web_server_start_keeps_and_reports_the_first_secret() -> None:
+    # A second start (the tool rebuilt mid-session) finds the server and must
+    # read its secret back, or the URLs it hands out would name dead routes.
+    code = web_server_start(12345, "2026-01-01-0000-abcd", secret="s3cret")
+    created = code.index("if !isdefined(Main, :__MAKKER_WEB_SERVER__)")
+    assert created < code.index('global __MAKKER_WEB_SECRET__ = raw"s3cret"') < code.index("end")
+    assert 'println("__MAKKER_WEB_SECRET__=", __MAKKER_WEB_SECRET__)' in code
+
+
+def test_a_live_route_carries_the_secret() -> None:
+    assert viz_route("pres", "s3cret") == "/s3cret/viz/pres"
+
+
 def test_web_server_start_sets_a_site_relative_proxy_url() -> None:
-    code = web_server_start(12345, "2026-01-01-0000-abcd")
+    code = web_server_start(12345, "2026-01-01-0000-abcd", secret="s3cret")
     assert 'proxy_url = raw"/live/2026-01-01-0000-abcd/"' in code
 
 
 def test_web_server_start_includes_base_path_in_proxy_url() -> None:
-    code = web_server_start(12345, "2026-01-01-0000-abcd", base_path="/restricted")
+    code = web_server_start(12345, "2026-01-01-0000-abcd", secret="s3cret", base_path="/restricted")
     assert 'proxy_url = raw"/restricted/live/2026-01-01-0000-abcd/"' in code
 
 
@@ -371,8 +385,8 @@ def test_live_routes_are_reported_after_they_change(tmp_path) -> None:
         route="/viz/a",
     )
     assert serve.index(LIVE_ROUTES_MARKER) > serve.index("Bonito.route!")
-    assert LIVE_ROUTES_MARKER in close_web_plots_call("a")
-    assert LIVE_ROUTES_MARKER in close_web_plots_call("")
+    assert LIVE_ROUTES_MARKER in close_web_plots_call("a", "s3cret")
+    assert LIVE_ROUTES_MARKER in close_web_plots_call("", "s3cret")
 
 
 def test_the_session_keeps_the_reported_routes() -> None:
@@ -397,7 +411,8 @@ def test_dropping_a_live_route_closes_its_page() -> None:
     assert code.index(replace) < code.index('Main.__MAKKER_WEB_FIGS__[raw"/viz/reservoir"] =')
     assert "MakkerWebViews.drop!(Main.__MAKKER_WEB_FIGS__, _victim)" in code
     for slot in ("reservoir", ""):
-        assert "MakkerWebViews.drop!(Main.__MAKKER_WEB_FIGS__, r)" in close_web_plots_call(slot)
+        close = close_web_plots_call(slot, "s3cret")
+        assert "MakkerWebViews.drop!(Main.__MAKKER_WEB_FIGS__, r)" in close
 
 
 def test_live_call_caps_the_route_registry() -> None:

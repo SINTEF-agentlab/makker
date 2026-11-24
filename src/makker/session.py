@@ -284,6 +284,9 @@ class Session:
     # reverse proxy reads this to know which local port to forward a live plot's
     # traffic to, so the browser never needs its own route to that ephemeral port.
     web_plot_port: int | None = None
+    # The secret in that server's figure routes (``plot_julia_src.viz_route``),
+    # which makes a live plot's URL the capability to view it.
+    web_plot_secret: str | None = None
     # The live figures that server still serves (its routes), as the kernel last
     # reported them. A replay offers a live view only of these; a figure closed or
     # released since then shows its poster instead of a dead page.

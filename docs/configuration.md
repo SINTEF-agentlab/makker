@@ -83,6 +83,7 @@ so a stale shell variable can't silently override a key you just changed.
 | `MAKKER_REVIEW` | Developer tool: set to `1` to auto-review every finished turn (see [session review](review.md)) |
 | `MAKKER_REVIEW_MODEL` | Model the reviewer uses (default `openai:gpt-5.4`) |
 | `XDG_DATA_HOME` | Relocates the state home (`<value>/makker`) |
+| `MAKKER_SERVER_TOKEN` | The token the web server asks for, in place of the one in the state home (for a launcher that builds the link itself) |
 
 ## What lives where
 
@@ -104,6 +105,7 @@ In the state home (default `~/.local/share/makker/`):
 ```
 config.toml              # user config
 .env                     # saved API keys (owner-only)
+server-token             # the web server's token (owner-only)
 workspaces/<hash>/
   memory/                # the workspace's agent-maintained memory
   sessions/<id>/

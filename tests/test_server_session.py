@@ -1057,7 +1057,7 @@ def _plot_eval_handler(code: str):
     from makker.julia.session import EvalResult
 
     if "Bonito.Server" in code and "__MAKKER_WEB_PORT__" in code:
-        return EvalResult(output="__MAKKER_WEB_PORT__=9123")
+        return EvalResult(output="__MAKKER_WEB_PORT__=9123\n__MAKKER_WEB_SECRET__=s3cret")
     if "get(Main.__MAKKER_WEB_FIGS__" in code:  # a refit: echo the requested size
         m = re.search(r"resize!\(_fig, (\d+), (\d+)\)", code)
         return EvalResult(output=f"{jl.FIG_SIZE_MARKER}={m.group(1)}x{m.group(2)}")
@@ -1120,7 +1120,7 @@ async def test_replot_revive_reserves_route_and_revives_view(tmp_path: Path) -> 
     await st._replot_turn("artifacts/res.png", "revive", None)
     viz = next(m for m in ws.sent if m["type"] == "viz")
     assert viz["live"] is True
-    assert viz["url"] == f"/live/{session.session_id}/viz/res"
+    assert viz["url"] == f"/live/{session.session_id}/s3cret/viz/res"
     assert viz["slot"] == "res"
     assert viz["record"] == "artifacts/res.png"
     assert (viz["width"], viz["height"]) == (1600, 900)
@@ -1210,11 +1210,12 @@ async def test_refit_resizes_the_live_figure_in_place(tmp_path: Path) -> None:
     # states drop the request silently; the client's scaled presentation is
     # the always-correct fallback.
     st, ws, session = _plot_state(tmp_path)
+    session.web_plot_secret = "s3cret"  # the live server that serves the figure
     await st.handle({"type": "refit", "record": "artifacts/res.png", "width": 1200, "height": 1000})
     await asyncio.gather(*st._refits)
     call = session.julia.calls[-1]
     assert "resize!(_fig, 1200, 1000)" in call
-    assert 'raw"/viz/res"' in call
+    assert 'raw"/s3cret/viz/res"' in call
     done = next(m for m in ws.sent if m["type"] == "refit_done")
     assert (done["record"], done["width"], done["height"]) == ("artifacts/res.png", 1200, 1000)
     assert not any(m["type"] == "viz" for m in ws.sent)  # in place: no re-pin

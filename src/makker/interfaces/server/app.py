@@ -49,7 +49,7 @@ from makker.agent.capabilities import (
     http_tool_capability,
 )
 from makker.interfaces.server import protocol
-from makker.interfaces.server.access import OriginGuard, request_is_local
+from makker.interfaces.server.access import OriginGuard, TokenGuard, request_is_local
 from makker.interfaces.server.manager import SessionBusyError, SessionManager
 from makker.interfaces.server.updates import BOOT_ID, Updater, UpdateRefused
 from makker.preview import TOOL_STREAM_RENDER_INTERVAL, TOOL_STREAM_TAIL_CAP
@@ -407,6 +407,7 @@ def create_app(
     updater: Updater | None = None,
     local_only: bool = False,
     allowed_origins: Sequence[str] = (),
+    token: str | None = None,
 ) -> FastAPI:
     # The launch-wide knobs (folder-fixed) ride in the default manager's host
     # factory; an injected manager (tests) brings its own. The model is a default
@@ -449,8 +450,12 @@ def create_app(
         # Embedded or under test: report updates, but never run one.
         updater = Updater(workspace_root(), local=False)
     app.state.updater = updater
-    # Only this server's own pages may drive it; see interfaces/server/access.py.
-    # ``local_only`` (a server for this computer only) also checks Host.
+    # Only those with the token, and only from this server's own pages, may drive
+    # it; see interfaces/server/access.py. ``local_only`` (a server for this
+    # computer only) also checks Host. Without a token (tests, an embedding host
+    # that controls access itself) anyone who reaches the port may.
+    if token is not None:
+        app.add_middleware(TokenGuard, token=token, base_path=base, open_prefixes=("/live/",))
     app.add_middleware(OriginGuard, local_only=local_only, allowed_origins=allowed_origins)
 
     @app.get("/models")
@@ -953,8 +958,14 @@ def create_app(
             raise HTTPException(status_code=404, detail="no such plot route")
         if not (100 <= w <= 8192 and 100 <= h <= 8192):
             raise HTTPException(status_code=404, detail="implausible figure size")
+        from makker.agent.plot_julia_src import viz_route
+
+        host = manager.get(session_id)
+        secret = host.session.web_plot_secret if host is not None else None
+        if secret is None:
+            raise HTTPException(status_code=404, detail="no live plot server for this session")
         bp = getattr(app.state, "base_path", "") or ""
-        src = public_url(bp, f"/live/{quote(session_id)}/viz/{quote(route)}")
+        src = public_url(bp, f"/live/{quote(session_id)}{viz_route(quote(route), secret)}")
         refit = public_url(bp, f"/popout/{quote(session_id)}/refit?route={quote(route)}")
         return HTMLResponse(
             _POPOUT_WRAPPER_HTML.replace("__SRC__", src)
@@ -2067,7 +2078,9 @@ class _StreamState:
 
         with contextlib.suppress(Exception):
             result = await asyncio.wait_for(
-                self._host.session.julia.eval(jl.close_web_plots_call(route_id)),
+                self._host.session.julia.eval(
+                    jl.close_web_plots_call(route_id, self._host.session.web_plot_secret or "")
+                ),
                 REFIT_TIMEOUT_S,
             )
             note_live_routes(self._host.session, result.output)

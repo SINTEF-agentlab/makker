@@ -388,23 +388,51 @@ alongside the application. That is enough for local use and for demonstrations. 
 that setting the agent's access to the workspace, the shell, and Julia is
 appropriate, because the user is trusted.
 
-Serving it to several external users is a later and deliberate step, and the
-design keeps room for it. A session can be scoped to its own workspace directory,
-the service can require authentication, and a session can be run in its own
-isolated process. Until that isolation is in place the service should not be
-exposed to untrusted users, because the agent has real access to the machine it
-runs on.
+A server belongs to the user who started it, and asks for that user's token
+(below), so other users of a shared machine can't use it. Serving one server to
+several users is a later and deliberate step, and the design keeps room for it. A
+session can be scoped to its own workspace directory, and run in its own isolated
+process. Until that isolation is in place a server should not be shared with
+other users, because the agent has real access to the machine it runs on.
 
-### Which pages may use it
+### Who may use it
 
-A browser lets any website send requests to `127.0.0.1` and open WebSockets to
-it, so the server turns away pages that aren't its own. A WebSocket, or a request
-that changes something, is only answered when the browser's `Origin` is the
-server's own: the host the request was sent to, or the `X-Forwarded-Host` a
-reverse proxy passed on. A server bound to localhost also answers only to
-localhost names, so a site can't point its own domain at `127.0.0.1` and pass as
-the server's page. Programs that aren't browsers send no `Origin` and are not
-affected.
+Whoever can drive a session can run code as the user who started the server,
+and on a shared machine other users' programs can reach its port too. So every
+request carries the server's token, in one of three ways:
+
+- **A browser** opens the link `makker` prints at launch, which ends in
+  `?token=…`. The server answers with a cookie and reloads the page without the
+  token. The cookie stays for a year, and the token survives a restart. So a
+  bookmark of the plain address keeps working after the link has been opened
+  once. The cookie is `SameSite=Strict`: another site can't open the UI as you,
+  in a frame or in a new tab.
+- **A script** sends `Authorization: Bearer <token>`.
+- **A program that opens the UI**, or a WebSocket from one, adds `?token=<token>`
+  to the address.
+
+The token is in `server-token` in the [state home](configuration.md#what-lives-where),
+readable by you only; delete it to make a new one. A launcher that builds the
+link itself (an SSO wrapper, a desktop application) can set
+`MAKKER_SERVER_TOKEN` to choose the token instead.
+
+Live plots are the exception, and carry their own capability. Each session's
+plot server picks a secret, and every figure's address contains it:
+`/live/<session>/<secret>/viz/<plot>`. Holding that address is what it takes to
+view the figure and use its widgets, without the token. So a live plot can be
+shown where no cookie reaches, such as another application's frame or browser
+pane, without handing out the token, which opens everything. The plot server
+itself listens on a local port of its own, but answers with a figure only to an
+address that names the secret.
+
+A browser also lets any website send requests to `127.0.0.1` and open WebSockets
+to it, so the server turns away pages that aren't its own as well. A WebSocket,
+or a request that changes something, is only answered when the browser's
+`Origin` is the server's own: the host the request was sent to, or the
+`X-Forwarded-Host` a reverse proxy passed on. A server bound to localhost also
+answers only to localhost names, so a site can't point its own domain at
+`127.0.0.1` and pass as the server's page. Programs that aren't browsers send no
+`Origin` and are not affected.
 
 A front end served from another origin (your own web app, say) must be allowed
 by name:
@@ -413,7 +441,8 @@ by name:
 makker --allowed-origin https://app.example.org
 ```
 
-Behind a reverse proxy (`--base-path`), the `Host` check is off, since the
+Behind a reverse proxy (`--base-path`), the link to open is the proxy's address
+with the prefix and `?token=…`. The `Host` check is off, since the
 proxy's public name arrives there, but `Origin` is still checked. A proxy that
 rewrites `Host` should pass the original on in `X-Forwarded-Host`; otherwise
 allow its public origin with `--allowed-origin`. The server log names any origin

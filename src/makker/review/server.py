@@ -12,9 +12,15 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
+from makker.interfaces.server.access import OriginGuard
 from makker.review.dashboard import render_page
 
 _STATUS = {"resolve": "fixed", "dismiss": "dismissed", "reopen": "open"}
+
+# The web server's checks, used here for the checks alone: only the dashboard's
+# own page, opened at a localhost address, may use it. Otherwise any site could
+# delete issues, or point its own domain at 127.0.0.1 and read the transcripts.
+_GUARD = OriginGuard(None, local_only=True)
 
 
 def _apply_action(action: str, issue_id: str) -> tuple[bool, str]:
@@ -50,7 +56,15 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _refused(self) -> bool:
+        reason = _GUARD.refusal("http", self.command, self.headers)
+        if reason is not None:
+            self._send(403, reason.encode(), "text/plain")
+        return reason is not None
+
     def do_GET(self) -> None:
+        if self._refused():
+            return
         url = urlsplit(self.path)
         if url.path in ("/", "/index.html"):
             self._send(200, render_page().encode("utf-8"), "text/html; charset=utf-8")
@@ -78,6 +92,8 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(200, render_trace_html(session.trace_path).encode("utf-8"), "text/html")
 
     def do_POST(self) -> None:
+        if self._refused():
+            return
         if urlsplit(self.path).path != "/api/action":
             self._send(404, b"not found", "text/plain")
             return

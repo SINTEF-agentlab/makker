@@ -59,7 +59,7 @@ def _force_utf8_streams() -> None:
 HELP = """usage: makker [<command>] [options]
 
 With no command, Makker starts the web UI for the current folder: chat
-with interactive plots and reports, in the browser at http://127.0.0.1:8742.
+with interactive plots and reports, in the browser at the link it prints.
 
   makker                  Web UI (`makker web` is the same).
   makker tui              Terminal UI.

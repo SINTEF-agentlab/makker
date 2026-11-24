@@ -53,7 +53,7 @@ looks wrong. Keep it current with `makker upgrade`.
 
 One folder is bound to one simulator and its Julia environment, so use a
 separate folder for each. `makker` with no command serves the web UI at
-<http://127.0.0.1:8742>, locally for a single trusted user; `makker tui`
+<http://127.0.0.1:8742> and prints the link to open it with; `makker tui`
 is the terminal alternative. The full [installation and usage
 guide](https://sintef-agentlab.github.io/makker/usage/) covers workspaces,
 interfaces, and models; to work on Makker itself, clone the repo (see
