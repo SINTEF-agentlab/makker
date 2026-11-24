@@ -570,7 +570,6 @@ class WorkspaceConfig:
 
     simulator: str | None = None
     simulators: dict[str, SimulatorConfig] = field(default_factory=dict)
-    approval_mode: str | None = None
     model: str | None = None
     # ``[julia] sysimage``: whether this workspace runs from a custom Julia system
     # image. ``None`` means unset, which is what lets a command-line flag and the
@@ -591,7 +590,6 @@ def load_workspace_config(workspace: Path | None = None) -> WorkspaceConfig:
     data = tomllib.loads(path.read_text(encoding="utf-8"))
 
     sim_name = (data.get("workspace") or {}).get("simulator")
-    approval_mode = (data.get("workspace") or {}).get("approval_mode")
     model = data.get("model")
     sysimage = (data.get("julia") or {}).get("sysimage")
     simulators_raw = data.get("simulator") or {}
@@ -607,7 +605,6 @@ def load_workspace_config(workspace: Path | None = None) -> WorkspaceConfig:
     return WorkspaceConfig(
         simulator=sim_name,
         simulators=simulators,
-        approval_mode=approval_mode,
         model=model if isinstance(model, str) else None,
         sysimage=sysimage if isinstance(sysimage, bool) else None,
     )
@@ -642,8 +639,6 @@ def write_workspace_config(
     workspace_lines: list[str] = []
     if config.simulator:
         workspace_lines.append(f'simulator = "{config.simulator}"')
-    if config.approval_mode:
-        workspace_lines.append(f'approval_mode = "{config.approval_mode}"')
     if workspace_lines:
         if lines:
             lines.append("")

@@ -236,8 +236,9 @@ def run(args: argparse.Namespace) -> int:
     config = load_workspace_config(ws)
     # Defaults for every session this server creates (same precedence as the
     # TUI/run: flag, then the folder's saved config). The UI can still change the
-    # model and approval policy per session; the rest are fixed to the folder.
-    approval_mode = args.approval_mode or config.approval_mode
+    # model and approval policy per session; the rest are fixed to the folder. The
+    # approval policy is never the folder's: it comes from the flag or the UI.
+    approval_mode = args.approval_mode
     model = args.model or config.model
     add_dirs = resolve_add_dirs(args.add_dir, ws)
 

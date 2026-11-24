@@ -38,8 +38,9 @@ an edit to a file outside the workspace.
 | `workspace` ("accept edits") | allow `write_file`/`edit_file` inside the workspace; prompt for the rest |
 | `auto` | allow all four |
 
-Set it at launch (`--approval-mode`), in the workspace config, with
-`/approval-mode` in the TUI and web UI, or cycle with `Shift+Tab` in the TUI.
+Set it at launch (`--approval-mode`), with `/approval-mode` in the TUI and
+web UI, or cycle with `Shift+Tab` in the TUI. A folder never sets it, so a
+folder from someone else can't turn approval off.
 A change applies from the agent's next tool call, mid-turn included, and a
 pending approval the new mode allows is resumed at once. Headless runs cannot
 prompt, so a gated call under `ask` ends the turn with an error; scripts and
