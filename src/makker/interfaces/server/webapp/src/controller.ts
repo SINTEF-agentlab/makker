@@ -87,9 +87,11 @@ export class Controller {
   // The composer registers a sink so an uploaded file's path can be appended to the
   // message box, whether the upload came from the attach button or a drag-drop.
   private composerSink: ((text: string) => void) | null = null;
-  // A prompt the user sent while no socket was open (before the first session is
-  // ready, or during a reconnect); delivered once a socket opens.
+  // A prompt the user sent while no socket was ready (before the first session is
+  // ready, or during a reconnect); delivered once the session's snapshot arrives.
   private queuedPrompt: string | null = null;
+  // Said in the thread once the session's snapshot has replaced it.
+  private arrivalNote: string | null = null;
   // True while a reconnect is in flight, so a second trigger does not start another.
   private recovering = false;
   // Bumped per reenter so a superseding one (e.g. a sidebar switch during a reconnect)
@@ -116,6 +118,9 @@ export class Controller {
       (msg) => this.effects(msg),
       () => void this.reconnect(),
       () => {
+        // The snapshot replaced the thread, so show the prompt that has just
+        // gone out after it again.
+        if (this.queuedPrompt) this.s.startTurn(this.queuedPrompt);
         this.queuedPrompt = null;
       },
     );
@@ -209,8 +214,9 @@ export class Controller {
     if (this.starting) return;
     this.starting = true;
     // Supersede any in-flight reenter: starting fresh (init or /new) must win over a
-    // reconnect that is still trying to get back to the old session.
-    this.reenterSeq++;
+    // reconnect that is still trying to get back to the old session. A reenter
+    // started after this one supersedes it in turn (a past chat clicked meanwhile).
+    const seq = ++this.reenterSeq;
     const { sim, branding } = this.s;
     const label = branding?.display_name || sim;
     this.store.setState({
@@ -222,6 +228,7 @@ export class Controller {
         host_context: hostContext.current() ?? undefined,
         host_api: hostApiUrl ?? undefined,
       });
+      if (seq !== this.reenterSeq) return;
       this.s.setSession(session_id, "");
       this.store.setState({ meta: this.meta() });
       this.transport.open(session_id);
@@ -393,11 +400,15 @@ export class Controller {
     if (!this.queuedPrompt) return;
     this.sendCanvasHint();
     this.transport.send({ type: "prompt", text: this.queuedPrompt });
-    this.queuedPrompt = null;
+    // Buffered until the snapshot arrives: the copy stays until then (see `onOpen`).
+    if (this.transport.isOpen()) this.queuedPrompt = null;
   }
 
   private effects(msg: ServerMessage): void {
-    if (msg.type === "turn_end") {
+    if (msg.type === "snapshot") {
+      if (this.arrivalNote) this.s.addSysNote(this.arrivalNote);
+      this.arrivalNote = null;
+    } else if (msg.type === "turn_end") {
       this.refreshHistory();
       if (!msg.cancelled) this.notifyDone("The agent finished your turn.");
     } else if (msg.type === "ui" && msg.action === HISTORY_CHANGED) {
@@ -793,22 +804,21 @@ export class Controller {
     try {
       await this.reenter(id);
     } catch (e) {
-      this.store.setState({ meta: "could not resume" });
+      // The page is still on the session it showed, socket and all.
+      this.store.setState({ meta: this.meta() });
       this.s.addSysNote(failureMessage(e, "Could not resume that session."), "warn");
     }
   }
 
   // Reopen a session: reattach to it if the server kept it live (its Julia REPL
-  // survives), otherwise resume it from disk (a fresh kernel). Throws on failure;
-  // callers decide how to report it.
+  // survives), otherwise resume it from disk (a fresh kernel). The new socket's
+  // first message is the session as the server has it, a turn still running
+  // included, and it replaces the page. Until the resume answers, the page stays
+  // on the session it shows, so a refused switch (the session is open in another
+  // tab) leaves that one working. Throws on failure; callers decide how to report it.
   private async reenter(id: string): Promise<void> {
     const seq = ++this.reenterSeq;
     const stale = () => seq !== this.reenterSeq; // a newer reenter superseded this one
-    // Reconnecting to the current session (vs switching to a different one): if the
-    // server kept it live, the thread, canvas, and any pending approval are already
-    // correct, so reattach without wiping and re-fetching the conversation.
-    const reconnecting = id === this.s.sessionId;
-    this.transport.close();
     const resuming = `resuming ${this.s.sim ?? ""}…`;
     this.store.setState({ meta: resuming });
     // A reattach answers at once, but a resume from disk prepares the Julia
@@ -837,22 +847,13 @@ export class Controller {
       this.refreshVersions();
     }
     if (stale()) return;
-    // Liveness is already decided by the time the resume answers, so mark it now
-    // rather than after the replay below, which waits on the whole conversation.
-    void this.refreshHistory();
-    if (!(reconnecting && body.kernel_restarted === false)) {
-      // A from-disk resume or a switch to another session: rebuild from the record.
-      // Lay the history down before opening the socket so a live frame can't
-      // interleave with the replay.
-      this.s.reset();
-      this.s.setSession(body.session_id, "");
-      this.s.replay(await api.messages(id));
-      if (stale()) return;
-    }
+    void this.refreshHistory(); // liveness is decided by now
+    this.transport.close();
+    this.s.setSession(body.session_id, "");
     this.store.setState({ meta: this.meta() });
+    this.arrivalNote = body.kernel_restarted === false ? REATTACHED_NOTE : RESTARTED_NOTE;
     this.transport.open(body.session_id);
     this.flushQueuedPrompt();
-    this.s.addSysNote(body.kernel_restarted === false ? REATTACHED_NOTE : RESTARTED_NOTE);
   }
 
   // Recover after the socket dropped (a network blip, sleep/wake, or a proxy idle

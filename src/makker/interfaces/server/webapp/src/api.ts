@@ -2,7 +2,6 @@
 // typed. Mirrors the FastAPI routes in interfaces/server/app.py.
 
 import type { HostContext } from "./hostContext";
-import type { ReplayMessage } from "./protocol";
 import { withBase } from "./basePath";
 
 export interface ModelInfo {
@@ -213,14 +212,6 @@ export const api = {
       { sessions: [] },
     );
     return data.sessions;
-  },
-
-  messages: async (id: string): Promise<ReplayMessage[]> => {
-    const data = await getJSON<{ messages: ReplayMessage[] }>(
-      `/sessions/${id}/messages`,
-      { messages: [] },
-    );
-    return data.messages;
   },
 
   // `host_context` is the embedding application's current selection and

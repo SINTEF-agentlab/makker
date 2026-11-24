@@ -143,6 +143,8 @@ class SessionManager:
         # Sessions being stood up right now: not registered yet, but already
         # preparing the Julia environment and starting a kernel.
         self._starting = 0
+        # Resumes in flight, by session id; see ``resume``.
+        self._resuming: dict[str, asyncio.Future[SessionHost]] = {}
 
     async def create(
         self,
@@ -179,6 +181,23 @@ class SessionManager:
         workspace: Any | None = None,
         extensions: Sequence[Capability] = (),
     ) -> SessionHost:
+        """Stand ``session_id`` up from disk; a resume already under way is joined.
+
+        Two at once (two tabs, or a retry while the first still prepares the
+        environment) would start two kernels, and registering the second would
+        close the first under whichever socket had attached to it.
+        """
+        task = self._resuming.get(session_id)
+        if task is None:
+            task = asyncio.ensure_future(
+                self._resume(session_id, sim, model, approval_mode, workspace, extensions)
+            )
+            self._resuming[session_id] = task
+            task.add_done_callback(lambda _t: self._resuming.pop(session_id, None))
+        # Shielded: a caller that goes away (a closed tab) leaves the resume to finish.
+        return await asyncio.shield(task)
+
+    async def _resume(self, session_id, sim, model, approval_mode, workspace, extensions):
         self._starting += 1
         try:
             host = await self._host_factory(

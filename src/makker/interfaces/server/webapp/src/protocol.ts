@@ -77,7 +77,11 @@ export type ServerMessage =
   | { type: "notice"; text: string }
   | { type: "ui"; action: string; payload: Record<string, unknown> }
   | { type: "credential_required"; provider: string; label: string; env_var: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  /** The first message on every connection: the session as it stands. `messages`
+   *  replays the record; while `busy`, a turn is running and `turn` holds what it
+   *  has sent so far, applied as if this page had been connected all along. */
+  | { type: "snapshot"; messages: ReplayMessage[]; turn: ServerMessage[]; busy: boolean };
 
 export type ServerMessageType = ServerMessage["type"];
 
@@ -105,9 +109,9 @@ export type ClientMessage =
   | { type: "host_context"; context: Record<string, unknown> | null };
 
 /**
- * One recorded item from `GET /sessions/{id}/messages`, replayed to reconstruct a
- * resumed conversation. A superset of the live stream: it also carries the `user`
- * and `assistant` text the live path delivers as bubbles and `text` deltas.
+ * One recorded item of a `snapshot`, replayed to reconstruct the conversation. A
+ * superset of the live stream: it also carries the `user` and `assistant` text the
+ * live path delivers as bubbles and `text` deltas.
  */
 export type ReplayMessage =
   | { type: "user"; text: string }

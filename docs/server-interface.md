@@ -73,10 +73,8 @@ the server's bound simulator, and returns a session id. The create request can
 also carry declarative tool specs, so an application in any language gives the
 agent its own operations without a Python plug-in (see
 [building your application](extending-for-your-application.md)). An earlier
-session can be reopened by id, because conversation state is kept per session;
-`/sessions/{id}/messages` then replays the whole conversation (text, reasoning,
-tool cards and their results, and views) so a reopened chat is reconstructed
-inline as it was left. If the session is still live on the server (its kernel is
+session can be reopened by id, because conversation state is kept per session.
+If the session is still live on the server (its kernel is
 up), resume reattaches to it with the Julia REPL state intact; if it has since
 been reclaimed, resume restarts the kernel from disk (the conversation and files
 return, in-memory REPL state does not). The response's `kernel_restarted` flag
@@ -93,6 +91,15 @@ run a tool that has side effects, the server sends an approval request and waits
 for the front end to send a decision. The front end can also cancel a running
 turn.
 
+A turn belongs to the session, not to the socket that started it: closing the
+socket (switching chats, a dropped connection, a closed tab) leaves it running,
+and only a cancel stops it. So every connection opens with a `snapshot` of the
+session: the whole conversation replayed (text, reasoning, tool cards and their
+results, and views), and, while a turn is running, everything that turn has sent
+so far. A front end that applies it shows the session exactly as one that never
+left, then follows the turn live. One socket at a time may hold a session; a
+second is refused while the first is open.
+
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `POST` | `/sessions` | Create a session and return its id (optionally with the host app's `tools` and `host_context`) |
@@ -100,7 +107,7 @@ turn.
 | `GET` | `/sessions/history` | List resumable sessions on disk (title, time, simulator) |
 | `POST` | `/sessions/{id}/resume` | Reopen an earlier session (reattaches if still live, else restarts its kernel; `kernel_restarted` says which) |
 | `DELETE` | `/sessions/{id}` | Close a session |
-| `GET` | `/sessions/{id}/messages` | The full conversation (text, reasoning, tool calls and results, views), for replaying a resumed session inline |
+| `GET` | `/sessions/{id}/messages` | The full conversation (text, reasoning, tool calls and results, views), replayed as a connection's `snapshot` gives it |
 | `GET` | `/sessions/{id}/artifacts/{path}` | Fetch a file the session produced |
 | `GET` | `/sessions/{id}/transcript` | The transcript (`?format=html` or `md`) |
 | `GET` | `/sessions/{id}/memory` | The session's workspace memory, as a page |
@@ -126,6 +133,7 @@ Messages from the server to the front end:
 
 | Message | Carries |
 | --- | --- |
+| `snapshot` | The first message on every connection: `messages`, the conversation replayed as `/sessions/{id}/messages` gives it; `busy`, whether a turn is running; and `turn`, the messages that turn has sent so far, to apply as if they had arrived live |
 | `text` | A piece of the assistant's reply |
 | `reasoning` | A piece of the assistant's reasoning |
 | `tool` | A step in a tool call: requested, started, finished, or failed |

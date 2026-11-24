@@ -19,6 +19,7 @@ from typing import Any, ClassVar
 import pytest
 from fastapi.testclient import TestClient
 
+from _server import open_stream
 from makker.agent.capabilities import Branding, Capability
 from makker.interfaces.server.app import artifact_wire_events, create_app
 from makker.interfaces.server.manager import SessionBusyError, SessionManager
@@ -258,7 +259,7 @@ def test_set_model_prompts_for_missing_key_over_ws(
         sid = client.post("/sessions", json={"sim": "demo", "model": "ollama:qwen3"}).json()[
             "session_id"
         ]
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "command", "command": "set_model", "arg": model})
             msg = ws.receive_json()
     assert msg["type"] == "credential_required" and msg["env_var"] == env_var
@@ -544,13 +545,13 @@ def test_second_connection_to_a_session_is_refused(tmp_path: Path) -> None:
     with _client(echo_agent, tmp_path) as client:
         sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
         with (
-            client.websocket_connect(f"/sessions/{sid}/stream"),  # first holds the session
+            open_stream(client, sid),  # first holds the session
             client.websocket_connect(f"/sessions/{sid}/stream") as ws2,
         ):
             refused = ws2.receive_json()
         assert refused["type"] == "error" and "another window" in refused["message"]
         # The first socket has closed, so a fresh connection attaches and runs.
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws3:
+        with open_stream(client, sid) as ws3:
             ws3.send_json({"type": "prompt", "text": "hi"})
             assert _drain_turn(ws3)[-1]["type"] == "turn_end"
 
@@ -662,7 +663,7 @@ def test_reconfigure_keeps_state_consistent_when_build_fails(tmp_path: Path, mon
 def test_ws_streaming_prompt(tmp_path: Path) -> None:
     with _client(streaming_agent, tmp_path) as client:
         sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "prompt", "text": "hi"})
             events = _drain_turn(ws)
     texts = [e["text"] for e in events if e["type"] == "text"]
@@ -678,16 +679,23 @@ class _FakeWS:
         self.sent.append(message)
 
 
+def _stream(ws: _FakeWS, host: Any) -> Any:
+    """A session stream sending to ``ws``, as if it were attached."""
+    from makker.interfaces.server.app import _SessionStream
+
+    stream = _SessionStream(host)
+    stream._ws = ws  # type: ignore[assignment]
+    return stream
+
+
 async def test_stream_delta_renders_terminal_output_and_trailing_flushes() -> None:
     # Streamed tool output is rendered the way the TUI renders it: the accumulated
     # raw stream is replayed through the terminal emulator (a progress bar's carriage
     # returns collapse to one line, not a stack) and the client replaces the card.
     # Throttling is leading+trailing, so a delta within the interval still gets shown
     # by a trailing flush rather than lingering until the next event.
-    from makker.interfaces.server.app import _StreamState
-
     ws = _FakeWS()
-    st = _StreamState(ws, None)  # type: ignore[arg-type]
+    st = _stream(ws, SimpleNamespace(busy=False))
     cid = "c1"
 
     await st._on_tool_delta(
@@ -712,7 +720,7 @@ async def test_stream_delta_renders_terminal_output_and_trailing_flushes() -> No
 def test_ws_echo_prompt(tmp_path: Path) -> None:
     with _client(echo_agent, tmp_path) as client:
         sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "prompt", "text": "hi"})
             events = _drain_turn(ws)
     assert any(e["type"] == "text" and "Echo:" in e["text"] for e in events)
@@ -722,7 +730,7 @@ def test_ws_echo_prompt(tmp_path: Path) -> None:
 def test_ws_interrupt_then_approve(tmp_path: Path) -> None:
     with _client(interrupt_agent, tmp_path) as client:
         sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "prompt", "text": "please run"})
             paused = _drain_turn(ws)
             interrupt = paused[-1]
@@ -741,7 +749,7 @@ def test_ws_decision_must_name_a_decision(tmp_path: Path) -> None:
     # approval, and the approval stays pending to be answered properly.
     with _client(interrupt_agent, tmp_path) as client:
         sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "prompt", "text": "please run"})
             assert _drain_turn(ws)[-1]["type"] == "interrupt"
 
@@ -777,11 +785,11 @@ def test_ws_reconnect_resurfaces_a_pending_approval(tmp_path: Path) -> None:
     # so the user can still answer it, instead of the paused turn being orphaned.
     with _client(interrupt_agent, tmp_path) as client:
         sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "prompt", "text": "please run"})
             assert _drain_turn(ws)[-1]["type"] == "interrupt"
         # ws closed without deciding (a dropped connection); the session stays live.
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws2:
+        with open_stream(client, sid) as ws2:
             resurfaced = ws2.receive_json()  # re-sent on attach, before any prompt
             assert resurfaced["type"] == "interrupt"
             assert resurfaced["actions"][0]["name"] == "execute"
@@ -803,7 +811,7 @@ def test_ws_always_allow_auto_approves_future_interrupts(tmp_path: Path) -> None
 
     with _client(agent, tmp_path) as client:
         sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "prompt", "text": "edit a file"})
             interrupt = _drain_turn(ws)[-1]
             assert interrupt["type"] == "interrupt"
@@ -828,7 +836,7 @@ def test_ws_always_allow_never_allows_shell(tmp_path: Path) -> None:
 
     with _client(agent, tmp_path) as client:
         sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "prompt", "text": "run ls"})
             interrupt = _drain_turn(ws)[-1]
             assert interrupt["allowlist"] == []
@@ -851,7 +859,7 @@ def test_ws_unknown_session(tmp_path: Path) -> None:
 def test_ws_decision_without_pending_is_error(tmp_path: Path) -> None:
     with _client(echo_agent, tmp_path) as client:
         sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "decision", "decision": "approve"})
             event = ws.receive_json()
     assert event["type"] == "error"
@@ -865,7 +873,6 @@ async def test_side_outputs_forward_artifacts_and_ui_commands(tmp_path: Path) ->
     flush turns it into a ``ui`` wire message. The kinds are read back from the
     trace, so a writer and this reader agreeing is the whole contract.
     """
-    from makker.interfaces.server.app import _StreamState
     from makker.trace import schema
 
     session = Session.create(
@@ -873,7 +880,7 @@ async def test_side_outputs_forward_artifacts_and_ui_commands(tmp_path: Path) ->
     )
     host = SessionHost(session=session, agent=None)
     ws = _FakeWS()
-    st = _StreamState(ws, host)  # type: ignore[arg-type]
+    st = _stream(ws, host)
 
     session.trace.append(schema.UI_COMMAND, {"action": "set_param", "payload": {"p": 2}})
     session.trace.append(
@@ -1072,7 +1079,6 @@ def _plot_eval_handler(code: str):
 
 def _plot_state(tmp_path: Path):
     """A stream state over a session whose trace holds one replayable plot."""
-    from makker.interfaces.server.app import _StreamState
     from makker.trace import schema
 
     session = Session.create(
@@ -1110,7 +1116,7 @@ def _plot_state(tmp_path: Path):
     agent = _CheckpointAgent()
     host = SessionHost(session=session, agent=agent)
     ws = _FakeWS()
-    return _StreamState(ws, host), ws, session  # type: ignore[arg-type]
+    return _stream(ws, host), ws, session
 
 
 async def test_replot_revive_reserves_route_and_revives_view(tmp_path: Path) -> None:
@@ -1434,7 +1440,7 @@ def test_command_reconfigures_session(tmp_path: Path) -> None:
         host = manager.get(sid)
         calls: list[dict] = []
         host.reconfigure = lambda **kw: calls.append(kw)  # type: ignore[method-assign]
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "command", "command": "set_model", "arg": "anthropic:c"})
             ws.send_json({"type": "command", "command": "set_approval", "arg": "auto"})
             ws.send_json({"type": "command", "command": "bogus"})
@@ -1457,7 +1463,7 @@ def test_command_compact_and_add_dir(tmp_path: Path) -> None:
             return "compacted:ok", None
 
         host.compact = fake_compact  # type: ignore[method-assign]
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "command", "command": "add_dir", "arg": "/data"})
             n1 = ws.receive_json()
             ws.send_json({"type": "command", "command": "compact"})
@@ -1505,61 +1511,22 @@ def test_history_endpoint_shape(tmp_path: Path) -> None:
         assert {"id", "title", "started", "sim", "live"} <= set(s)
 
 
-async def test_disconnect_leaves_a_running_turn_alone() -> None:
-    # Switching sessions closes the socket, and the teardown used to cancel the
-    # turn with it: a simulation minutes in died because the user looked at
-    # another chat. The turn writes to the trace either way, so it is left to run.
-    from makker.interfaces.server.app import _StreamState
-
-    host = SimpleNamespace(set_busy=lambda _busy: None)
-    st = _StreamState(_FakeWS(), host)  # type: ignore[arg-type]
-
-    running = asyncio.Event()
-    finished = asyncio.Event()
-
-    async def turn() -> None:
-        running.set()
-        await asyncio.sleep(0.05)
-        finished.set()
-
-    st._turn = asyncio.create_task(turn())
-    await running.wait()
-
-    await st.aclose()
-    assert not st._turn.cancelled()
-
-    await st._turn
-    assert finished.is_set()  # it ran to completion after the socket went away
-
-
-def test_reattaching_to_a_busy_session_says_so(tmp_path: Path) -> None:
-    # The turn streams to the socket that started it, so a reconnect gets the
-    # replay and then silence. Without a word, a conversation that is still being
-    # written looks like it was cut off, which is how a surviving turn was read as
-    # a cancelled one.
-    manager = _manager(echo_agent, tmp_path)
-    with TestClient(create_app(manager)) as client:
+def test_every_connection_opens_with_the_session_as_it_stands(tmp_path: Path) -> None:
+    # The replay used to be a separate request, so a reconnect that skipped it
+    # (or a turn that kept writing after it) left the page behind the session.
+    with _client(echo_agent, tmp_path) as client:
         sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
-        host = manager.get(sid)
-        assert host is not None
-
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        stream = f"/sessions/{sid}/stream"
+        with client.websocket_connect(stream) as ws:
+            first = ws.receive_json()
             ws.send_json({"type": "prompt", "text": "hi"})
             _drain_turn(ws)
-        # Idle: nothing to explain.
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
-            ws.send_json({"type": "prompt", "text": "again"})
-            first = _drain_turn(ws)[0]
-            assert first["type"] != "notice"
+        with client.websocket_connect(stream) as ws:
+            again = ws.receive_json()
 
-        host.set_busy(True)
-        try:
-            with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
-                note = ws.receive_json()
-                assert note["type"] == "notice"
-                assert "still working" in note["text"]
-        finally:
-            host.set_busy(False)
+    assert first == {"type": "snapshot", "messages": [], "turn": [], "busy": False}
+    assert again["type"] == "snapshot" and again["busy"] is False
+    assert {"type": "user", "text": "hi"} in again["messages"]
 
 
 async def test_a_busy_session_is_never_evicted_or_deleted(tmp_path: Path) -> None:
@@ -1704,7 +1671,7 @@ def test_history_changed_arrives_before_the_turn_ends(tmp_path: Path) -> None:
     # is minutes when it runs a simulation. It must land while the turn is going.
     with _client(streaming_agent, tmp_path) as client:
         sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "prompt", "text": "hi"})
             events = _drain_turn(ws)
 
@@ -1830,7 +1797,7 @@ def test_delete_refuses_a_session_open_in_a_connection(tmp_path: Path) -> None:
     manager = _manager(echo_agent, tmp_path)
     with TestClient(create_app(manager)) as client:
         sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
-        with client.websocket_connect(f"/sessions/{sid}/stream"):
+        with open_stream(client, sid):
             assert client.delete(f"/sessions/{sid}").status_code == 409
         assert client.delete(f"/sessions/{sid}").status_code == 200
 
@@ -1841,9 +1808,7 @@ async def test_end_all_tool_streams_clears_state_and_cancels_flushes() -> None:
     import asyncio
     import contextlib
 
-    from makker.interfaces.server.app import _StreamState
-
-    st = _StreamState(_FakeWS(), None)  # type: ignore[arg-type]
+    st = _stream(_FakeWS(), None)
     st._tool_streams["c1"] = "partial output"
     st._tool_render_at["c1"] = 1.0
     st._tool_delta_wire["c1"] = {"type": "tool", "event": "delta", "tool_call_id": "c1"}
@@ -1971,7 +1936,7 @@ def test_first_turn_generates_llm_title(tmp_path: Path, monkeypatch: Any) -> Non
 
     with _client(echo_agent, tmp_path) as client:
         sid = client.post("/sessions", json={"sim": "jutuldarcy"}).json()["session_id"]
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "prompt", "text": "set up a small reservoir"})
             events = _drain_turn(ws)
             renamed = ws.receive_json()  # the post-turn history-refresh signal
@@ -2048,6 +2013,36 @@ async def test_acquire_attaches_promotes_and_refuses_a_second_connection(tmp_pat
     assert await manager.acquire(sid) is host  # reattachable once idle again
 
 
+async def test_concurrent_resumes_of_one_session_start_one_kernel(tmp_path: Path) -> None:
+    # Two at once (two tabs, or a retry while the first still prepares the env)
+    # each started a kernel, and registering the second closed the first.
+    started: list[str] = []
+    gate = asyncio.Event()
+
+    async def host_factory(*, session_id, **_kwargs) -> SessionHost:
+        started.append(session_id)
+        await gate.wait()
+        session = Session.create(
+            julia=FakeJulia(),
+            simulator=make_fake_adapter(tmp_path),
+            session_id=session_id,
+            state_root=tmp_path,
+        )
+        return SessionHost(session=session, agent=echo_agent())
+
+    manager = SessionManager(host_factory=host_factory)
+    sid = default_session_id()
+    first = asyncio.create_task(manager.resume(sid, sim="demo"))
+    second = asyncio.create_task(manager.resume(sid, sim="demo"))
+    await asyncio.sleep(0)
+    gate.set()
+    a, b = await asyncio.gather(first, second)
+
+    assert a is b
+    assert started == [sid]
+    assert manager.list_ids() == [sid]
+
+
 async def test_close_require_idle_refuses_an_attached_session(tmp_path: Path) -> None:
     # A delete must not tear a kernel down under a live connection: with require_idle
     # the check and the pop are one atomic step, raising rather than closing.
@@ -2068,7 +2063,7 @@ def test_respond_decision_without_message_sends_an_empty_message(tmp_path: Path)
     # the turn and the resume decision carries message="" rather than omitting it.
     with _client(interrupt_agent, tmp_path) as client:
         sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "prompt", "text": "please run"})
             assert _drain_turn(ws)[-1]["type"] == "interrupt"
             ws.send_json({"type": "decision", "decision": "respond"})  # no "message" field
@@ -2169,7 +2164,7 @@ def test_set_model_refused_while_approval_pending(tmp_path: Path) -> None:
     """Switching models would rebuild the agent out from under a paused approval."""
     with _client(interrupt_agent, tmp_path) as client:
         sid = client.post("/sessions", json={"sim": "jutuldarcy"}).json()["session_id"]
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "prompt", "text": "run it"})
             assert _drain_turn(ws)[-1]["type"] == "interrupt"
             ws.send_json(
@@ -2189,7 +2184,7 @@ def test_set_approval_auto_resolves_a_pending_interrupt(tmp_path: Path) -> None:
     manager = _manager(interrupt_agent, tmp_path)
     with TestClient(create_app(manager)) as client:
         sid = client.post("/sessions", json={"sim": "jutuldarcy"}).json()["session_id"]
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "prompt", "text": "run it"})
             assert _drain_turn(ws)[-1]["type"] == "interrupt"
             ws.send_json({"type": "command", "command": "set_approval", "arg": "auto"})
@@ -2504,12 +2499,10 @@ async def test_cancel_answers_even_with_no_turn_running(tmp_path: Path) -> None:
     assert ws.sent[0]["cancelled"] is True
 
 
-async def test_reconnected_socket_cannot_overlap_or_lose_the_running_turn(tmp_path: Path) -> None:
-    from makker.interfaces.server.app import _StreamState
-
-    first, _ws, _session = _plot_state(tmp_path)
-    second_ws = _FakeWS()
-    second = _StreamState(second_ws, first._host)
+async def test_a_reattached_socket_can_stop_the_turn_but_not_start_another(
+    tmp_path: Path,
+) -> None:
+    st, first_ws, _session = _plot_state(tmp_path)
     started = asyncio.Event()
     finished = asyncio.Event()
 
@@ -2520,51 +2513,81 @@ async def test_reconnected_socket_cannot_overlap_or_lose_the_running_turn(tmp_pa
         finally:
             finished.set()
 
-    first._host.drive_turn = slow  # type: ignore[assignment]
-    await first._start_prompt("first")
+    st._host.drive_turn = slow  # type: ignore[assignment]
+    await st._start_prompt("first")
     await started.wait()
-    await first.aclose()
-    assert first._host.busy
+    st.detach(first_ws)  # the user switched away; the turn runs on
+    assert st._host.busy
 
-    await second._start_prompt("second")
-    await second._start_replot({"record": "artifacts/res.png"})
-    assert [message["type"] for message in second_ws.sent] == ["error", "error"]
-    assert first._host.active_turn is first._turn
+    second_ws = _FakeWS()
+    await st.attach(second_ws)
+    await st._start_prompt("second")
+    await st._start_replot({"record": "artifacts/res.png"})
+    assert [message["type"] for message in second_ws.sent] == ["snapshot", "error", "error"]
 
-    await second.cancel_turn()
+    await st.cancel_turn()
     assert finished.is_set()
     assert second_ws.sent[-1]["cancelled"] is True
-    assert not first._host.busy
-    await second.aclose()
+    assert not st._host.busy
+    assert not [m for m in first_ws.sent if m.get("cancelled")]
 
 
-async def test_reconnected_socket_resyncs_when_the_old_turn_finishes(tmp_path: Path) -> None:
-    from makker.interfaces.server.app import _StreamState
+async def test_a_socket_attaching_mid_turn_sees_all_of_it(tmp_path: Path) -> None:
+    # A laptop that sleeps through a simulation reconnects mid-turn: it gets what
+    # the turn has sent so far (merged as the page merges it) and then the rest,
+    # with nothing lost and nothing twice.
+    from makker.agent.turns import TurnTextDelta, TurnToolEvent
 
-    first, _ws, _session = _plot_state(tmp_path)
-    second_ws = _FakeWS()
-    second = _StreamState(second_ws, first._host)
-    started = asyncio.Event()
-    finish = asyncio.Event()
-    resynced = []
+    st, first_ws, _session = _plot_state(tmp_path)
+    halfway = asyncio.Event()
+    go_on = asyncio.Event()
 
-    async def turn(*_args: Any, **_kwargs: Any) -> Any:
-        started.set()
-        await finish.wait()
+    async def turn(_start: Any, *, on_message: Any) -> Any:
+        await on_message(TurnTextDelta("Hel"))
+        await on_message(TurnTextDelta("lo"))
+        await on_message(TurnToolEvent("requested", "run_julia", "c1", {"code": "simulate()"}))
+        await on_message(TurnToolEvent("delta", "run_julia", "c1", content="step 1"))
+        halfway.set()
+        await go_on.wait()
+        await on_message(TurnToolEvent("finished", "run_julia", "c1", content="done"))
+        await on_message(TurnTextDelta(" again"))
         return SimpleNamespace(interrupts=[], messages=[])
 
-    async def resync() -> None:
-        resynced.append(True)
+    st._host.drive_turn = turn  # type: ignore[assignment]
+    st._host.maybe_title = lambda _cb: None  # type: ignore[assignment]
+    await st._start_prompt("simulate it")
+    await halfway.wait()
+    st.detach(first_ws)
+    sent_before = len(first_ws.sent)
 
-    first._host.drive_turn = turn  # type: ignore[assignment]
-    first._host.maybe_title = lambda _cb: None  # type: ignore[assignment]
-    second.resync_pending = resync  # type: ignore[method-assign]
-    await first._start_prompt("first")
-    await started.wait()
-    second.watch_existing_turn()
-    finish.set()
-    await first._turn
-    await second._existing_turn_watch
-    assert resynced == [True]
-    assert second_ws.sent[-1]["type"] == "notice"
-    await second.aclose()
+    second_ws = _FakeWS()
+    await st.attach(second_ws)
+    snapshot = second_ws.sent[0]
+    assert snapshot["type"] == "snapshot" and snapshot["busy"] is True
+    assert snapshot["messages"][-1] == {"type": "user", "text": "simulate it"}
+    turn_so_far = [
+        (m["type"], m.get("event"), m.get("text") or m.get("content") or None)
+        for m in snapshot["turn"]
+    ]
+    assert turn_so_far == [
+        ("ui", None, None),  # the history refresh every turn starts with
+        ("text", None, "Hello"),
+        ("tool", "requested", None),
+        ("tool", "delta", "step 1"),
+    ]
+
+    go_on.set()
+    await st._turn
+    after = [(m["type"], m.get("event"), m.get("text")) for m in second_ws.sent[1:]]
+    assert after == [
+        ("tool", "finished", None),
+        ("text", None, " again"),
+        ("turn_end", None, ""),
+    ]
+    assert len(first_ws.sent) == sent_before  # the detached socket got nothing more
+
+    # Once the turn is over the record holds it, and a snapshot is the record.
+    third_ws = _FakeWS()
+    st.detach(second_ws)
+    await st.attach(third_ws)
+    assert third_ws.sent[0]["busy"] is False and third_ws.sent[0]["turn"] == []
