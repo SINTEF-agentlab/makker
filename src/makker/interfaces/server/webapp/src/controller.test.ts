@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, api } from "./api";
 import { Controller, preparePopoutDocument } from "./controller";
@@ -90,5 +90,117 @@ describe("session startup failures", () => {
       expect.objectContaining({ kind: "user", text: "Run the model" }),
     );
     create.mockRestore();
+  });
+});
+
+/** A WebSocket the test opens, feeds and reads by hand. */
+class FakeSocket {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 3;
+  static all: FakeSocket[] = [];
+  readyState = FakeSocket.CONNECTING;
+  sent: Record<string, unknown>[] = [];
+  onopen: (() => void) | null = null;
+  onmessage: ((e: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+
+  constructor(public url: string) {
+    FakeSocket.all.push(this);
+  }
+
+  send(data: string): void {
+    this.sent.push(JSON.parse(data));
+  }
+
+  close(): void {
+    this.readyState = FakeSocket.CLOSED;
+  }
+
+  connect(): void {
+    this.readyState = FakeSocket.OPEN;
+    this.onopen?.();
+  }
+
+  receive(msg: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(msg) });
+  }
+}
+
+const IDLE = { type: "snapshot", messages: [], turn: [], busy: false };
+
+describe("session lifecycle", () => {
+  beforeEach(() => {
+    FakeSocket.all = [];
+    vi.stubGlobal("WebSocket", FakeSocket);
+    vi.spyOn(api, "history").mockResolvedValue([]);
+    vi.spyOn(api, "version").mockResolvedValue({ makker: null, update: null, simulator: null });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function setup() {
+    const store = createSessionStore();
+    store.setState({ sim: "jutuldarcy" });
+    const controller = new Controller(store);
+    vi.spyOn(controller, "sendCanvasHint").mockImplementation(() => undefined);
+    return { store, controller };
+  }
+
+  it("sends a prompt typed while connecting after the snapshot, and keeps it shown", async () => {
+    vi.spyOn(api, "createSession").mockResolvedValue({ session_id: "s1" });
+    const { store, controller } = setup();
+
+    controller.send("Run the model");
+    await vi.waitFor(() => expect(FakeSocket.all).toHaveLength(1));
+    const socket = FakeSocket.all[0];
+    socket.connect();
+    expect(socket.sent).toEqual([]); // held until the page shows the session
+
+    socket.receive(IDLE);
+    expect(socket.sent).toEqual([{ type: "prompt", text: "Run the model" }]);
+    expect(store.getState().items).toContainEqual(
+      expect.objectContaining({ kind: "user", text: "Run the model" }),
+    );
+    expect(store.getState().busy).toBe(true);
+  });
+
+  it("stays on its session, socket and all, when a switch is refused", async () => {
+    vi.spyOn(api, "createSession").mockResolvedValue({ session_id: "s1" });
+    vi.spyOn(api, "resumeSession").mockRejectedValue(
+      new ApiError(409, "session is already open in another connection"),
+    );
+    const { store, controller } = setup();
+    await controller.startSession();
+    const socket = FakeSocket.all[0];
+    socket.connect();
+    socket.receive(IDLE);
+
+    await controller.resume("s2");
+
+    expect(socket.readyState).toBe(FakeSocket.OPEN);
+    expect(FakeSocket.all).toHaveLength(1);
+    expect(store.getState().sessionId).toBe("s1");
+    expect(controller.transport.isOpen()).toBe(true);
+    expect(store.getState().items.at(-1)).toMatchObject({ kind: "sys-note", level: "warn" });
+  });
+
+  it("lets a past chat clicked while a new one starts win", async () => {
+    let created!: (value: { session_id: string }) => void;
+    vi.spyOn(api, "createSession").mockReturnValue(new Promise((r) => (created = r)));
+    vi.spyOn(api, "resumeSession").mockResolvedValue({ session_id: "old", kernel_restarted: false });
+    const { store, controller } = setup();
+
+    const starting = controller.startSession();
+    await controller.resume("old");
+    created({ session_id: "new" });
+    await starting;
+
+    expect(store.getState().sessionId).toBe("old");
+    expect(FakeSocket.all.map((s) => s.url)).toEqual([
+      expect.stringContaining("/sessions/old/stream"),
+    ]);
   });
 });

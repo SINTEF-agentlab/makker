@@ -87,6 +87,9 @@ class SessionHost:
         # Whether a turn is running; see the ``busy`` property.
         self._busy = False
         self._active_turn: asyncio.Task[None] | None = None
+        # The web server's turn stream for this session, kept here so a turn and
+        # what it has sent outlive the socket that started it.
+        self.turn_stream: Any = None
         # Background Julia warm-up (load warm package, set GLMakie offscreen); held
         # so it can be cancelled on teardown. Set by ``start``.
         self._warmup_task: Any | None = None

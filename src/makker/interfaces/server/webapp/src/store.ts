@@ -501,10 +501,24 @@ export function createSessionStore() {
       }));
     };
 
+    // The session as the server has it, the first message on every connection. It
+    // replaces what the page showed (a reconnect or a switch rebuilds from it), and
+    // a running turn carries on from where it has got to.
+    const onSnapshot = (msg: Extract<ServerMessage, { type: "snapshot" }>) => {
+      const { sessionId, meta, warming } = get();
+      get().reset();
+      set({ sessionId, meta, warming });
+      get().replay(msg.messages);
+      if (!msg.busy) return;
+      set({ busy: true, working: true });
+      for (const m of msg.turn) get().handle(m);
+    };
+
     return {
       ...initialState,
 
       handle(msg) {
+        if (msg.type === "snapshot") return onSnapshot(msg);
         // Anything but a side output means the agent produced content, so the
         // "thinking" indicator clears. Side outputs (a plot, a usage tick) arrive
         // mid-turn while the agent keeps working, so they must not clear it.

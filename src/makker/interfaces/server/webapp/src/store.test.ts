@@ -215,6 +215,40 @@ describe("replay", () => {
   });
 });
 
+describe("snapshot", () => {
+  it("replaces the page and carries on with a running turn", () => {
+    state().setSession("s1", "model · s1");
+    state().addSysNote("from before the reconnect");
+    state().handle({
+      type: "snapshot",
+      messages: [{ type: "user", text: "simulate it" }],
+      busy: true,
+      turn: [
+        { type: "tool", event: "requested", name: "run_julia", tool_call_id: "c1" },
+        {
+          type: "tool", event: "delta", name: "run_julia", tool_call_id: "c1",
+          content: "step 1", replace: true,
+        },
+        { type: "text", text: "Hal" },
+      ],
+    });
+    state().handle({ type: "text", text: "fway" }); // the turn goes on, live
+
+    expect(items().map((it) => it.kind)).toEqual(["user", "tool", "assistant"]);
+    expect(byKind("tool")[0]).toMatchObject({ status: "running", output: "step 1" });
+    expect(byKind("assistant")[0].text).toBe("Halfway");
+    expect(state().busy).toBe(true);
+    expect(state().sessionId).toBe("s1");
+    expect(state().meta).toBe("model · s1");
+  });
+
+  it("leaves the composer free when no turn is running", () => {
+    state().handle({ type: "snapshot", messages: [{ type: "user", text: "hi" }], busy: false, turn: [] });
+    expect(byKind("user")[0].text).toBe("hi");
+    expect(state().busy).toBe(false);
+  });
+});
+
 describe("reset", () => {
   it("clears the thread and canvas but keeps config", () => {
     state().setConfig({ sim: "battmo", model: "anthropic:claude" });

@@ -26,8 +26,11 @@ export class Transport {
   private ws: WebSocket | null = null;
   private queue: QueuedDelta[] = [];
   private frame = 0;
-  // Client messages sent before the socket is open; flushed once it opens.
+  // Client messages sent before the session's snapshot arrived; flushed after it,
+  // so they act on the session as the page then shows it.
   private outbox: ClientMessage[] = [];
+  // The snapshot arrived on this socket, so messages go straight out.
+  private ready = false;
 
   constructor(
     private store: StoreApi<SessionStore>,
@@ -35,7 +38,7 @@ export class Transport {
     // Called when the socket closes unexpectedly (not via `close`), so the
     // controller can reconnect to the session.
     private onDrop: OnDrop,
-    // Called once the socket opens and its buffered messages have been flushed.
+    // Called once the snapshot is applied and the buffered messages flushed.
     private onOpen: OnOpen,
     // Injectable so tests can flush synchronously; defaults to rAF.
     private schedule: Scheduler = (cb) => requestAnimationFrame(cb),
@@ -47,15 +50,7 @@ export class Transport {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const path = withBase(`/sessions/${sessionId}/stream`);
     const ws = new WebSocket(`${proto}://${location.host}${path}`);
-    ws.onopen = () => {
-      this.store.setState({ reconnecting: false });
-      // Flush anything queued while connecting (e.g. an example clicked the instant
-      // the page loaded, or a prompt typed during a reconnect).
-      const pending = this.outbox;
-      this.outbox = [];
-      for (const msg of pending) ws.send(JSON.stringify(msg));
-      this.onOpen(); // the buffer is delivered; the controller can drop its durable copy
-    };
+    ws.onopen = () => this.store.setState({ reconnecting: false });
     ws.onmessage = (e) => {
       const msg = parseServerMessage(typeof e.data === "string" ? e.data : "");
       if (msg) this.apply(msg);
@@ -63,6 +58,7 @@ export class Transport {
     ws.onclose = () => {
       this.flush();
       this.ws = null;
+      this.ready = false;
       this.store.setState({ busy: false, working: false });
       // `close` detaches this handler before closing, so only an unexpected drop
       // reaches here. Let the controller decide how to get back to the session.
@@ -77,6 +73,7 @@ export class Transport {
   close(): void {
     this.flush();
     this.outbox = [];
+    this.ready = false;
     if (this.ws) {
       this.ws.onopen = null;
       this.ws.onclose = null;
@@ -91,26 +88,39 @@ export class Transport {
   }
 
   isOpen(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN;
+    return this.ready && this.ws?.readyState === WebSocket.OPEN;
   }
 
-  /** Deliver a message, or buffer it while the socket connects. Returns false when
-   *  there is no socket (closed or not opened yet), so the caller can hold the
-   *  message and trigger a reconnect. */
+  /** Deliver a message, or buffer it until the session's snapshot arrives. Returns
+   *  false when there is no socket (closed or not opened yet), so the caller can
+   *  hold the message and trigger a reconnect. */
   send(msg: ClientMessage): boolean {
     const ws = this.ws;
-    if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(msg));
+    if (this.isOpen()) {
+      ws!.send(JSON.stringify(msg));
       return true;
     }
-    if (ws?.readyState === WebSocket.CONNECTING) {
-      this.outbox.push(msg); // delivered by onopen
+    if (ws?.readyState === WebSocket.CONNECTING || ws?.readyState === WebSocket.OPEN) {
+      this.outbox.push(msg); // delivered once the snapshot is applied
       return true;
     }
     return false;
   }
 
   private apply(msg: ServerMessage): void {
+    if (msg.type === "snapshot") {
+      this.flush();
+      this.store.getState().handle(msg);
+      this.effects(msg);
+      // Flush anything sent while connecting (an example clicked the instant the
+      // page loaded, a prompt typed during a reconnect) onto the session as shown.
+      this.ready = true;
+      const pending = this.outbox;
+      this.outbox = [];
+      for (const queued of pending) this.ws?.send(JSON.stringify(queued));
+      this.onOpen(); // the buffer is delivered; the controller can drop its durable copy
+      return;
+    }
     if (msg.type === "text" || msg.type === "reasoning") {
       this.enqueue(msg.type, msg.text);
       return;

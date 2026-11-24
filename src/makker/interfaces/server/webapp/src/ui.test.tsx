@@ -273,14 +273,12 @@ describe("switching sessions", () => {
   it("marks the resumed session live without waiting for the replay", async () => {
     // The refresh used to run after the conversation had been re-fetched and laid
     // down, so on a long chat the dot appeared well after the click. Liveness is
-    // already settled once the resume answers.
+    // already settled once the resume answers, before the socket brings the replay.
     const { controller } = renderWithStore(<Sidebar collapsed={false} />);
     vi.spyOn(api, "resumeSession").mockResolvedValue({
       session_id: "a",
       kernel_restarted: true,
     });
-    // A replay that never settles stands in for a slow one.
-    vi.spyOn(api, "messages").mockReturnValue(new Promise(() => {}));
     const history = vi.spyOn(api, "history").mockResolvedValue([]);
 
     void controller.resume("a");

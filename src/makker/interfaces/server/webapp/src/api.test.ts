@@ -11,7 +11,7 @@ describe.each(["", "/restricted", "/nested/prefix"])("API under %j", (prefix) =>
   it("routes every request through the configured prefix exactly once", async () => {
     window.__MAKKER_BASE_PATH__ = prefix;
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      providers: [], sessions: [], messages: [],
+      providers: [], sessions: [],
     })));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -21,7 +21,6 @@ describe.each(["", "/restricted", "/nested/prefix"])("API under %j", (prefix) =>
     await api.credentials();
     await api.modelWindow("provider:model");
     await api.history(10);
-    await api.messages("sid");
     await api.context("sid");
     await api.setCredential("provider", "test-key");
     await api.createSession({ sim: "demo" });
@@ -39,7 +38,6 @@ describe.each(["", "/restricted", "/nested/prefix"])("API under %j", (prefix) =>
       ["/credentials", "GET"],
       ["/models/window?model=provider%3Amodel", "GET"],
       ["/sessions/history?limit=10", "GET"],
-      ["/sessions/sid/messages", "GET"],
       ["/sessions/sid/context", "GET"],
       ["/credentials", "POST"],
       ["/sessions", "POST"],
@@ -49,11 +47,11 @@ describe.each(["", "/restricted", "/nested/prefix"])("API under %j", (prefix) =>
     ].map(([path, method]) => [prefix + path, method]));
 
     const calls = vi.mocked(fetch).mock.calls;
-    expect(calls[8][1]).toMatchObject({
+    expect(calls[7][1]).toMatchObject({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ provider: "provider", value: "test-key" }),
     });
-    const upload = calls[12][1]!;
+    const upload = calls[11][1]!;
     expect(upload.body).toBeInstanceOf(FormData);
     expect((upload.body as FormData).get("file")).toBeInstanceOf(File);
     expect(upload.headers).toBeUndefined();

@@ -40,6 +40,7 @@ __all__ = [
     "popout_ready_to_wire",
     "replay_message",
     "replay_tool_event",
+    "snapshot_to_wire",
     "to_wire",
     "turn_cancelled_to_wire",
     "turn_end_to_wire",
@@ -50,7 +51,8 @@ __all__ = [
 
 # Bumped when a message kind or field changes shape incompatibly. Front ends
 # read it from ``GET /models`` and can refuse or adapt instead of mis-parsing.
-PROTOCOL_VERSION = 1
+# 2: every connection opens with a ``snapshot``.
+PROTOCOL_VERSION = 2
 
 
 def credential_required_to_wire(*, provider: str, label: str, env_var: str) -> dict[str, Any]:
@@ -305,6 +307,20 @@ def replay_tool_event(
     if content is not None:
         wire["content"] = content
     return wire
+
+
+def snapshot_to_wire(
+    messages: list[dict[str, Any]], turn: list[dict[str, Any]], *, busy: bool
+) -> dict[str, Any]:
+    """The session as a newly connected front end finds it; the first message.
+
+    ``messages`` replays the recorded conversation, as ``GET
+    /sessions/{id}/messages`` does. ``busy`` says a turn is running: ``turn``
+    then holds the live messages it has sent so far, for the front end to apply
+    as if it had been connected all along, before the turn's next message.
+    """
+
+    return {"type": "snapshot", "messages": messages, "turn": turn, "busy": busy}
 
 
 def notice_to_wire(text: str) -> dict[str, Any]:

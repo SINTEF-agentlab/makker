@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from _server import open_stream
 from makker.agent.capabilities import (
     HOST_CONTEXT_CAPABILITY,
     Capability,
@@ -251,6 +252,32 @@ def test_reattaching_a_live_session_adopts_the_current_selection(tmp_path: Path)
         assert len(rebuilds) == 1
 
 
+def test_reattaching_mid_turn_holds_the_selection_until_the_turn_ends(tmp_path: Path) -> None:
+    # A turn outlives its socket, so a reattach can find one still running, and
+    # rebuilding the agent then would swap the runner under it.
+    manager = _manager(tmp_path)
+    with TestClient(create_app(manager)) as client:
+        sid = client.post(
+            "/sessions", json={"sim": "jutuldarcy", "host_context": SELECTION}
+        ).json()["session_id"]
+        host = manager.get(sid)
+        rebuilds: list[dict] = []
+        host.reconfigure = lambda **kw: rebuilds.append(kw)  # type: ignore[method-assign]
+
+        host.set_busy(True)
+        client.post(
+            f"/sessions/{sid}/resume", json={"sim": "jutuldarcy", "host_context": OTHER_SELECTION}
+        )
+        assert rebuilds == []
+        host.set_busy(False)
+        with open_stream(client, sid) as ws:
+            ws.send_json({"type": "command", "command": "bogus"})
+            assert ws.receive_json()["type"] == "notice"  # adopted at the first idle moment
+
+    assert len(rebuilds) == 1
+    assert host.session.host_context == OTHER_SELECTION
+
+
 # --- where the host application listens ------------------------------------
 
 
@@ -352,7 +379,7 @@ def test_ws_selection_change_rebuilds_the_agent_and_tells_the_user(tmp_path: Pat
         rebuilds: list[dict] = []
         host.reconfigure = lambda **kw: rebuilds.append(kw)  # type: ignore[method-assign]
 
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "host_context", "context": OTHER_SELECTION})
             notice = ws.receive_json()
             # The same selection again is not a change, so nothing is rebuilt. The
@@ -383,7 +410,7 @@ def test_a_selection_change_while_paused_on_approval_keeps_the_turn_answerable(
         host = manager.get(sid)
         host.reconfigure = lambda **kw: None  # type: ignore[method-assign]
 
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "prompt", "text": "do something needing approval"})
             assert ws.receive_json()["type"] == "interrupt"
 
@@ -411,7 +438,7 @@ def test_a_failed_rebuild_reports_and_keeps_the_session(tmp_path: Path) -> None:
 
         host.reconfigure = explode  # type: ignore[method-assign]
 
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "host_context", "context": SELECTION})
             error = ws.receive_json()
             # The socket is still usable afterwards.
@@ -445,7 +472,7 @@ def test_ws_selection_change_during_a_turn_waits_for_the_turn_to_settle(tmp_path
         host = manager.get(sid)
         host.reconfigure = lambda **kw: None  # type: ignore[method-assign]
 
-        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+        with open_stream(client, sid) as ws:
             ws.send_json({"type": "prompt", "text": "work on the selection"})
             ws.send_json({"type": "host_context", "context": OTHER_SELECTION})
             kinds: list[str] = []

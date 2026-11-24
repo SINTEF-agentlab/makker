@@ -843,8 +843,8 @@ def create_app(
                 raise HTTPException(
                     status_code=409, detail="session is already open in another connection"
                 )
-            # Still live and idle (the user navigated away and came back, or the socket
-            # dropped and reconnected): reattach as-is. The live host is authoritative
+            # Still live (the user navigated away and came back, or the socket dropped
+            # and reconnected): reattach as-is. The live host is authoritative
             # because an in-session model or approval change already updated it via the
             # set_model/set_approval command. Re-applying the resume request's values
             # here would let a stale UI value clobber the user's in-session choice on
@@ -855,11 +855,12 @@ def create_app(
             manager.promote(session_id)
             # The host's selection is the exception to "the live host is
             # authoritative": it describes the application right now, not this
-            # session's earlier settings, so a reattach carries it over. Nothing
-            # is running (the session is idle and unattached, checked above), so
-            # the rebuild this triggers when it actually changed is safe here.
+            # session's earlier settings, so a reattach carries it over. A turn may
+            # still be running (it outlives its socket), and the rebuild a change
+            # triggers must not happen under it, so the stream applies it now or
+            # when that turn ends.
             if req.host_context is not None:
-                existing.set_host_context(req.host_context)
+                await _stream_of(existing).set_host_context(req.host_context)
             # Likewise the API URL, which moves whenever the application restarts:
             # a session reattached against a stale port would only find a closed
             # door. Sent on every resume, so its absence genuinely means "no host".
@@ -1590,24 +1591,9 @@ async def _serve_stream(websocket: WebSocket, manager: SessionManager, session_i
         await websocket.close()
         return
 
-    state = _StreamState(websocket, host)
-    # A turn started before this connection is still running (the user switched
-    # away and came back). It streams to the socket that started it, so nothing
-    # more will arrive here and the replay above stops wherever the trace had got
-    # to. Say so, or the conversation looks like it was cut off.
-    if host.busy:
-        await _safe_send(
-            websocket,
-            protocol.notice_to_wire(
-                "This session is still working on a turn you started earlier. Its "
-                "output is being recorded; reopen the session to see the rest."
-            ),
-        )
-        state.watch_existing_turn()
-    # Re-surface an approval the session was paused on if an earlier connection
-    # dropped while it was pending, so a reconnect can still answer it.
-    await state.resync_pending()
+    stream = _stream_of(host)
     try:
+        await stream.attach(websocket)
         while True:
             try:
                 message = await websocket.receive_json()
@@ -1616,28 +1602,55 @@ async def _serve_stream(websocket: WebSocket, manager: SessionManager, session_i
                     websocket, protocol.error_to_wire("invalid message (expected JSON)")
                 )
                 continue
-            await state.handle(message)
+            await stream.handle(message)
     except WebSocketDisconnect:
         pass
     finally:
-        # detach() must run even if teardown raises, or the session stays marked
-        # attached forever and no later connection can ever acquire it again.
+        # The turn, if one is running, carries on without this socket. detach()
+        # must run even so, or no later connection could acquire the session.
         try:
-            await state.aclose()
+            stream.detach(websocket)
         finally:
             host.detach()
 
 
-class _StreamState:
-    """Per-connection turn state: at most one turn in flight, plus pending approvals."""
+def _stream_of(host: SessionHost) -> _SessionStream:
+    """The session's stream, made on its first connection and kept with the host."""
+    if host.turn_stream is None:
+        host.turn_stream = _SessionStream(host)
+    return host.turn_stream
 
-    def __init__(self, websocket: WebSocket, host: SessionHost) -> None:
-        self._ws = websocket
+
+# What a turn sends that the conversation shows, kept for a socket that attaches
+# before the turn ends. The rest answers the socket that asked, or ends the turn.
+_TURN_CONTENT = frozenset({"text", "reasoning", "tool", "viz", "artifact", "ui"})
+
+
+class _SessionStream:
+    """One session's turns and what they send, whichever socket is watching.
+
+    A turn belongs to the session, not to the connection that started it:
+    switching chats or a dropped connection leaves it running (a simulation
+    minutes in once died because the user looked at another chat), and so does
+    closing the tab; the stop button ends it. The running turn also keeps the
+    manager from evicting the kernel under it. It sends to whichever socket is
+    attached now, if any. A socket that attaches first gets a snapshot of the
+    session: the recorded conversation and, while a turn runs, everything that
+    turn has sent so far. So a reconnect shows the turn exactly as a socket that
+    never left would, and then follows it live.
+    """
+
+    def __init__(self, host: SessionHost) -> None:
         self._host = host
+        self._ws: WebSocket | None = None
         self._pending: list[Any] = []
         self._turn: asyncio.Task[None] | None = None
-        self._existing_turn_watch: asyncio.Task[None] | None = None
-        self._closed = False
+        # The running turn, for a socket that attaches before it ends: the last
+        # trace event before it, its prompt (the client shows its own), and the
+        # content it has sent, merged as the client would merge it.
+        self._turn_start_id = 0
+        self._turn_prompt: str | None = None
+        self._turn_log: list[dict[str, Any]] = []
         # Whether the running turn has already told the client it ended, so the
         # backstop in ``_run_turn`` never sends a second end.
         self._turn_ended = True
@@ -1700,13 +1713,13 @@ class _StreamState:
                     self._host.session.web_canvas_hint = (size[0], size[1])
             self._host.session.trace.append(schema.UI_EVENT, {"payload": payload})
         elif kind == "host_context":
-            await self._set_host_context(message.get("context"))
+            await self.set_host_context(message.get("context"))
         elif kind == "command":
             await self._handle_command(message)
         else:
-            await _safe_send(self._ws, protocol.error_to_wire(f"unknown message {kind!r}"))
+            await self._send(protocol.error_to_wire(f"unknown message {kind!r}"))
 
-    async def _set_host_context(self, context: Any) -> None:
+    async def set_host_context(self, context: Any) -> None:
         """Adopt a selection the host application changed while the session was open.
 
         The selection lives in the system prompt, so adopting one rebuilds the
@@ -1717,7 +1730,7 @@ class _StreamState:
         started on, instead of the ground moving underneath it.
         """
         if context is not None and not isinstance(context, dict):
-            await _safe_send(self._ws, protocol.error_to_wire("host_context must be a JSON object"))
+            await self._send(protocol.error_to_wire("host_context must be a JSON object"))
             return
         if self._busy():
             self._deferred_host_context = (context,)
@@ -1748,14 +1761,12 @@ class _StreamState:
         try:
             changed = self._host.set_host_context(context)
         except Exception as exc:
-            await _safe_send(
-                self._ws,
+            await self._send(
                 protocol.error_to_wire(f"could not apply the application's selection: {exc}"),
             )
             return
         if changed:
-            await _safe_send(
-                self._ws,
+            await self._send(
                 protocol.notice_to_wire("The application's selection changed; the agent was told."),
             )
 
@@ -1766,8 +1777,7 @@ class _StreamState:
         live Julia state all survive — so a front end can offer these as commands.
         """
         if self._busy():
-            await _safe_send(
-                self._ws,
+            await self._send(
                 protocol.error_to_wire("finish the current turn before changing settings"),
             )
             return
@@ -1778,8 +1788,7 @@ class _StreamState:
                 # A model switch under a paused approval would rebuild the agent
                 # out from under the pending interrupt (the TUI refuses this too).
                 if self._pending or await self._host.pending_interrupts():
-                    await _safe_send(
-                        self._ws,
+                    await self._send(
                         protocol.error_to_wire(
                             "answer the pending approval before switching models"
                         ),
@@ -1798,13 +1807,12 @@ class _StreamState:
                 # fail opaquely on the next turn instead.
                 problem = missing_provider_error(arg)
                 if problem is not None:
-                    await _safe_send(self._ws, protocol.error_to_wire(problem))
+                    await self._send(protocol.error_to_wire(problem))
                     return
                 env_var = missing_credential(arg)
                 if env_var is not None:
                     info = provider_info(arg)
-                    await _safe_send(
-                        self._ws,
+                    await self._send(
                         protocol.credential_required_to_wire(
                             provider=info.name if info else "",
                             label=info.label if info else arg,
@@ -1816,7 +1824,7 @@ class _StreamState:
                 # here with a reason, not opaquely on the next turn.
                 problem = await local_model_error(arg)
                 if problem is not None:
-                    await _safe_send(self._ws, protocol.error_to_wire(problem))
+                    await self._send(protocol.error_to_wire(problem))
                     return
                 self._host.reconfigure(model=arg)
             elif command == "set_approval":
@@ -1825,38 +1833,38 @@ class _StreamState:
                 # instead of waiting for a decision that is a foregone conclusion.
                 await self._auto_resolve_pending()
             elif command == "add_dir":
-                await _safe_send(self._ws, protocol.notice_to_wire(self._host.add_dir(arg)))
+                await self._send(protocol.notice_to_wire(self._host.add_dir(arg)))
             elif command == "compact":
                 note, _result = await self._host.compact()
-                await _safe_send(self._ws, protocol.notice_to_wire(note))
+                await self._send(protocol.notice_to_wire(note))
             else:
-                await _safe_send(self._ws, protocol.error_to_wire(f"unknown command {command!r}"))
+                await self._send(protocol.error_to_wire(f"unknown command {command!r}"))
                 return
         except Exception as exc:  # surface a bad model/mode, keep the session alive
-            await _safe_send(self._ws, protocol.error_to_wire(f"could not apply {command}: {exc}"))
+            await self._send(protocol.error_to_wire(f"could not apply {command}: {exc}"))
 
     async def _start_prompt(self, text: str) -> None:
         if self._busy():
-            await _safe_send(self._ws, protocol.error_to_wire("a turn is already running"))
+            await self._send(protocol.error_to_wire("a turn is already running"))
             return
         # Name the session from its first prompt, like the CLI/TUI do, so it reads
         # well in the history list. Idempotent (only the first prompt sets it).
         with contextlib.suppress(Exception):
             self._host.session.adopt_title(text)
         runner = self._host.runner
-        self._spawn(lambda: runner.run_prompt(text, on_message=self._on_message))
+        self._spawn(lambda: runner.run_prompt(text, on_message=self._on_message), prompt=text)
 
     async def _start_decision(self, message: dict[str, Any]) -> None:
         if self._busy():
-            await _safe_send(self._ws, protocol.error_to_wire("a turn is already running"))
+            await self._send(protocol.error_to_wire("a turn is already running"))
             return
         if not self._pending:
-            await _safe_send(self._ws, protocol.error_to_wire("no approval is pending"))
+            await self._send(protocol.error_to_wire("no approval is pending"))
             return
         kind = str(message.get("decision") or "")
         if kind not in (*SUPPORTED_APPROVAL_DECISIONS, "always_allow"):
             # Never read a missing or misspelt decision as an approval.
-            await _safe_send(self._ws, protocol.error_to_wire(f"unknown decision {kind!r}"))
+            await self._send(protocol.error_to_wire(f"unknown decision {kind!r}"))
             return
         # "always_allow" is approve plus a session policy: remember what these cards
         # offered (file edits in the workspace), so later ones go through unasked.
@@ -1893,11 +1901,9 @@ class _StreamState:
         if self._busy():
             reason = "finish the current turn before regenerating a plot"
             if target == "popout":
-                await _safe_send(
-                    self._ws, protocol.popout_ready_to_wire(record, None, error=reason)
-                )
+                await self._send(protocol.popout_ready_to_wire(record, None, error=reason))
             else:
-                await _safe_send(self._ws, protocol.error_to_wire(reason))
+                await self._send(protocol.error_to_wire(reason))
             return
         # An optional target size the client measured (the stage on a regenerate,
         # the popup window on a popout): the replay re-fits the figure to it.
@@ -2052,9 +2058,7 @@ class _StreamState:
                     self._host.session, _plot_id_of(payload), target, _authored_of(payload)
                 )
                 if err is None and echoed is not None:
-                    await _safe_send(
-                        self._ws, protocol.refit_done_to_wire(record, echoed[0], echoed[1])
-                    )
+                    await self._send(protocol.refit_done_to_wire(record, echoed[0], echoed[1]))
 
         task = asyncio.create_task(run())
         # Keep a reference so the task isn't garbage-collected mid-flight.
@@ -2088,55 +2092,83 @@ class _StreamState:
     def _busy(self) -> bool:
         return self._host.busy or (self._turn is not None and not self._turn.done())
 
-    def watch_existing_turn(self) -> None:
-        task = self._host.active_turn
-        if task is None:
-            return
+    async def attach(self, websocket: WebSocket) -> None:
+        """Send this session's messages to ``websocket`` from now on.
 
-        async def watch() -> None:
-            try:
-                await asyncio.shield(task)
-            except asyncio.CancelledError:
-                if not task.done():
-                    return
-            except Exception:
-                pass
-            if self._closed:
-                return
-            await self.resync_pending()
-            await _safe_send(
-                self._ws,
-                protocol.notice_to_wire(
-                    "The earlier turn finished. Reopen this session to see its output."
-                ),
-            )
-
-        self._existing_turn_watch = asyncio.create_task(watch())
-
-    async def resync_pending(self) -> None:
-        """Re-send an approval the session was paused on when a prior connection dropped.
-
-        A turn that pauses on an interrupt finishes its task with the interrupt recorded
-        in the graph state, but the per-connection pending list is lost with the socket.
-        On a fresh connection, re-read the persisted interrupts and re-send them so the
-        user can still answer, instead of the paused turn being orphaned. A no-op when
-        nothing is pending.
+        It first gets the session as it stands (see ``_snapshot``), then any
+        approval the session is paused on. The snapshot is taken and the socket
+        adopted with no await in between, so every later message follows the
+        snapshot and none is in both.
         """
-        if self._busy() or self._pending:
-            return
-        try:
-            pending = await self._host.runner.pending_interrupts()
-        except Exception:
-            return
-        if not pending:
-            return
-        self._pending = list(pending)
-        for interrupt in pending:
+        snapshot = self._snapshot()
+        self._ws = websocket
+        await _safe_send(websocket, snapshot)
+        # Read back from the graph state when this stream has none in hand: the
+        # session was resumed from disk, or paused before this server started.
+        if not self._pending and not self._busy():
+            with contextlib.suppress(Exception):
+                self._pending = list(await self._host.runner.pending_interrupts())
+        for interrupt in self._pending:
             await self._send_interrupt(interrupt)
+
+    def detach(self, websocket: WebSocket) -> None:
+        """Stop sending to ``websocket``; a running turn carries on regardless."""
+        if self._ws is websocket:
+            self._ws = None
+
+    def _snapshot(self) -> dict[str, Any]:
+        """The session as a newly attached socket should show it.
+
+        The recorded conversation, replayed like ``GET /sessions/{id}/messages``.
+        While a turn runs, the record stops where the turn began, and the turn
+        follows as its prompt and the messages it has sent so far: the trace only
+        gets a model's text once the model has finished, and a tool's output once
+        the tool has, so it can't show a turn in progress.
+        """
+        session = self._host.session
+        busy = self._busy()
+        events = session.trace.iter_events()
+        if busy:
+            events = [event for event in events if event.id <= self._turn_start_id]
+        live = session.web_plot_port is not None
+        messages = replay_events(
+            events,
+            session.session_id,
+            live=live,
+            live_routes=session.live_routes if live else None,
+            base_path=session.base_path,
+        )
+        if busy and self._turn_prompt:
+            messages.append(protocol.replay_message("user", self._turn_prompt))
+        return protocol.snapshot_to_wire(messages, self._turn_log if busy else [], busy=busy)
+
+    async def _send(self, message: dict[str, Any]) -> None:
+        """Send to the attached socket, if any, keeping the running turn's content."""
+        if message.get("type") in _TURN_CONTENT and self._busy():
+            self._keep(message)
+        if self._ws is not None:
+            await _safe_send(self._ws, message)
+
+    def _keep(self, message: dict[str, Any]) -> None:
+        """Add a turn message to the turn's log, merged as the client merges it:
+        text and reasoning deltas into one, a tool's output to its latest state
+        (each sent delta is the whole rendered output so far)."""
+        log = self._turn_log
+        kind = message.get("type")
+        if kind in ("text", "reasoning") and log and log[-1].get("type") == kind:
+            log[-1]["text"] += message.get("text") or ""
+            return
+        if kind == "tool" and message.get("event") == "delta":
+            cid = message.get("tool_call_id")
+            for i, entry in enumerate(log):
+                if entry.get("event") == "delta" and entry.get("tool_call_id") == cid:
+                    log[i] = dict(message)
+                    return
+        log.append(dict(message))
 
     async def _send_interrupt(self, interrupt: Any) -> None:
         offer = self._host.approval.always_allow_offer(interrupt.value)
-        await _safe_send(self._ws, protocol.interrupt_to_wire(interrupt, always_allow=offer))
+        await self._send(protocol.interrupt_to_wire(interrupt, always_allow=offer))
 
     async def _auto_resolve_pending(self) -> None:
         """Resume a paused approval the (changed) policy now auto-allows."""
@@ -2147,15 +2179,20 @@ class _StreamState:
         runner = self._host.runner
         self._spawn(lambda: runner.resume(payload, on_message=self._on_message))
 
-    def _spawn(self, factory) -> None:
-        self._spawn_task(self._run_turn(factory))
+    def _spawn(self, factory, *, prompt: str | None = None) -> None:
+        self._spawn_task(self._run_turn(factory), prompt=prompt)
 
-    def _spawn_task(self, coro) -> None:
+    def _spawn_task(self, coro, *, prompt: str | None = None) -> None:
         task = asyncio.create_task(coro)
         if not self._host.claim_turn(task):
             task.cancel()
             return
         self._turn = task
+        # Before the task first runs, so a socket attaching at any point of the
+        # turn finds its start.
+        self._turn_start_id = self._side_output_id = self._latest_event_id()
+        self._turn_prompt = prompt
+        self._turn_log = []
 
     async def _run_turn(self, factory) -> None:
         """Drive one turn and, whatever happens, tell the client it ended.
@@ -2168,7 +2205,6 @@ class _StreamState:
         there is nothing left to cancel, and only a reload frees it. The end is
         therefore delivered from a ``finally``, once per turn.
         """
-        self._side_output_id = self._latest_event_id()
         self._turn_ended = False
         self._announced = False
         try:
@@ -2200,8 +2236,8 @@ class _StreamState:
             return
         self._turn_ended = True
         if error is not None:
-            await _safe_send(self._ws, protocol.error_to_wire(error))
-        await _safe_send(self._ws, wire)
+            await self._send(protocol.error_to_wire(error))
+        await self._send(wire)
 
     async def _drive(self, factory) -> None:
         """The turn itself. Reports its own outcome through ``_end_turn``; a path
@@ -2230,7 +2266,7 @@ class _StreamState:
         with contextlib.suppress(Exception):
             usage = protocol.usage_to_wire(result.messages)
             if usage is not None:
-                await _safe_send(self._ws, usage)
+                await self._send(usage)
         await self._end_turn(protocol.turn_end_to_wire(result.messages))
         with contextlib.suppress(Exception):
             await self._flush_host_context()
@@ -2240,7 +2276,7 @@ class _StreamState:
 
     async def _on_titled(self, title: str) -> None:
         """Nudge the front end to refresh its history list with the new title."""
-        await _safe_send(self._ws, protocol.ui_command("history_changed", {"title": title}))
+        await self._send(protocol.ui_command("history_changed", {"title": title}))
 
     def _latest_event_id(self) -> int:
         return self._host.session.trace.max_id()
@@ -2260,11 +2296,11 @@ class _StreamState:
                     self._host.session_id,
                     base_path=self._host.session.base_path,
                 ):
-                    await _safe_send(self._ws, wire)
+                    await self._send(wire)
             elif event.kind == schema.UI_COMMAND:
                 action = str(event.payload.get("action") or "")
                 payload = event.payload.get("payload")
-                await _safe_send(self._ws, protocol.ui_command(action, payload))
+                await self._send(protocol.ui_command(action, payload))
 
     async def _announce_history_once(self) -> None:
         """Tell the client the session list changed, at most once per turn.
@@ -2280,7 +2316,7 @@ class _StreamState:
             return
         self._announced = True
         with contextlib.suppress(Exception):
-            await _safe_send(self._ws, protocol.ui_command("history_changed", {}))
+            await self._send(protocol.ui_command("history_changed", {}))
 
     async def _on_message(self, event: Any) -> None:
         await self._announce_history_once()
@@ -2297,7 +2333,7 @@ class _StreamState:
                 # The final result (terminal-rendered by the kernel) replaces the
                 # live stream; stop any pending flush and drop the per-call buffers.
                 self._end_tool_stream(cid)
-        await _safe_send(self._ws, wire)
+        await self._send(wire)
         # A tool just finished: surface any artifacts/ui it produced right away, so a
         # plot or report appears inline as it happens instead of all at turn end.
         if wire.get("type") == "tool" and wire.get("event") in ("finished", "error"):
@@ -2346,7 +2382,7 @@ class _StreamState:
             "content": render_terminal_output(buf),
             "replace": True,
         }
-        await _safe_send(self._ws, wire)
+        await self._send(wire)
 
     def _end_tool_stream(self, cid: str) -> None:
         task = self._tool_flush.pop(cid, None)
@@ -2378,48 +2414,13 @@ class _StreamState:
         the client believes a turn is in flight and the server does not, the
         client is the one stuck.
         """
-        task = self._host.active_turn
+        task = self._turn
         if task is not None and not task.done():
-            task.cancel()
+            task.cancel()  # the turn answers for itself as it unwinds
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
-            if task is not self._turn:
-                await _safe_send(self._ws, protocol.turn_cancelled_to_wire())
             return
-        if self._turn is not None and not self._turn.done():
-            self._turn.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await self._turn
-            return
-        await _safe_send(self._ws, protocol.turn_cancelled_to_wire())
-
-    async def aclose(self) -> None:
-        """Tear down on disconnect, leaving a running turn alone.
-
-        Switching sessions closes the socket, and cancelling here threw away
-        whatever the turn had reached: a simulation minutes in died because the
-        user looked at another chat. The turn is finite and writes everything it
-        produces to the trace, so it is left to finish and its results are there
-        on the way back. It also holds the session busy, which keeps the manager
-        from evicting the kernel out from under it.
-
-        The cost is that closing the tab no longer stops a turn either. That is
-        bounded by the one turn the user already asked for; use the stop button to
-        end it early.
-
-        The titling task is still cancelled: it is a fire-and-forget model call
-        with nothing to write, so without this it would spend for nobody.
-        """
-        self._closed = True
-        self._end_all_tool_streams()
-        if self._existing_turn_watch is not None:
-            self._existing_turn_watch.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._existing_turn_watch
-        if self._title_task is not None and not self._title_task.done():
-            self._title_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await self._title_task
+        await self._send(protocol.turn_cancelled_to_wire())
 
 
 # How much of a prompt the server log shows: enough to tell which log lines a
