@@ -582,3 +582,16 @@ def test_upgrade_choice_for_a_system_image(tmp_path, monkeypatch) -> None:
     assert load_workspace_config(tmp_path).sysimage is True
     assert upgrade.decide_sysimage(tmp_path, interactive=True, choice="off") is False
     assert load_workspace_config(tmp_path).sysimage is False
+
+
+def test_a_folder_never_sets_the_approval_mode(web_run, tmp_path, capsys) -> None:
+    """A folder from someone else must not be able to turn approval off."""
+    web, _calls = web_run
+    config = tmp_path / ".makker" / "config.toml"
+    config.parent.mkdir()
+    config.write_text('[workspace]\nsimulator = "jutuldarcy"\napproval_mode = "auto"\n')
+
+    assert web.run(_web_args()) == 0
+    assert "approval:" not in capsys.readouterr().err  # the default, ask
+    assert web.run(_web_args(approval_mode="auto")) == 0
+    assert "approval: auto" in capsys.readouterr().err  # the user's own choice

@@ -248,7 +248,7 @@ async def _run_session(
         )
         return 1
 
-    approval_mode = parse_approval_mode(args.approval_mode or config.approval_mode)
+    approval_mode = parse_approval_mode(args.approval_mode)
     try:
         host = await SessionHost.start(
             simulator=adapter,

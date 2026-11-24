@@ -10,11 +10,12 @@ config, then `$MAKKER_MODEL`, then the built-in default.
 TUI when you save a choice:
 
 ```toml
-simulator = "jutuldarcy"           # active simulator for this workspace
 model = "<provider:model>"         # optional, overrides the user default
-approval_mode = "workspace"        # optional: ask | workspace | auto
 
-[simulators.jutuldarcy]
+[workspace]
+simulator = "jutuldarcy"           # active simulator for this workspace
+
+[simulator.jutuldarcy]
 source_path = "/path/to/JutulDarcy.jl"  # dev-link, set by init --source-path
 
 [julia]
@@ -27,7 +28,12 @@ it is on, a launch that finds the image missing or out of date refuses to
 start rather than falling back to the slow path; see
 [the system image](sysimage.md).
 
-This file is safe to commit: API keys never go here.
+This file is safe to commit: API keys never go here, and the approval mode
+is never the folder's to set.
+
+Opening a folder runs its Julia environment, the way `julia --project` does:
+its packages, and a system image if it has one, run as you. So open a folder
+from someone else only if you would run its code.
 
 ## User config
 
