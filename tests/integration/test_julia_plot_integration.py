@@ -207,7 +207,7 @@ async def test_web_view_take_over(plot_display) -> None:
 async def test_dropped_routes_close_their_pages(plot_display, tmp_path, monkeypatch) -> None:
     open_page = (
         "global page = WGLMakie.Bonito.Session(); "
-        'Makker.MakkerWebViews.view(page, Main.__MAKKER_WEB_FIGS__["/viz/{}"]); nothing'
+        'Makker.MakkerWebViews.view(page, Main.__MAKKER_WEB_FIGS__["{}"]); nothing'
     )
     page_closed = "@assert WGLMakie.Bonito.isclosed(page)"
     code = "fig = WGLMakie.Figure(); WGLMakie.lines!(WGLMakie.Axis(fig[1, 1]), 1:3); fig"
@@ -215,20 +215,50 @@ async def test_dropped_routes_close_their_pages(plot_display, tmp_path, monkeypa
         session = _session(julia, tmp_path, "web-drop")
         tool = make_plot_julia_tool(session, surface="web")
         assert "served a live interactive plot" in await _plot(tool, code, "a")
-        assert not (await julia.eval(open_page.format("a"))).error
+        secret = session.web_plot_secret or ""
+        route_a, route_b = jl.viz_route("a", secret), jl.viz_route("b", secret)
+        assert not (await julia.eval(open_page.format(route_a))).error
         # A re-plot of the same slot replaces its figure.
         assert "served a live interactive plot" in await _plot(tool, code, "a")
         assert not (await julia.eval(page_closed)).error
         # Eviction past the cap, then closing the remaining plot.
         monkeypatch.setattr(jl, "WEB_LIVE_ROUTE_CAP", 1)
-        assert not (await julia.eval(open_page.format("a"))).error
+        assert not (await julia.eval(open_page.format(route_a))).error
         assert "served a live interactive plot" in await _plot(tool, code, "b")
         assert not (await julia.eval(page_closed)).error
-        assert not (await julia.eval(open_page.format("b"))).error
-        assert not (await julia.eval(jl.close_web_plots_call("b"))).error
+        assert not (await julia.eval(open_page.format(route_b))).error
+        assert not (await julia.eval(jl.close_web_plots_call("b", secret))).error
         result = await julia.eval(page_closed + "; @assert isempty(Main.__MAKKER_WEB_FIGS__)")
         assert not result.error, result.error
         session.finalize()
+
+
+@pytest.mark.skipif(
+    not _julia_available() or not _wgl_ready(JUTULDARCY_ENV),
+    reason="Julia and a WGLMakie-instantiated jutuldarcy env are required",
+)
+async def test_the_plot_server_renders_a_figure_only_for_its_secret(plot_display, tmp_path) -> None:
+    """The plot server's port is open to anything on this computer, other users'
+    programs included. Only a request naming the session's secret gets a page, and
+    without a page there is no widget WebSocket to join."""
+    import httpx
+
+    code = "fig = WGLMakie.Figure(); WGLMakie.lines!(WGLMakie.Axis(fig[1, 1]), 1:3); fig"
+    async with JuliaKernel(_plot_kernel_config(plot_display)) as julia:
+        session = _session(julia, tmp_path, "web-secret")
+        tool = make_plot_julia_tool(session, surface="web")
+        try:
+            assert "served a live interactive plot" in await _plot(tool, code, "a")
+            server = f"http://127.0.0.1:{session.web_plot_port}"
+            secret = session.web_plot_secret
+            assert secret and len(secret) >= 24
+            async with httpx.AsyncClient(timeout=60) as client:
+                assert (await client.get(f"{server}/viz/a")).status_code == 404
+                assert (await client.get(f"{server}/not-{secret}/viz/a")).status_code == 404
+                page = await client.get(f"{server}{jl.viz_route('a', secret)}")
+            assert page.status_code == 200 and "<html" in page.text.lower()
+        finally:
+            session.finalize()
 
 
 # Every Makie return shape that `_as_figure` must resolve, built from plain Makie so
@@ -383,8 +413,9 @@ async def test_reservoir_phase_selection(tmp_path: Path, plot_display) -> None:
                         "@assert any(x -> x isa Makie.Menu && "
                         'x.selection[] == "Saturations row 2", fig.content)\n'
                     )
+                route = jl.viz_route(slot, session.web_plot_secret or "")
                 verified = await julia.eval(
-                    f'let fig = Main.__MAKKER_WEB_FIGS__["/viz/{slot}"], Makie = WGLMakie.Makie\n'
+                    f'let fig = Main.__MAKKER_WEB_FIGS__["{route}"], Makie = WGLMakie.Makie\n'
                     f"{check}\nend"
                 )
                 assert not verified.error, f"{slot}: {verified.error}"
@@ -436,9 +467,10 @@ async def test_native_plotters_render_to_png(tmp_path: Path, plot_display, surfa
             elif surface == "web":
                 # A Cairo poster does not exercise browser serialization. Render each
                 # plotter into two pages; the second takes the figure over.
+                route = jl.viz_route(slot, session.web_plot_secret or "")
                 checked = await julia.eval(
                     "let B = WGLMakie.Bonito, V = Makker.MakkerWebViews\n"
-                    f'    fig = Main.__MAKKER_WEB_FIGS__["/viz/{slot}"]\n'
+                    f'    fig = Main.__MAKKER_WEB_FIGS__["{route}"]\n'
                     "    pages = [B.Session(B.NoConnection(); asset_server = B.NoServer())\n"
                     "             for _ in 1:2]\n"
                     "    for page in pages\n"

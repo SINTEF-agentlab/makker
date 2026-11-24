@@ -28,7 +28,7 @@ The web stack ships in the core install, so just start the app:
 python examples/demo-app/demo.py       # first run instantiates the Julia env
 ```
 
-Open <http://127.0.0.1:8742>. Pick a model if needed (any provider key in your
+Open the link it prints (<http://127.0.0.1:8742/?token=…>). Pick a model if needed (any provider key in your
 environment), then try: *"plot the response for p=3"*, or *"set the parameter to 5
 and plot it"*. The interactive plot appears in the canvas on the right.
 

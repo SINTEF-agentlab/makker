@@ -39,7 +39,10 @@ async def test_web_surface_serves_plot_live(tmp_path: Path) -> None:
             # The server prints its bound port on a tagged line; a later log line
             # carries other digits (an address) that a "last run of digits" parse
             # would wrongly pick, so this guards the tagged-line parse.
-            return EvalResult(output="__MAKKER_WEB_PORT__=51000\n[ Info: listening on :9999")
+            return EvalResult(
+                output="__MAKKER_WEB_PORT__=51000\n__MAKKER_WEB_SECRET__=s3cret\n"
+                "[ Info: listening on :9999"
+            )
         if "Bonito.route!" in code:  # the live render: Cairo saves the poster PNG
             (session.output_dir / "artifacts" / "pres.png").write_bytes(b"PNG")
         return EvalResult(output="")  # render "succeeds"
@@ -73,7 +76,7 @@ async def test_web_surface_serves_plot_live(tmp_path: Path) -> None:
         # (see interfaces/server/app.py), not the raw port Bonito bound -- the browser
         # never needs to reach that port directly (it may not be forwarded at all,
         # e.g. behind an SSH tunnel). The proxy resolves the port from session state.
-        assert f"/live/{session.session_id}/viz/" in (artifact.payload["live_url"] or "")
+        assert f"/live/{session.session_id}/s3cret/viz/" in (artifact.payload["live_url"] or "")
         assert session.web_plot_port == 51000
     finally:
         log.close()
@@ -94,7 +97,7 @@ async def test_plot_setup_heals_after_a_kernel_reset(tmp_path: Path) -> None:
             state = "false,false" if kernel_reset else "true,true"
             return EvalResult(output=f"{jl_src.PLOT_STATE_MARKER}={state}")
         if "Bonito.Server" in code:
-            return EvalResult(output="__MAKKER_WEB_PORT__=51000")
+            return EvalResult(output="__MAKKER_WEB_PORT__=51000\n__MAKKER_WEB_SECRET__=s3cret")
         return EvalResult(output="")
 
     session = _session(tmp_path, FakeJulia(eval_handler=fake_eval))
@@ -127,7 +130,7 @@ async def test_web_plot_without_size_fits_the_panel_hint(tmp_path: Path) -> None
     async def fake_eval(code: str) -> EvalResult:
         seen.append(code)
         if "Bonito.Server" in code:
-            return EvalResult(output="__MAKKER_WEB_PORT__=51000")
+            return EvalResult(output="__MAKKER_WEB_PORT__=51000\n__MAKKER_WEB_SECRET__=s3cret")
         return EvalResult(output="")
 
     session = _session(tmp_path, FakeJulia(eval_handler=fake_eval))
@@ -156,7 +159,7 @@ async def test_unslotted_plot_replays_onto_its_original_route(tmp_path: Path) ->
 
     async def fake_eval(code: str) -> EvalResult:
         if "Bonito.Server" in code:
-            return EvalResult(output="__MAKKER_WEB_PORT__=51000")
+            return EvalResult(output="__MAKKER_WEB_PORT__=51000\n__MAKKER_WEB_SECRET__=s3cret")
         return EvalResult(output="")
 
     session = _session(tmp_path, FakeJulia(eval_handler=fake_eval))
@@ -168,18 +171,18 @@ async def test_unslotted_plot_replays_onto_its_original_route(tmp_path: Path) ->
     artifact = next(e for e in session.trace.iter_events() if e.kind == schema.ARTIFACT)
     routed = next(c for c in session.julia.calls if "Bonito.route!" in c)
     stem = str(artifact.payload["path"]).rsplit("/", 1)[-1].rsplit(".", 1)[0]
-    assert f'raw"/viz/{stem}"' in routed
+    assert f'raw"/s3cret/viz/{stem}"' in routed
 
     session.julia.calls.clear()
     err, url, _size = await replot_web(session, artifact.payload)
     assert err is None
-    assert url == f"/live/{session.session_id}/viz/{stem}"
+    assert url == f"/live/{session.session_id}/s3cret/viz/{stem}"
 
 
 async def test_web_plot_ignores_a_degenerate_panel_hint(tmp_path: Path) -> None:
     async def fake_eval(code: str) -> EvalResult:
         if "Bonito.Server" in code:
-            return EvalResult(output="__MAKKER_WEB_PORT__=51000")
+            return EvalResult(output="__MAKKER_WEB_PORT__=51000\n__MAKKER_WEB_SECRET__=s3cret")
         return EvalResult(output="")
 
     session = _session(tmp_path, FakeJulia(eval_handler=fake_eval))
@@ -198,7 +201,7 @@ async def test_web_surface_live_gl_only_records_html_export(tmp_path: Path) -> N
         if "CairoMakie.Makie === WGLMakie.Makie" in code:
             return EvalResult(output="MAKKER_MAKIE_MATCH")
         if "Bonito.Server" in code:
-            return EvalResult(output="__MAKKER_WEB_PORT__=51000")
+            return EvalResult(output="__MAKKER_WEB_PORT__=51000\n__MAKKER_WEB_SECRET__=s3cret")
         return EvalResult(output="")  # render "succeeds" but writes no poster PNG
 
     session = _session(tmp_path, FakeJulia(eval_handler=fake_eval))
@@ -211,7 +214,7 @@ async def test_web_surface_live_gl_only_records_html_export(tmp_path: Path) -> N
         artifact = next(ev for ev in log.iter_events() if ev.kind == "artifact")
         assert artifact.payload["mime"] == "text/html"
         assert artifact.payload["path"] == "artifacts/pres.html"
-        assert f"/live/{session.session_id}/viz/" in (artifact.payload["live_url"] or "")
+        assert f"/live/{session.session_id}/s3cret/viz/" in (artifact.payload["live_url"] or "")
     finally:
         log.close()
 
@@ -258,7 +261,7 @@ async def test_web_render_restores_display_capture_before_serving(tmp_path: Path
         if "CairoMakie.Makie === WGLMakie.Makie" in code:
             return EvalResult(output="MAKKER_MAKIE_MATCH")
         if "Bonito.Server" in code:
-            return EvalResult(output="__MAKKER_WEB_PORT__=51000")
+            return EvalResult(output="__MAKKER_WEB_PORT__=51000\n__MAKKER_WEB_SECRET__=s3cret")
         return EvalResult(output="")
 
     session = _session(tmp_path, FakeJulia(eval_handler=fake_eval))
@@ -368,7 +371,7 @@ async def test_live_plot_records_its_route_as_most_recent(tmp_path: Path) -> Non
         if "CairoMakie.Makie === WGLMakie.Makie" in code:
             return EvalResult(output="MAKKER_MAKIE_MATCH")
         if "Bonito.Server" in code:
-            return EvalResult(output="__MAKKER_WEB_PORT__=51000")
+            return EvalResult(output="__MAKKER_WEB_PORT__=51000\n__MAKKER_WEB_SECRET__=s3cret")
         if "Bonito.route!" in code:
             (session.output_dir / "artifacts" / "pres.png").write_bytes(b"PNG")
         return EvalResult(output="")
@@ -386,8 +389,8 @@ async def test_live_plot_records_its_route_as_most_recent(tmp_path: Path) -> Non
     render = next(c for c in seen if "Bonito.route!" in c)
     # Re-plotting a slot reuses its route, so the earlier entry is dropped rather
     # than leaving the same route listed twice.
-    assert 'filter!(!=(raw"/viz/pres"), _order)' in render
-    assert 'push!(_order, raw"/viz/pres")' in render
+    assert 'filter!(!=(raw"/s3cret/viz/pres"), _order)' in render
+    assert 'push!(_order, raw"/s3cret/viz/pres")' in render
 
 
 async def test_web_recapture_reports_a_view_it_cannot_read(tmp_path: Path) -> None:
@@ -485,7 +488,7 @@ async def test_web_surface_loads_the_warm_package_before_it_serves(tmp_path: Pat
         if "CairoMakie.Makie === WGLMakie.Makie" in code:
             return EvalResult(output="MAKKER_MAKIE_MATCH")
         if "Bonito.Server" in code:
-            return EvalResult(output="__MAKKER_WEB_PORT__=51000")
+            return EvalResult(output="__MAKKER_WEB_PORT__=51000\n__MAKKER_WEB_SECRET__=s3cret")
         return EvalResult(output="")
 
     adapter = make_fake_adapter(tmp_path, warm_package="MakkerFakeSim")

@@ -475,6 +475,32 @@ def test_server_apply_action(_state_home):
     assert _apply_action("bogus", "x")[0] is False
 
 
+def test_server_answers_only_its_own_page_at_localhost(_state_home):
+    import http.client
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from makker.review.server import _Handler
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    port = httpd.server_address[1]
+
+    def status(method: str, **headers: str) -> int:
+        conn = http.client.HTTPConnection("127.0.0.1", port)
+        conn.request(method, "/api/action" if method == "POST" else "/", "{}", headers)
+        return conn.getresponse().status
+
+    try:
+        assert status("GET") == 200
+        assert status("GET", Host="rebound.example") == 403  # DNS rebinding
+        assert status("POST", Origin="https://evil.example") == 403
+        assert status("POST", Origin=f"http://127.0.0.1:{port}") == 404  # no such issue
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
 # ---- dashboard + export -----------------------------------------------------
 
 

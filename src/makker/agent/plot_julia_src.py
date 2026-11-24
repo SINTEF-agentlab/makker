@@ -480,9 +480,9 @@ def web_render_call(
 _WRAP_STYLE = "position:fixed; inset:0; margin:0; padding:0; overflow:hidden;"
 
 
-def web_server_start(port: int, session_id: str, *, base_path: str = "") -> str:
+def web_server_start(port: int, session_id: str, *, secret: str, base_path: str = "") -> str:
     """Julia to start the session's Bonito server once (idempotent), returning the
-    actual port it is bound to.
+    actual port it is bound to and the secret its figure routes carry.
 
     The server lives in the Julia process for the session's lifetime and holds
     the live figures, so their in-figure widgets (a timestep slider, a field
@@ -505,6 +505,9 @@ def web_server_start(port: int, session_id: str, *, base_path: str = "") -> str:
     site-relative-prefix mechanism Bonito already uses for JupyterHub/Binder.
     ``base_path`` is the public prefix (e.g. ``/restricted``) when an SSO wrapper
     reverse-proxies the UI; empty means the server is at ``/``.
+
+    ``secret`` goes into every figure's route (see ``viz_route``), and like the
+    port the server keeps the one it started with, so it is read back too.
     """
 
     # ``global`` (not ``Main.X = ``) so the assignment defines the Main global even
@@ -529,12 +532,14 @@ def web_server_start(port: int, session_id: str, *, base_path: str = "") -> str:
         # tracked here rather than recovered from it.
         "        global __MAKKER_WEB_ORDER__ = String[]\n"
         "        global __MAKKER_WEB_PORT__ = __MAKKER_WEB_SERVER__.port\n"
+        f'        global __MAKKER_WEB_SECRET__ = raw"{secret}"\n'
         "    end\n"
         # Print the bound port on a uniquely-tagged line so the Python side reads it
         # back unambiguously; taking "the last run of digits" from the output would
         # pick up a wrong number if Bonito/HTTP.jl logged its address (also digits)
         # on startup.
         '    println("__MAKKER_WEB_PORT__=", __MAKKER_WEB_PORT__)\n'
+        '    println("__MAKKER_WEB_SECRET__=", __MAKKER_WEB_SECRET__)\n'
         "    __MAKKER_WEB_PORT__\n"
         "end"
     )
@@ -646,18 +651,25 @@ _NOT_ON_SCREEN = (
 )
 
 
-def viz_route(plot_id: str) -> str:
+def viz_route(plot_id: str, secret: str) -> str:
     """The Bonito route a live figure is served on, given its slot or plot id.
 
-    One spelling shared by the three sites that need it (serve, recapture, close):
+    One spelling shared by the sites that need it (serve, refit, recapture, close):
     they have no way to fail loudly on each other if it drifts, since a route that
     does not match simply reads as a plot that is not there.
+
+    ``secret`` is the session's live-plot secret (``web_server_start``). The plot
+    server's port is open to anything on this computer, and so is the ``/live/...``
+    proxy to it, so the route is the capability: without the secret no figure page
+    renders, and without a page there is no widget WebSocket to join (Bonito keys
+    those by a random session id). That also lets a live view be shown where no
+    cookie reaches, such as another application's frame or browser pane.
     """
 
-    return f"/viz/{plot_id}"
+    return f"/{secret}/viz/{plot_id}"
 
 
-def web_recapture_call(*, slot: str, png_path: Path) -> str:
+def web_recapture_call(*, slot: str, png_path: Path, secret: str) -> str:
     """Julia to snapshot a live web figure's browser view at its current state.
 
     The browser owns what the user currently sees, because WGLMakie runs the camera
@@ -679,7 +691,7 @@ def web_recapture_call(*, slot: str, png_path: Path) -> str:
     refuse = f'return println("{WEB_RECAPTURE_REFUSED}", '
     if slot:
         resolve = (
-            f'        local _route = raw"{viz_route(slot)}"\n'
+            f'        local _route = raw"{viz_route(slot, secret)}"\n'
             "        if !haskey(_figs, _route)\n"
             f"            {refuse}\n"
             f"                \"no live plot for slot '{slot}' (it may have been closed \" *\n"
@@ -776,7 +788,7 @@ def resize_web_fig_call(
     )
 
 
-def close_web_plots_call(slot: str) -> str:
+def close_web_plots_call(slot: str, secret: str) -> str:
     """Julia to release live web figures: one slot's route, or all when empty.
 
     The web counterpart of ``close_windows_call``, which closes native windows and
@@ -786,7 +798,9 @@ def close_web_plots_call(slot: str) -> str:
     showing its last frame.
     """
 
-    routes = f'[raw"{viz_route(slot)}"]' if slot else "collect(keys(Main.__MAKKER_WEB_FIGS__))"
+    routes = (
+        f'[raw"{viz_route(slot, secret)}"]' if slot else "collect(keys(Main.__MAKKER_WEB_FIGS__))"
+    )
     return (
         "begin\n"
         # Guarded rather than imported, so closing costs nothing in a session that

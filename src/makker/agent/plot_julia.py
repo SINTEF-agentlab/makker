@@ -26,6 +26,7 @@ import asyncio
 import base64
 import io
 import re
+import secrets
 import socket
 import sys
 import uuid
@@ -168,6 +169,32 @@ def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+async def _start_live_server(session: Session) -> str | None:
+    """Start the session's Bonito server (idempotent); why it failed, or ``None``.
+
+    Records the port the ``/live/...`` proxy dials and the secret the figure
+    routes carry, both as the server reports them: an existing server keeps its
+    own (see ``jl.web_server_start``).
+    """
+    started = await session.julia.eval(
+        jl.web_server_start(
+            _free_port(),
+            session.session_id,
+            secret=secrets.token_urlsafe(18),
+            base_path=session.base_path,
+        )
+    )
+    # The server prints both on uniquely-tagged lines; read those rather than
+    # scanning for digits (a startup log line could carry others).
+    port = re.search(r"__MAKKER_WEB_PORT__=(\d+)", started.output or "")
+    secret = re.search(r"__MAKKER_WEB_SECRET__=([\w-]+)", started.output or "")
+    if started.error or port is None or secret is None:
+        return started.error or "the server did not report a port"
+    session.web_plot_port = int(port.group(1))
+    session.web_plot_secret = secret.group(1)
+    return None
 
 
 def _encode_view_image(png_path: Path, max_edge: int = _VIEW_MAX_EDGE) -> str:
@@ -374,7 +401,8 @@ async def refit_web(
     Bounded by ``REFIT_TIMEOUT_S``: cosmetic work must never wedge a session.
     """
 
-    call = jl.resize_web_fig_call(jl.viz_route(route_id), *size, authored=authored)
+    route = jl.viz_route(route_id, session.web_plot_secret or "")
+    call = jl.resize_web_fig_call(route, *size, authored=authored)
     try:
         result = await asyncio.wait_for(session.julia.eval(call), REFIT_TIMEOUT_S)
     except TimeoutError:
@@ -424,17 +452,13 @@ async def replot_web(
         return err, None, None
     # Idempotent: an existing server answers with its real port, a fresh kernel
     # gets one started. Either way the reverse proxy learns where to dial.
-    started = await session.julia.eval(
-        jl.web_server_start(_free_port(), session.session_id, base_path=session.base_path)
-    )
-    match = re.search(r"__MAKKER_WEB_PORT__=(\d+)", started.output or "")
-    if started.error or match is None:
-        reason = _truncate(started.error or "the server did not report a port", 200)
+    reason = await _start_live_server(session)
+    if reason is not None:
+        reason = _truncate(reason, 200)
         return f"the session's live plot server is unavailable ({reason})", None, None
-    session.web_plot_port = int(match.group(1))
 
     plot_id = _plot_id_of(payload)
-    route = jl.viz_route(f"{plot_id}{route_suffix}")
+    route = jl.viz_route(f"{plot_id}{route_suffix}", session.web_plot_secret or "")
     live_url = f"/live/{session.session_id}{route}"
     png_rel = f"artifacts/{plot_id}.png"
     png_abs = session.output_dir / png_rel
@@ -500,7 +524,7 @@ def make_plot_julia_tool(session: Session, *, surface: str | None = None):
                 backend_loaded = False
             if flags is None or flags.group(2) != "true":
                 live_base = None
-                session.web_plot_port = None
+                session.web_plot_port = session.web_plot_secret = None
                 session.live_routes = set()
         if not backend_loaded:
             loader = _load_web_plot_backend if web else _load_plot_backend
@@ -509,16 +533,10 @@ def make_plot_julia_tool(session: Session, *, surface: str | None = None):
                 return err  # don't latch: a fixable load failure can be retried
             backend_loaded = True
         if web and live_base is None:
-            started = await session.julia.eval(
-                jl.web_server_start(_free_port(), session.session_id, base_path=session.base_path)
-            )
-            # The server prints its bound port on a uniquely-tagged line; read that
-            # rather than scanning for digits (a startup log line could carry others).
-            match = re.search(r"__MAKKER_WEB_PORT__=(\d+)", started.output or "")
-            if started.error or match is None:
+            reason = await _start_live_server(session)
+            if reason is not None:
                 if not warned_no_live:
                     warned_no_live = True
-                    reason = started.error or "the server did not report a port"
                     print(
                         f"warning: live plot serving unavailable ({_truncate(reason, 200)}); "
                         "falling back to static interactive exports.",
@@ -532,7 +550,6 @@ def make_plot_julia_tool(session: Session, *, surface: str | None = None):
                 # (an SSH tunnel, VS Code/Cursor remote, Docker) already knows about.
                 # ``session.web_plot_port`` is what tells that proxy where to send it.
                 live_base = f"/live/{session.session_id}"
-                session.web_plot_port = int(match.group(1))
         return None
 
     @tool
@@ -610,7 +627,7 @@ def make_plot_julia_tool(session: Session, *, surface: str | None = None):
             # Serve live (in-figure widgets work) when the session's Bonito server
             # is up; otherwise fall back to a self-contained static export.
             if live_base:
-                route = jl.viz_route(plot_id)
+                route = jl.viz_route(plot_id, session.web_plot_secret or "")
                 call = jl.web_live_call(
                     user_code=code,
                     png_path=abs_path,
@@ -725,7 +742,9 @@ def make_recapture_tool(session: Session, *, surface: str | None = None):
         if web:
             # The browser owns the current view, so the snapshot comes from the plot's
             # connected live session.
-            call = jl.web_recapture_call(slot=safe_slot or "", png_path=abs_path)
+            call = jl.web_recapture_call(
+                slot=safe_slot or "", png_path=abs_path, secret=session.web_plot_secret or ""
+            )
         else:
             call = jl.recapture_call(key=safe_slot or "", png_path=abs_path)
         result = await session.julia.eval(call)
@@ -776,8 +795,11 @@ def make_close_plots_tool(session: Session, *, surface: str | None = None):
         safe_slot, slot_err = _resolve_slot(slot)
         if slot_err:
             return slot_err
-        make_call = jl.close_web_plots_call if web else jl.close_windows_call
-        result = await session.julia.eval(make_call(safe_slot or ""))
+        if web:
+            call = jl.close_web_plots_call(safe_slot or "", session.web_plot_secret or "")
+        else:
+            call = jl.close_windows_call(safe_slot or "")
+        result = await session.julia.eval(call)
         note_live_routes(session, result.output)
         if result.error:
             return f"ERROR: {result.error}"

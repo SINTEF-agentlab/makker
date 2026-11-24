@@ -1,9 +1,13 @@
-"""Which browser pages may use this server.
+"""Who may use this server.
 
-A page that can drive a session can run code on this computer: the agent runs
-Julia and shell commands. Browsers let any site send requests to 127.0.0.1 and,
-without CORS getting in the way, open WebSockets to it. So the server itself
-turns away pages that aren't its own:
+Whoever can drive a session can run code on this computer as the user who
+started it: the agent runs Julia and shell commands. So the server asks for its
+token (``TokenGuard``): anything else on this computer, another user's program
+on a shared machine included, can reach the port, but can't read the token.
+
+Browsers add a second risk: they let any site send requests to 127.0.0.1 and,
+without CORS getting in the way, open WebSockets to it. So the server also
+turns away pages that aren't its own (``OriginGuard``):
 
 - A request from a browser page carries ``Origin``. A WebSocket handshake, or a
   request that changes something (anything but GET, HEAD and OPTIONS), is only
@@ -22,17 +26,153 @@ they cover every route and WebSocket, including the live-plot proxy.
 
 from __future__ import annotations
 
+import contextlib
+import hmac
 import ipaddress
+import json
 import logging
+import os
+import secrets
 from collections.abc import Iterable, Mapping
-from urllib.parse import urlsplit
+from html import escape
+from pathlib import Path
+from urllib.parse import quote, urlencode, urlsplit
 
 from starlette.datastructures import Headers
-from starlette.responses import PlainTextResponse
+from starlette.requests import HTTPConnection
+from starlette.responses import HTMLResponse, PlainTextResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 _log = logging.getLogger("uvicorn.error")
+
+TOKEN_ENV_VAR = "MAKKER_SERVER_TOKEN"
+_COOKIE = "makker-token"
+_COOKIE_MAX_AGE = 365 * 24 * 3600
+
+
+def token_path() -> Path:
+    from makker.paths import state_home
+
+    return state_home() / "server-token"
+
+
+def server_token() -> str:
+    """The token this user's servers ask for.
+
+    ``MAKKER_SERVER_TOKEN`` when set (for a launcher that builds the link
+    itself), else the one in ``server-token`` in the state home, made on first
+    use and readable by this user only. It stays the same across launches, so a
+    browser that has opened the link once keeps working after a restart. Delete
+    the file to make a new one.
+    """
+    if token := os.environ.get(TOKEN_ENV_VAR, "").strip():
+        return token
+    path = token_path()
+    with contextlib.suppress(FileNotFoundError):
+        if token := path.read_text(encoding="utf-8").strip():
+            return token
+    token = secrets.token_urlsafe(32)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(token + "\n")
+    return token
+
+
+_ENTER_PAGE = """<!doctype html><meta charset="utf-8"><title>Makker</title>
+<script>location.replace(__TARGET_JS__)</script>
+<noscript><a href="__TARGET__">Open Makker</a></noscript>
+"""
+
+_LOCKED_PAGE = """<!doctype html><meta charset="utf-8"><title>Makker</title>
+<p style="font-family: system-ui, sans-serif; margin: 3em auto; max-width: 34em">
+This Makker server asks for its link. Open the link Makker printed when it
+started; it ends in <code>?token=</code>.</p>
+"""
+
+
+class TokenGuard:
+    """ASGI middleware letting through only requests that carry the token.
+
+    The token comes in a cookie, an ``Authorization: Bearer`` header (scripts),
+    or a ``token`` query parameter (the printed link, or a WebSocket from a
+    program). A page opened from the link gets the cookie and is sent on to the
+    same address without the token, so it leaves the address bar and history.
+
+    The cookie is ``SameSite=Strict``: a browser never sends it with a request
+    another site starts, so another site can't open the UI as the user, in a
+    frame or a new tab.
+
+    Paths under ``open_prefixes`` carry a capability of their own and pass
+    without the token: a live plot's URL holds its session's plot secret
+    (``plot_julia_src.viz_route``), so it can be shown where no cookie reaches,
+    such as another application's frame or browser pane.
+    """
+
+    def __init__(
+        self, app: ASGIApp, *, token: str, base_path: str = "", open_prefixes: Iterable[str] = ()
+    ) -> None:
+        self.app = app
+        self.token = token.encode()
+        self.base_path = base_path
+        self.open_prefixes = tuple(open_prefixes)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket") or scope["path"].startswith(
+            self.open_prefixes
+        ):
+            await self.app(scope, receive, send)
+            return
+        conn = HTTPConnection(scope)
+        if self._matches(conn.cookies.get(_COOKIE)) or self._matches(_bearer(conn.headers)):
+            await self.app(scope, receive, send)
+        elif self._matches(conn.query_params.get("token")):
+            if scope["type"] == "http" and scope["method"] == "GET" and _wants_html(conn):
+                await self._enter(conn)(scope, receive, send)
+            else:
+                await self.app(scope, receive, send)
+        elif scope["type"] == "websocket":
+            await receive()
+            await send({"type": "websocket.close", "code": 1008})
+        elif _wants_html(conn):
+            await HTMLResponse(_LOCKED_PAGE, status_code=401)(scope, receive, send)
+        else:
+            await PlainTextResponse("missing or wrong token", status_code=401)(scope, receive, send)
+
+    def _matches(self, given: str | None) -> bool:
+        return bool(given) and hmac.compare_digest(given.encode(), self.token)
+
+    def _enter(self, conn: HTTPConnection) -> Response:
+        """Set the cookie, then load the same address without the token.
+
+        A page rather than a redirect: the cookie is then sent on the next load
+        even when the link was opened from another site.
+        """
+        rest = [(k, v) for k, v in conn.query_params.multi_items() if k != "token"]
+        target = quote(self.base_path + conn.url.path) + (f"?{urlencode(rest)}" if rest else "")
+        page = _ENTER_PAGE.replace("__TARGET_JS__", json.dumps(target)).replace(
+            "__TARGET__", escape(target, quote=True)
+        )
+        response = HTMLResponse(page, headers={"Cache-Control": "no-store"})
+        response.set_cookie(
+            _COOKIE,
+            self.token.decode(),
+            max_age=_COOKIE_MAX_AGE,
+            path=self.base_path or "/",
+            httponly=True,
+            samesite="strict",
+        )
+        return response
+
+
+def _bearer(headers: Headers) -> str | None:
+    scheme, _, value = headers.get("authorization", "").partition(" ")
+    return value.strip() if scheme.lower() == "bearer" else None
+
+
+def _wants_html(conn: HTTPConnection) -> bool:
+    return "text/html" in conn.headers.get("accept", "")
 
 
 def is_loopback_host(host: str) -> bool:

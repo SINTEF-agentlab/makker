@@ -107,8 +107,12 @@ def demo_capability() -> Capability:
     )
 
 
-def create_demo_app():
-    """Build the demo server: the standard app and bundled UI, running DemoSim."""
+def create_demo_app(token: str | None = None):
+    """Build the demo server: the standard app and bundled UI, running DemoSim.
+
+    ``token`` is the one every request must carry (see the server interface
+    docs); ``None`` lets anyone who reaches the port in.
+    """
     from makker.interfaces.server.app import create_app
     from makker.interfaces.server.manager import SessionManager
     from makker.session_host import SessionHost
@@ -135,7 +139,7 @@ def create_demo_app():
     # Serve the bundled web UI; every session runs DemoSim, so the server is bound
     # to a single "demo" simulator. The interactive plot the agent produces is
     # pinned in the canvas, and a `set_param` UI action shows as a note.
-    return create_app(SessionManager(host_factory=host_factory), default_sim="demo")
+    return create_app(SessionManager(host_factory=host_factory), default_sim="demo", token=token)
 
 
 def ensure_env() -> None:
@@ -156,9 +160,12 @@ def main() -> int:
     except ModuleNotFoundError:
         print("The web stack is missing; reinstall Makker (or `uv sync`).", file=sys.stderr)
         return 1
+    from makker.interfaces.server.access import server_token
+
     ensure_env()
-    print("Demo app on http://127.0.0.1:8742")
-    uvicorn.run(create_demo_app(), host="127.0.0.1", port=8742)
+    token = server_token()
+    print(f"Demo app: open http://127.0.0.1:8742/?token={token}")
+    uvicorn.run(create_demo_app(token), host="127.0.0.1", port=8742)
     return 0
 
 

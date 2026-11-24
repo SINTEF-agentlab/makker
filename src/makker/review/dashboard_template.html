@@ -142,7 +142,7 @@ const el = (t, c, h) => { const e=document.createElement(t); if(c)e.className=c;
   if(h!==undefined)e.innerHTML=h; return e; };
 const esc = s => (s||'').replace(/[&<>"]/g, m =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
-const sevClass = s => 'pill sev-'+s;
+const sevClass = s => 'pill sev-'+esc(s);
 function openTranscript(sid) {
   const url = TRANSCRIPTS[sid]
     ? URL.createObjectURL(new Blob([TRANSCRIPTS[sid]], {type:'text/html'}))
@@ -242,7 +242,7 @@ function render() {
     const stale = i.stale ? ` <span class="pill stale" title="last seen on ${esc(i.last_version)}, not since">possibly fixed</span>` : '';
     tr.innerHTML =
       `<td class="tnum" style="font-weight:600">${i.priority}</td>`+
-      `<td><span class="${sevClass(i.severity)}">${i.severity}</span></td>`+
+      `<td><span class="${sevClass(i.severity)}">${esc(i.severity)}</span></td>`+
       `<td>${esc(i.title)}${stale}</td>`+
       `<td class="tnum">${i.count}×</td>`+
       `<td class="tnum">${i.sessions.length}</td>`+
@@ -305,7 +305,7 @@ function openIssue(i) {
   document.getElementById('dlg-title').innerHTML =
     `<div><div style="font-weight:650">${esc(i.title)}</div>`+
     `<div class="mut" style="margin-top:4px">`+
-    `<span class="${sevClass(i.severity)}">${i.severity}</span> · ${esc(i.category)} · `+
+    `<span class="${sevClass(i.severity)}">${esc(i.severity)}</span> · ${esc(i.category)} · `+
     `fix: ${esc(i.fix_target)} · seen ${i.count}× in ${i.sessions.length} session(s)${span}${staleNote}</div></div>`;
   const b = document.getElementById('dlg-body'); b.innerHTML='';
 

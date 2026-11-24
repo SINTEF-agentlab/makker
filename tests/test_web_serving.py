@@ -16,6 +16,20 @@ from fastapi.testclient import TestClient
 from starlette.responses import Response
 
 from makker.interfaces.server.app import WEB_DIST_DIR, _ui_dir, create_app
+from makker.interfaces.server.manager import SessionManager
+
+
+def _app_with_live_plots(**kwargs):
+    """An app whose session ``sid-1`` has a live plot server, secret ``s3cret``."""
+    from types import SimpleNamespace
+
+    async def unused_factory(**_kwargs):
+        raise AssertionError("no session should start")
+
+    manager = SessionManager(host_factory=unused_factory)
+    session = SimpleNamespace(web_plot_secret="s3cret", web_plot_port=None)
+    manager._hosts["sid-1"] = SimpleNamespace(session=session)
+    return create_app(manager, ui=False, **kwargs)
 
 
 def test_built_app_is_present_and_served() -> None:
@@ -76,10 +90,10 @@ def test_assets_load_through_prefix_stripping_proxy(prefix: str, trailing_slash:
 
 
 def test_popout_wrapper_uses_base_path() -> None:
-    with TestClient(create_app(ui=False, base_path="/restricted")) as client:
+    with TestClient(_app_with_live_plots(base_path="/restricted")) as client:
         resp = client.get("/popout/sid-1", params={"route": "res--pop2", "w": 1600, "h": 900})
         assert resp.status_code == 200
-        assert 'src="/restricted/live/sid-1/viz/res--pop2"' in resp.text
+        assert 'src="/restricted/live/sid-1/s3cret/viz/res--pop2"' in resp.text
         assert "/restricted/popout/sid-1/refit?route=res--pop2" in resp.text
 
 
@@ -93,11 +107,11 @@ def test_no_ui_mount_when_disabled() -> None:
 def test_popout_wrapper_stages_the_live_route() -> None:
     # The popup's wrapper page embeds the live route at the figure's real size
     # and scales it to the window; it never echoes an arbitrary route string.
-    with TestClient(create_app(ui=False)) as client:
+    with TestClient(_app_with_live_plots()) as client:
         resp = client.get("/popout/sid-1", params={"route": "res--pop2", "w": 1600, "h": 900})
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/html")
-        assert 'src="/live/sid-1/viz/res--pop2"' in resp.text
+        assert 'src="/live/sid-1/s3cret/viz/res--pop2"' in resp.text
         assert "let W = 1600, H = 900;" in resp.text
         # The window's base canvas is painted before any CSS applies and is
         # white until the page declares its schemes; without this a resize
@@ -112,10 +126,10 @@ def test_popout_wrapper_stages_the_live_route() -> None:
         assert "/popout/sid-1/refit?route=res--pop2" in resp.text
 
         # The refit endpoint validates like the wrapper and is 204 best-effort
-        # (no session here, so the fallback presentation stands).
+        # (no such session, so the fallback presentation stands).
         assert (
             client.post(
-                "/popout/sid-1/refit", params={"route": "res--pop2", "w": 1200, "h": 900}
+                "/popout/sid-2/refit", params={"route": "res--pop2", "w": 1200, "h": 900}
             ).status_code
             == 204
         )

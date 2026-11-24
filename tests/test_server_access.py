@@ -1,6 +1,9 @@
-"""Only the server's own pages may drive it (interfaces/server/access.py)."""
+"""Only the token's holder, from the server's own pages, may drive it (access.py)."""
 
 from __future__ import annotations
+
+import os
+import stat
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,7 +12,14 @@ from starlette.responses import PlainTextResponse
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from makker.interfaces.server.access import OriginGuard, normalize_origin
+from makker.interfaces.server.access import (
+    TOKEN_ENV_VAR,
+    OriginGuard,
+    TokenGuard,
+    normalize_origin,
+    server_token,
+    token_path,
+)
 
 SERVER = "http://127.0.0.1:8742"
 
@@ -127,12 +137,92 @@ def test_the_server_is_guarded(tmp_path) -> None:
     async def unused_factory(**_kwargs):
         raise AssertionError("no session should start")
 
-    app = create_app(SessionManager(host_factory=unused_factory), default_sim="jutuldarcy")
+    app = create_app(
+        SessionManager(host_factory=unused_factory), default_sim="jutuldarcy", token=TOKEN
+    )
     with TestClient(app) as client:
-        response = client.post("/sessions", json={}, headers={"origin": "https://evil.example"})
+        assert client.get("/sessions").status_code == 401
+        assert client.get("/sessions", headers=BEARER).status_code == 200
+        # A live plot's URL is its own capability (the secret in its route), so the
+        # proxy answers without the token; here there is no plot server to reach.
+        assert client.get("/live/2026-01-01-0000-abcd/s3cret/viz/a").status_code == 404
+        response = client.post(
+            "/sessions", json={}, headers={"origin": "https://evil.example", **BEARER}
+        )
         assert response.status_code == 403
         stream = "/sessions/2026-01-01-0000-abcd/stream"
         with pytest.raises(WebSocketDisconnect) as refused:  # noqa: SIM117
             with client.websocket_connect(stream, headers={"origin": "https://evil.example"}):
                 pass
         assert refused.value.code == 1008
+
+
+# --- The token ----------------------------------------------------------------
+
+TOKEN = "s3cret-token"
+BEARER = {"authorization": f"Bearer {TOKEN}"}
+HTML = {"accept": "text/html,application/xhtml+xml"}
+
+
+def _token_client(base_path: str = "") -> TestClient:
+    app = Starlette(routes=[Route("/thing", _ok), WebSocketRoute("/ws", _echo)])
+    return TestClient(TokenGuard(app, token=TOKEN, base_path=base_path), base_url=SERVER)
+
+
+def test_every_request_needs_the_token() -> None:
+    client = _token_client()
+    assert client.get("/thing").status_code == 401
+    assert client.get("/thing", headers={"authorization": "Bearer wrong"}).status_code == 401
+    assert client.get("/thing", headers=BEARER).text == "ok"
+    assert client.get("/thing", params={"token": TOKEN}).text == "ok"  # a script's GET
+    assert _connects(client) is False
+    assert _connects(client, **BEARER) is True
+    with client.websocket_connect(f"/ws?token={TOKEN}") as ws:
+        assert ws.receive_text() == "hello"
+
+
+def test_open_paths_pass_without_the_token() -> None:
+    app = Starlette(routes=[Route("/live/s/x", _ok), Route("/thing", _ok)])
+    guard = TokenGuard(app, token=TOKEN, open_prefixes=("/live/",))
+    client = TestClient(guard, base_url=SERVER)
+    assert client.get("/live/s/x").text == "ok"
+    assert client.get("/thing").status_code == 401
+
+
+def test_a_browser_without_the_token_is_told_to_open_the_link() -> None:
+    page = _token_client().get("/thing", headers=HTML)
+    assert page.status_code == 401
+    assert "?token=" in page.text
+
+
+@pytest.mark.parametrize(
+    ("base_path", "target"), [("", "/thing"), ("/restricted", "/restricted/thing")]
+)
+def test_the_link_swaps_the_token_for_a_cookie(base_path, target) -> None:
+    client = _token_client(base_path)
+    page = client.get("/thing", params={"token": TOKEN, "data": "a b"}, headers=HTML)
+
+    assert page.status_code == 200
+    assert f'location.replace("{target}?data=a+b")' in page.text
+    assert TOKEN not in page.text  # the address the page moves on to drops it
+    cookie = page.headers["set-cookie"].lower()
+    assert "httponly" in cookie
+    assert "samesite=strict" in cookie
+    assert f"path={base_path or '/'}" in cookie
+    if not base_path:  # (behind a proxy, the browser sends it under the prefix)
+        assert client.get("/thing").text == "ok"
+    # The cookie opens WebSockets too, the live views' included. (The test client
+    # opens them at another host, so it doesn't attach the saved cookie itself.)
+    assert _connects(client, cookie=f"makker-token={TOKEN}") is True
+
+
+def test_the_server_token_is_private_and_stays_the_same(monkeypatch) -> None:
+    monkeypatch.delenv(TOKEN_ENV_VAR, raising=False)
+    first = server_token()
+    assert len(first) >= 32
+    assert server_token() == first
+    if os.name == "posix":
+        assert stat.S_IMODE(token_path().stat().st_mode) == 0o600
+
+    monkeypatch.setenv(TOKEN_ENV_VAR, "from-the-launcher")
+    assert server_token() == "from-the-launcher"

@@ -261,6 +261,10 @@ def run(args: argparse.Namespace) -> int:
         ):
             return 1
 
+    from makker.interfaces.server.access import server_token
+    from makker.interfaces.server.app import normalize_base_path
+
+    token = server_token()
     print(
         f"makker {__version__.split('+')[0]} server on http://{args.host}:{args.port} "
         f"(simulator: {sim}"
@@ -271,6 +275,11 @@ def run(args: argparse.Namespace) -> int:
         + ")",
         file=sys.stderr,
     )
+    if args.base_path:
+        link = f"{normalize_base_path(args.base_path)}/?token={token} at your proxy's address"
+    else:
+        link = f"http://{args.host}:{args.port}/?token={token}"
+    print(f"Open {link}", file=sys.stderr)
     # Serving this computer only: no reverse proxy in front (that would set
     # --base-path), and bound to a loopback address.
     local = is_loopback_host(args.host) and not args.base_path
@@ -290,6 +299,7 @@ def run(args: argparse.Namespace) -> int:
         updater=updater,
         local_only=local,
         allowed_origins=args.allowed_origin,
+        token=token,
     )
     server = uvicorn.Server(
         uvicorn.Config(app, host=args.host, port=args.port, timeout_graceful_shutdown=5)

@@ -541,6 +541,25 @@ def test_a_restarted_server_starts_even_if_something_needs_fixing(web_run, monke
     assert calls.updater.status()["job"]["state"] == "done"
 
 
+@pytest.mark.parametrize(
+    ("base_path", "link"),
+    [
+        ("", "Open http://127.0.0.1:8742/?token={token}\n"),
+        ("/restricted", "Open /restricted/?token={token} at your proxy's address\n"),
+    ],
+)
+def test_the_server_asks_for_its_token(web_run, capsys, base_path, link) -> None:
+    from makker.interfaces.server.access import TokenGuard, server_token
+
+    web, calls = web_run
+    assert web.run(_web_args(base_path=base_path)) == 0
+    token = server_token()
+    guard = next(m.kwargs for m in calls.app.user_middleware if m.cls is TokenGuard)
+    # Live plots carry their own capability (the secret in their routes).
+    assert guard == {"token": token, "base_path": base_path, "open_prefixes": ("/live/",)}
+    assert link.format(token=token) in capsys.readouterr().err
+
+
 def _guard(app):
     from makker.interfaces.server.access import OriginGuard
 

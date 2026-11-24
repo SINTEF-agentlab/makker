@@ -23,7 +23,8 @@ on its own or work through it with you.</p>
 <span class="ja-t-dim">$</span> mkdir my-battery-run &amp;&amp; cd my-battery-run
 <span class="ja-t-dim">$</span> makker init --sim battmo
 <span class="ja-t-dim">$</span> makker
-Makker server on <span class="ja-t-ok">http://127.0.0.1:8742</span> (simulator: battmo)</code></pre>
+Makker server on http://127.0.0.1:8742 (simulator: battmo)
+Open <span class="ja-t-ok">http://127.0.0.1:8742/?token=…</span></code></pre>
 </div>
 </div>
 
