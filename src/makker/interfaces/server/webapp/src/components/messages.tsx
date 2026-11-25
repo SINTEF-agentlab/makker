@@ -366,7 +366,3 @@ export function HelpCard() {
     </div>
   );
 }
-
-export function ContextCard({ markdown }: { markdown: string }) {
-  return <Markdown text={markdown} className="context-card markdown" />;
-}

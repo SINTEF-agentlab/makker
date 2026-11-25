@@ -59,8 +59,8 @@ fire only when the cheaper ones are not enough:
   back to by value. The agent reads a moved result back with `read_file`. The
   change is stored in the conversation, in one chunk per step, so the prompt
   stays the same between calls for provider caching; the trace keeps the full
-  text. Each step is a `context_offload` trace event, and both front ends show
-  a note for it (`agent/offload.py`). This replaced clearing old results to a
+  text. Each step is a `context_offload` trace event (`agent/offload.py`),
+  which the context view counts; the chat does not announce it. This replaced clearing old results to a
   bare `[cleared]` on every call, which left the agent nothing to read back.
 - **Summarization.** When offloading is not enough and the conversation reaches
   the compaction point (85% of the window, earlier for a model with a large
@@ -73,11 +73,6 @@ fire only when the cheaper ones are not enough:
   compaction point and replacing the one `create_deep_agent` installs (same
   name), and non-mutating; `TraceRecorder` records each compaction. We lean on
   the stock middleware so upstream improvements arrive without porting.
-
-`/context` shows measured usage by category (the last call's `usage_metadata`
-is exactly what the conversation costs to send) plus both the offloading and the
-summarization thresholds, so it is clear what will happen as the window fills.
-The status bar keeps a `ctx` percentage in view (yellow at 70%, red at 90%).
 
 Every consumer reads one context budget (`context_budget.py`), resolved when
 the agent is built and on every model switch: the window, where it came from,
@@ -117,3 +112,28 @@ the conclusion, not the exploration. The seam exists per simulator
 (`subagent_factories`); a general source-exploration subagent (so that browsing
 installed package source never enters the main context at all) is the planned
 next step.
+
+## Seeing it
+
+The context view (`/context` in both front ends; in the browser also the ring
+under the message box) shows how full the context is and what fills it. Its
+figures come from the trace, so a resumed session shows the same as a live one,
+and both front ends show the same numbers:
+
+- **How full.** The last model call's input plus its output: the reply joins the
+  conversation the next call sends, and the summarizer compares the same figure
+  with the compaction point.
+- **What fills it.** The recorder measures each request as it is sent, part by
+  part: system prompt, tool definitions, skills, memory, the conversation
+  summary, your messages, the agent's messages, and tool results. The parts are
+  counted by characters and scaled to the provider's measured total, so the
+  total is exact and the split a close estimate (`agent/context_measure.py`).
+  In the browser, the tool results expand to the largest ones.
+- **Free space** up to the compaction point, the compaction buffer, and how many
+  tool results and compactions have been moved out so far.
+
+The ring (the terminal shows a `ctx` percentage in its status bar) updates after
+every model call, when a turn ends however it ends, on reconnect, after
+`/compact` and after a model switch. After `/compact` or a switch the figure is
+an estimate (marked `~`) until the next call measures it. It turns amber, then
+red, as the context nears the compaction point.

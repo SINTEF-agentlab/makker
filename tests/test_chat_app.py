@@ -12,7 +12,6 @@ from textual.widgets import Footer
 
 from _tui import submit_prompt, wait_until_ready
 from makker.agent.turns import TurnTextDelta, TurnToolEvent
-from makker.context_budget import ContextBudget
 from makker.interfaces.tui import TUIApp
 from makker.interfaces.tui.approval_menu import ApprovalMenu
 from makker.interfaces.tui.prompt import PromptTextArea
@@ -1283,15 +1282,31 @@ def _usage_agent() -> ScriptedV3Agent:
     return ScriptedV3Agent([v3_message_event(final), v3_values_event([human, final])])
 
 
-async def test_context_command_reports_usage(session: Session, monkeypatch) -> None:
-    from makker import models
-    from makker.interfaces.tui.widgets import StatusBar
+def _record_model(session: Session, window: int) -> None:
+    """What building the agent records: the model and its window."""
+    from makker.trace.schema import MODEL, model_payload
 
-    monkeypatch.setattr(models, "context_window", lambda model_id: 400_000)
+    session.trace.append(
+        MODEL,
+        model_payload(
+            model="openai:gpt-5.4-mini",
+            window=window,
+            window_source="provider",
+            compact_at=int(window * 0.85),
+            offload_at=round(int(window * 0.85) * 0.7),
+            settings={},
+        ),
+    )
+
+
+async def test_context_command_reports_usage(session: Session) -> None:
+    from makker.interfaces.tui.widgets import StatusBar
+    from makker.trace.schema import MODEL_USAGE
+
+    _record_model(session, 400_000)
     app = TUIApp(agent=_usage_agent(), session=session, model_label="openai:gpt-5.4-mini")
     async with app.run_test() as pilot:
         await wait_until_ready(app)
-        await app.workers.wait_for_complete()
 
         # Before any model call the panel explains itself instead of guessing.
         await app._handle_command("/context")
@@ -1299,6 +1314,10 @@ async def test_context_command_reports_usage(session: Session, monkeypatch) -> N
         notes = [b.content_text for b in app.query(MessageBlock) if b.border_title == "Context"]
         assert any("No model calls yet" in text for text in notes)
 
+        # The recorder writes the call's usage during the turn.
+        session.trace.append(
+            MODEL_USAGE, {"input_tokens": 30_000, "output_tokens": 2_000, "total_tokens": 32_000}
+        )
         await submit_prompt(pilot, "hello")
         await app._handle_command("/context")
         await pilot.pause()
@@ -1466,10 +1485,19 @@ async def test_compact_updates_context_figure_immediately(session: Session, monk
     until the next reply."""
     from makker.agent import summarization
     from makker.interfaces.tui.widgets import StatusBar
+    from makker.trace.schema import CONTEXT_COMPACTION, MODEL_USAGE, compaction_payload
 
+    _record_model(session, 200_000)
+    session.trace.append(MODEL_USAGE, {"input_tokens": 30_000, "output_tokens": 1_000})
     app = TUIApp(agent=_stub_agent(), session=session, model_label="openai:gpt-5.4-mini")
 
     async def fake_compact(agent, *, thread_id, model, backend=None, trace=None):
+        trace.append(
+            CONTEXT_COMPACTION,
+            compaction_payload(
+                summarized=30, kept=10, offloaded=False, manual=True, freed_tokens=14_000
+            ),
+        )
         return summarization.CompactResult(
             messages_summarized=30, messages_kept=10, freed_tokens=14_000
         )
@@ -1478,25 +1506,21 @@ async def test_compact_updates_context_figure_immediately(session: Session, monk
 
     async with app.run_test() as pilot:
         await wait_until_ready(app)
-        app._context_budget = ContextBudget(window=200_000, source="provider")
-        app._last_usage = {"input_tokens": 30_000, "output_tokens": 1_000}
-        app._first_usage = {"input_tokens": 8_500}
-        app._model_calls = 17
-        app._refresh_context_status()
         assert app.query_one("#status", StatusBar)._context_label == "ctx 16%"  # 31k/200k
 
         await app._handle_command("/compact")
         await wait_until_ready(app)
         await pilot.pause()
 
-        # 31k - 14k freed = 17k → 8.5% → "ctx 8%", immediately.
-        assert app.query_one("#status", StatusBar)._context_label == "ctx 8%"
-        assert app._last_usage.get("estimated") is True
+        # 31k - 14k freed = 17k → 8.5% → "ctx ~8%", immediately, marked as an estimate.
+        assert app.query_one("#status", StatusBar)._context_label == "ctx ~8%"
 
         await app._handle_command("/context")
         await pilot.pause()
         panels = [b.content_text for b in app.query(MessageBlock) if b.border_title == "Context"]
-        assert panels and "estimated after compaction" in panels[-1]
+        assert panels and "**~17k of 200k tokens** (8%)" in panels[-1]
+        assert "breakdown updates after the next model call" in panels[-1]
+        assert "| In context |" not in panels[-1]
 
 
 async def test_resolvable_approval_adds_no_redundant_note(session: Session) -> None:

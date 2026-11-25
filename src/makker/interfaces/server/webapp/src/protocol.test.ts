@@ -14,7 +14,7 @@ describe("parseServerMessage", () => {
 
 describe("SIDE_OUTPUT_TYPES", () => {
   it("covers mid-turn outputs but not agent content or command results", () => {
-    for (const t of ["usage", "viz", "artifact", "ui"] as const) {
+    for (const t of ["context", "viz", "artifact", "ui"] as const) {
       expect(SIDE_OUTPUT_TYPES.has(t)).toBe(true);
     }
     expect(SIDE_OUTPUT_TYPES.has("text")).toBe(false);

@@ -1,20 +1,45 @@
-"""Render context-usage figures for the ``/context`` panel and status bar.
+"""The context view: how full the context is, what fills it, and what was moved out.
 
-Numbers come from the provider's ``usage_metadata`` on each model call (also
-traced as ``model_usage`` events), so they are measured, not estimated: the
-last call's input tokens are exactly what the conversation costs to send —
-system prompt, tools, skills, memory index, and history together.
+Everything here reads the session's trace, so a resumed session shows the same as
+a live one and both front ends show the same figures:
+
+- the ``model`` event holds the window, where it came from, and the points where
+  offloading and compaction run;
+- each ``model_usage`` event holds what the provider measured for a call, and
+  (under ``context``) what the request held, part by part;
+- ``context_offload`` and ``context_compaction`` events hold what was moved out.
+
+The context in use is the last call's input plus its output: the reply joins the
+conversation the next call sends. The summarizer compares the same figure with
+the compaction point.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from makker.context_budget import ContextBudget
+from makker.agent.context_measure import PARTS
+from makker.trace import TraceLog
+from makker.trace.schema import CONTEXT_COMPACTION, CONTEXT_OFFLOAD, MODEL, MODEL_USAGE
 
 _BAR_CELLS = 24
-_WARN_FRACTION = 0.7
-_HIGH_FRACTION = 0.9
+# The meter warns as the context nears the compaction point.
+_WARN_SHARE = 0.75
+_HIGH_SHARE = 0.9
+
+# Shown instead of the split while the figure is an estimate.
+ESTIMATE_NOTE = "The breakdown updates after the next model call."
+
+PART_LABELS = {
+    "system": "System prompt",
+    "tools": "Tool definitions",
+    "skills": "Skills",
+    "memory": "Memory",
+    "summary": "Conversation summary",
+    "user": "Your messages",
+    "assistant": "Agent messages",
+    "tool_results": "Tool results",
+}
 
 
 def format_tokens(count: int) -> str:
@@ -27,37 +52,155 @@ def format_tokens(count: int) -> str:
     return str(count)
 
 
-def context_tokens(usage: dict[str, Any]) -> int:
-    """Tokens the context holds after a model call (its input plus output)."""
+def tokens_after_call(usage: dict[str, Any]) -> int:
+    """The context a call leaves: its input plus its output."""
     return int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
 
 
-def context_fraction(usage: dict[str, Any], window: int | None) -> float | None:
-    if not window or window <= 0:
+def context_meter(trace: TraceLog) -> dict[str, Any] | None:
+    """How full the context is now, or None before the agent was first built.
+
+    ``used`` is None until a model call has measured it. It is ``estimated`` when
+    something changed since that call: a compaction made the context smaller (by
+    about its ``freed_tokens``), or the model was switched (another tokenizer
+    counts the same text differently).
+    """
+    model = trace.last_event((MODEL,))
+    if model is None:
         return None
-    return min(1.0, context_tokens(usage) / window)
+    info = model.payload
+    meter: dict[str, Any] = {
+        "model": info.get("model"),
+        "window": info.get("window"),
+        "window_source": info.get("window_source"),
+        "compact_at": info.get("compact_at"),
+        "offload_at": info.get("offload_at"),
+        "used": None,
+        "estimated": False,
+    }
+    usage = trace.last_event((MODEL_USAGE,))
+    if usage is None:
+        return meter
+    used = tokens_after_call(usage.payload)
+    estimated = False
+    if model.id > usage.id:
+        measured_on = trace.last_event((MODEL,), before=usage.id)
+        estimated = measured_on is None or measured_on.payload.get("model") != info.get("model")
+    for event in trace.events_after(usage.id, kinds=(CONTEXT_COMPACTION,)):
+        used -= int(event.payload.get("freed_tokens") or 0)
+        estimated = True
+    meter["used"] = max(0, used)
+    meter["estimated"] = estimated
+    return meter
 
 
-def usage_alert(usage: dict[str, Any] | None, window: int | None) -> str:
-    """``ok`` / ``warn`` / ``high`` for status-bar styling."""
-    fraction = context_fraction(usage, window) if usage else None
-    if fraction is None:
+def context_report(trace: TraceLog) -> dict[str, Any]:
+    """Everything the context view shows, as data both front ends render."""
+    meter = context_meter(trace)
+    usage_event = trace.last_event((MODEL_USAGE,))
+    usage = usage_event.payload if usage_event else {}
+    measured = usage.get("context") or {}
+    parts = measured.get("parts") or {}
+
+    breakdown = [
+        {"key": key, "label": PART_LABELS[key], "tokens": int(parts[key])}
+        for key in PARTS
+        if parts.get(key)
+    ]
+    if not breakdown and usage:
+        # Recorded before calls were measured part by part.
+        breakdown = [{"key": "all", "label": "In context", "tokens": tokens_after_call(usage)}]
+
+    moved = {
+        "results": sum(int(e.payload.get("count") or 0) for e in trace.events_of(CONTEXT_OFFLOAD)),
+        "compactions": len(trace.events_of(CONTEXT_COMPACTION)),
+    }
+    return {
+        "meter": meter,
+        "breakdown": breakdown,
+        "largest": list(measured.get("largest") or ()),
+        "moved": moved,
+    }
+
+
+def usage_alert(meter: dict[str, Any] | None) -> str:
+    """``ok`` / ``warn`` / ``high`` for status-bar styling, by how near compaction is."""
+    if not meter or meter.get("used") is None:
         return "ok"
-    if fraction >= _HIGH_FRACTION:
+    limit = meter.get("compact_at") or meter.get("window")
+    if not limit:
+        return "ok"
+    share = meter["used"] / limit
+    if share >= _HIGH_SHARE:
         return "high"
-    if fraction >= _WARN_FRACTION:
+    if share >= _WARN_SHARE:
         return "warn"
     return "ok"
 
 
-def status_label(usage: dict[str, Any] | None, window: int | None) -> str | None:
-    """Short ``ctx …`` figure for the status bar, or ``None`` before any turn."""
-    if not usage:
+def status_label(meter: dict[str, Any] | None) -> str | None:
+    """Short ``ctx …`` figure for the status bar, or None before the first call."""
+    if not meter or meter.get("used") is None:
         return None
-    fraction = context_fraction(usage, window)
+    fraction = _fraction(meter)
+    approx = "~" if meter.get("estimated") else ""
     if fraction is None:
-        return f"ctx {format_tokens(context_tokens(usage))}"
-    return f"ctx {fraction:.0%}"
+        return f"ctx {approx}{format_tokens(meter['used'])}"
+    return f"ctx {approx}{fraction:.0%}"
+
+
+def render_context_markdown(report: dict[str, Any]) -> str:
+    """The context view as markdown, for the terminal's ``/context``."""
+    meter = report.get("meter") or {}
+    window = int(meter.get("window") or 0)
+    used = meter.get("used")
+    compact_at = int(meter.get("compact_at") or 0)
+    lines: list[str] = []
+
+    if used is None:
+        lines.append("No model calls yet.")
+    else:
+        approx = "~" if meter.get("estimated") else ""
+        if window:
+            lines.append(
+                f"**{approx}{format_tokens(used)} of {format_tokens(window)} tokens**"
+                f" ({_share(used / window)})"
+            )
+        else:
+            lines.append(f"**{approx}{format_tokens(used)} tokens**")
+    if meter.get("model"):
+        assumed = " · window size assumed" if meter.get("window_source") == "assumed" else ""
+        lines.append(f"`{meter['model']}`{assumed}")
+    if used is not None and window:
+        lines.append(f"`{_bar(min(1.0, used / window))}`")
+    if meter.get("estimated"):
+        # The split is the last call's, from before the compaction or switch.
+        lines += ["", ESTIMATE_NOTE]
+
+    breakdown = [] if meter.get("estimated") else report.get("breakdown") or []
+    if breakdown:
+        lines += ["", "| | Tokens | |", "|---|---:|---:|"]
+        lines += [_row(part["label"], int(part["tokens"]), window) for part in breakdown]
+        if window and compact_at and used is not None:
+            lines.append(_row("Free space", max(0, compact_at - used), window))
+            lines.append(_row("Compaction buffer", max(0, window - compact_at), window))
+
+    moved = report.get("moved") or {}
+    bits = []
+    if moved.get("results"):
+        bits.append(f"{moved['results']} tool results to files")
+    if moved.get("compactions"):
+        count = moved["compactions"]
+        bits.append(f"{count} compaction{'s' if count != 1 else ''}")
+    if bits:
+        lines += ["", "Moved out: " + ", ".join(bits) + "."]
+    return "\n".join(lines)
+
+
+def _fraction(meter: dict[str, Any] | None) -> float | None:
+    if not meter or meter.get("used") is None or not meter.get("window"):
+        return None
+    return min(1.0, meter["used"] / meter["window"])
 
 
 def _bar(fraction: float) -> str:
@@ -65,183 +208,10 @@ def _bar(fraction: float) -> str:
     return "█" * filled + "░" * (_BAR_CELLS - filled)
 
 
-def _detail(value: Any, label: str) -> str:
-    return f" ({label} {format_tokens(int(value))})" if value else ""
+def _row(label: str, tokens: int, window: int) -> str:
+    share = _share(tokens / window) if window else ""
+    return f"| {label} | {format_tokens(tokens)} | {share} |"
 
 
-def _pct(tokens: int, window: int | None) -> str:
-    if not window:
-        return ""
-    return f" ({tokens / window:.1%})"
-
-
-def render_context_panel(
-    *,
-    model_label: str | None,
-    usage: dict[str, Any] | None,
-    budget: ContextBudget | None,
-    first_usage: dict[str, Any] | None = None,
-    model_calls: int = 0,
-    system_prompt_tokens: int | None = None,
-    memory_index_tokens: int | None = None,
-    memory_notes: int = 0,
-) -> str:
-    """The ``/context`` card body (markdown).
-
-    The headline and the last-call figures are measured (``usage_metadata``).
-    ``system_prompt_tokens`` / ``memory_index_tokens`` are caller-supplied
-    approximations (marked ``~``) used to split the measured first-call input
-    into categories; the remainder is the tool definitions, skill index, and
-    framework prompt, which only the provider can count exactly.
-    """
-    if not usage:
-        return (
-            "No model calls yet — context usage appears after the first reply.\n\n"
-            "The context holds the system prompt, tool definitions, the memory "
-            "index, and the conversation; every model call sends all of it."
-        )
-
-    held = context_tokens(usage)
-    estimated = bool(usage.get("estimated"))
-    window = budget.window if budget else None
-    fraction = context_fraction(usage, window)
-    if fraction is None:
-        headline = f"**{format_tokens(held)} tokens** in context (window size unknown)"
-    else:
-        headline = (
-            f"`{_bar(fraction)}` **{fraction:.0%}** — "
-            f"{format_tokens(held)} of {format_tokens(window or 0)} tokens"
-        )
-
-    lines = [headline, ""]
-    if budget and budget.source == "assumed":
-        lines += [
-            f"_No source reports this model's window, so {format_tokens(budget.window)} "
-            "is assumed. If it is smaller, the provider rejects a long request and the "
-            "conversation is compacted then._",
-            "",
-        ]
-    if estimated:
-        # After /compact no model call has measured the new size yet; the
-        # figures are an estimate until the next reply.
-        lines += ["_estimated after compaction — refined on your next reply_", ""]
-    baseline = int(first_usage.get("input_tokens") or 0) if first_usage else 0
-    lines += _category_lines(
-        held=held,
-        baseline=baseline,
-        window=window,
-        system_prompt_tokens=system_prompt_tokens,
-        memory_index_tokens=memory_index_tokens,
-        memory_notes=memory_notes,
-        compact_trigger_tokens=budget.compact_at if budget else None,
-        offload_trigger_tokens=budget.offload_at if budget else None,
-    )
-
-    input_tokens = int(usage.get("input_tokens") or 0)
-    output_tokens = int(usage.get("output_tokens") or 0)
-    cache_read = (usage.get("input_token_details") or {}).get("cache_read")
-    reasoning = (usage.get("output_token_details") or {}).get("reasoning")
-    lines += [
-        "",
-        f"Last call: input {format_tokens(input_tokens)}{_detail(cache_read, 'cache-read')}"
-        f" · output {format_tokens(output_tokens)}{_detail(reasoning, 'reasoning')}",
-    ]
-    if baseline and model_calls > 1 and not estimated:
-        # Growth tracks the trajectory across model calls; after a compaction
-        # the baseline predates the summary, so the comparison is meaningless
-        # until the next measured turn.
-        growth = held - baseline
-        lines.append(
-            f"Conversation growth: {'+' if growth >= 0 else '-'}{format_tokens(abs(growth))}"
-            f" over {model_calls} model calls"
-        )
-    if model_label:
-        lines.append(f"Model: `{model_label}`")
-    lines.append("`/compact` summarizes older turns to free space now")
-    return "\n".join(lines)
-
-
-def _category_lines(
-    *,
-    held: int,
-    baseline: int,
-    window: int | None,
-    system_prompt_tokens: int | None,
-    memory_index_tokens: int | None,
-    memory_notes: int,
-    compact_trigger_tokens: int | None,
-    offload_trigger_tokens: int | None = None,
-) -> list[str]:
-    """Estimated usage by category, Σ = the window when it is known."""
-    lines = ["Estimated usage by category:"]
-
-    if baseline and system_prompt_tokens is not None:
-        lines.append(
-            f"- system prompt: ~{format_tokens(system_prompt_tokens)}"
-            f"{_pct(system_prompt_tokens, window)}"
-        )
-        memory = memory_index_tokens or 0
-        if memory:
-            notes = f" — {memory_notes} notes load on demand" if memory_notes else ""
-            lines.append(f"- memory index: ~{format_tokens(memory)}{_pct(memory, window)}{notes}")
-        framework = max(0, baseline - system_prompt_tokens - memory)
-        lines.append(
-            f"- tools, skills & framework: ~{format_tokens(framework)}{_pct(framework, window)}"
-        )
-        conversation = max(0, held - baseline)
-        lines.append(f"- conversation: ~{format_tokens(conversation)}{_pct(conversation, window)}")
-    elif baseline:
-        lines.append(f"- fixed per call: {format_tokens(baseline)}{_pct(baseline, window)}")
-        conversation = max(0, held - baseline)
-        lines.append(f"- conversation: ~{format_tokens(conversation)}{_pct(conversation, window)}")
-    else:
-        lines.append(f"- in context: {format_tokens(held)}{_pct(held, window)}")
-
-    trigger = compact_trigger_tokens
-    if window and trigger and trigger <= window:
-        free = max(0, trigger - held)
-        buffer = window - trigger
-        lines.append(f"- free space: {format_tokens(free)}{_pct(free, window)}")
-        # Offloading comes before summarization, so note it first.
-        if offload_trigger_tokens and offload_trigger_tokens < trigger:
-            lines.append(
-                f"- older tool results move to files at {format_tokens(offload_trigger_tokens)}"
-                " (before any summary)"
-            )
-        lines.append(
-            f"- auto-compact buffer: {format_tokens(buffer)}{_pct(buffer, window)}"
-            f" — summarization triggers at {format_tokens(trigger)}"
-        )
-    elif trigger:
-        lines.append(f"- auto-compact triggers at {format_tokens(trigger)} tokens")
-    return lines
-
-
-def context_component_estimates(session, memory_dir) -> tuple[int | None, int | None]:
-    """Approximate token counts for the fixed context cost the harness owns.
-
-    Covers the base session prompt and the memory index (``None`` for a part
-    that cannot be assembled). An approximation by design: capability prompt
-    fragments and tool schemas ride on top, and the measured ``usage_metadata``
-    figures remain the ground truth.
-    """
-    from langchain_core.messages.utils import count_tokens_approximately
-
-    from makker.agent.memory import MEMORY_INDEX_FILENAME
-    from makker.agent.prompts import assemble_session_prompt
-
-    try:
-        prompt = assemble_session_prompt(
-            session.simulator,
-            open_windows=session.open_windows,
-            resumed=session.resumed,
-        )
-        system_tokens = int(count_tokens_approximately([prompt]))
-    except Exception:
-        system_tokens = None
-    try:
-        index = (memory_dir / MEMORY_INDEX_FILENAME).read_text(encoding="utf-8")
-        memory_tokens = int(count_tokens_approximately([index]))
-    except OSError:
-        memory_tokens = None
-    return system_tokens, memory_tokens
+def _share(fraction: float) -> str:
+    return "<1%" if 0 < fraction < 0.01 else f"{fraction:.0%}"

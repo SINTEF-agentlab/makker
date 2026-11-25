@@ -47,13 +47,6 @@ describe("compaction", () => {
     expect(byKind("sys-note")[0].text).toBe(compaction.text);
   });
 
-  it("shows an offload note the same way", () => {
-    state().beginWorking();
-    state().handle({ type: "offload", text: "Moved 5 older tool results to files.", count: 5, freed_tokens: 30000 });
-    expect(state().busy).toBe(true);
-    expect(byKind("sys-note").map((it) => it.text)).toEqual(["Moved 5 older tool results to files."]);
-  });
-
   it("replays as the same note", () => {
     state().replay([{ type: "user", text: "q" }, compaction]);
     expect(byKind("sys-note").map((it) => it.text)).toEqual([compaction.text]);
@@ -188,22 +181,26 @@ describe("interrupts", () => {
   });
 });
 
-describe("usage", () => {
-  it("reports a percentage of the context window when known", () => {
-    state().setContextWindow(1000);
-    state().handle({ type: "usage", input_tokens: 250, output_tokens: 10, total_tokens: 260, model_calls: 1 });
-    expect(state().usageLabel).toBe("25% ctx");
+describe("context meter", () => {
+  const meter = { model: "openai:m", window: 1000, compact_at: 850, offload_at: 595, used: 260, estimated: false };
+  it("takes the meter from each context message", () => {
+    state().handle({ type: "context", ...meter });
+    expect(state().context).toEqual(meter);
+    state().handle({ type: "context", ...meter, used: 400 });
+    expect(state().context?.used).toBe(400);
   });
-  it("falls back to a token count without a window", () => {
-    state().handle({ type: "usage", input_tokens: 2000, output_tokens: 0, total_tokens: 2000, model_calls: 1 });
-    expect(state().usageLabel).toBe("2.0k ctx");
+  it("takes the meter from the snapshot, and keeps none when it has none", () => {
+    state().handle({ type: "snapshot", messages: [], turn: [], busy: false, model: null, context: meter });
+    expect(state().context).toEqual(meter);
+    state().handle({ type: "snapshot", messages: [], turn: [], busy: false, model: null });
+    expect(state().context).toBeNull();
   });
 });
 
 describe("side outputs do not clear the thinking indicator", () => {
-  it("keeps working through usage and viz, clears on text", () => {
+  it("keeps working through context ticks and viz, clears on text", () => {
     state().beginWorking();
-    state().handle({ type: "usage", input_tokens: 1, output_tokens: 0, total_tokens: 1, model_calls: 1 });
+    state().handle({ type: "context", window: 1000, used: 10 });
     expect(state().working).toBe(true);
     state().handle({ type: "viz", url: "/a", kind: "plot" });
     expect(state().working).toBe(true);

@@ -23,10 +23,10 @@ from makker.trace import TraceLog
 from makker.trace.messages import content_to_str
 from makker.trace.schema import (
     CONTEXT_COMPACTION,
-    CONTEXT_OFFLOAD,
     HITL_REQUEST,
     HITL_RESPONSE,
     MESSAGE_USER,
+    MODEL_USAGE,
 )
 
 # The turn runs on langgraph's v3 event stream on purpose, which warns that it is
@@ -94,16 +94,25 @@ class TurnToolEvent:
 
 
 @dataclass(frozen=True)
-class TurnContextNote:
-    """The conversation was made smaller during the turn.
+class TurnCompaction:
+    """The conversation was compacted during the turn.
 
-    ``kind`` is ``compaction`` (older turns summarized) or ``offload`` (older tool
-    results moved to files); ``payload`` is the trace event's, and ``text`` the
-    note a front end shows for it.
+    ``payload`` is the ``context_compaction`` trace event's; ``text`` is the note
+    a front end shows for it.
     """
 
-    kind: str
     text: str
+    payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class TurnUsage:
+    """A model call finished and its usage was recorded: the context size changed.
+
+    ``payload`` is the trace's ``model_usage`` event. Front ends refresh their
+    context meter from the trace on it.
+    """
+
     payload: dict[str, Any]
 
 
@@ -403,16 +412,6 @@ async def _final_messages(run: Any) -> list[BaseMessage]:
 # Shared views over a turn's final messages (used by every interface).
 
 
-def usage_from_messages(messages: list[Any]) -> list[dict[str, Any]]:
-    """The turn's ``usage_metadata`` dicts, one per model call, oldest first."""
-
-    return [
-        dict(message.usage_metadata)
-        for message in messages
-        if isinstance(message, AIMessage) and getattr(message, "usage_metadata", None)
-    ]
-
-
 def final_assistant_text(messages: list[Any]) -> str:
     """Text of the turn's last *assistant* message (``""`` when there is none).
 
@@ -451,12 +450,13 @@ def _should_skip_tool_error(value: Any) -> bool:
 
 
 class _ContextWatch:
-    """Tell the front end when the conversation was made smaller during a turn.
+    """Tell the front end when the context changed during a turn.
 
-    Offloading and compaction happen around a model call, and their trace events
-    are written by then. The watch reads new ones from the trace when the next tool
-    starts and once more when the turn ends, and passes each on as a
-    ``TurnContextNote`` ahead of the event that revealed it.
+    A model call's compaction and usage are both recorded once the call is done.
+    The watch reads new events from the trace when the next tool starts and once
+    more when the turn ends, and passes each on ahead of the event that revealed
+    it: a ``TurnCompaction`` when the conversation was compacted, a ``TurnUsage``
+    when a call measured it.
     """
 
     def __init__(self, trace: TraceLog | None, on_message: MessageCallback | None) -> None:
@@ -467,27 +467,24 @@ class _ContextWatch:
     async def surface(self) -> None:
         if self._trace is None or self._on_message is None:
             return
-        for event in self._trace.events_after(
-            self._mark, kinds=(CONTEXT_COMPACTION, CONTEXT_OFFLOAD)
-        ):
+        from makker.agent.summarization import COMPACTION_NOTE
+
+        usage = None
+        for event in self._trace.events_after(self._mark, kinds=(CONTEXT_COMPACTION, MODEL_USAGE)):
             self._mark = event.id
-            await _emit(self._on_message, context_note(event.kind, event.payload))
+            if event.kind == MODEL_USAGE:
+                usage = event.payload  # only the newest matters
+            else:
+                note = TurnCompaction(text=COMPACTION_NOTE, payload=event.payload)
+                await _emit(self._on_message, note)
+        if usage is not None:
+            await _emit(self._on_message, TurnUsage(payload=usage))
 
     async def relay(self, message: Any) -> None:
         if isinstance(message, TurnToolEvent) and message.event == "started":
             await self.surface()
         if self._on_message is not None:
             await _emit(self._on_message, message)
-
-
-def context_note(kind: str, payload: dict[str, Any]) -> TurnContextNote:
-    """The front-end note for a ``context_compaction`` or ``context_offload`` event."""
-    from makker.agent.offload import describe_offload
-    from makker.agent.summarization import describe_compaction
-
-    if kind == CONTEXT_OFFLOAD:
-        return TurnContextNote(kind="offload", text=describe_offload(payload), payload=payload)
-    return TurnContextNote(kind="compaction", text=describe_compaction(payload), payload=payload)
 
 
 async def _emit(callback: MessageCallback, message: Any) -> None:

@@ -62,12 +62,12 @@ class ContextBudget:
     @property
     def offload_at(self) -> int:
         """The context size at which older tool results start moving to files."""
-        return int(self.compact_at * _OFFLOAD_AT)
+        return round(self.compact_at * _OFFLOAD_AT)
 
     @property
     def offload_to(self) -> int:
         """The context size offloading brings the conversation back down to."""
-        return int(self.compact_at * _OFFLOAD_TO)
+        return round(self.compact_at * _OFFLOAD_TO)
 
     @property
     def keep_tool_results(self) -> int:

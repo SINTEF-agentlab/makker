@@ -21,6 +21,7 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately
 
+from makker.agent.context_measure import MOVED_PREFIX
 from makker.context_budget import ContextBudget
 from makker.trace import TraceLog
 from makker.trace.schema import CONTEXT_OFFLOAD, offload_payload
@@ -31,8 +32,6 @@ _MIN_CHARS = 2_000
 _NEVER_OFFLOAD = frozenset({"record_attempt"})
 _PREVIEW_LINES = 5
 _PREVIEW_LINE_CHARS = 200
-# Opens every replacement, so a result is never moved twice.
-_MOVED = "[Moved out of the conversation to save context."
 # deepagents' own replacement for a result too large to keep in the first place.
 _EVICTED = "was saved in the filesystem at this path"
 
@@ -86,7 +85,7 @@ class ToolResultOffloadMiddleware(AgentMiddleware):
             message.id is None
             or not isinstance(content, str)
             or len(content) < _MIN_CHARS
-            or content.startswith(_MOVED)
+            or content.startswith(MOVED_PREFIX)
             or _EVICTED in content[:400]
             or message.name in _NEVER_OFFLOAD
         ):
@@ -123,19 +122,7 @@ def _replacement(path: str, content: str) -> str:
     else:
         preview = clip
     return (
-        f"{_MOVED} The full result ({len(lines)} lines) is in {path}; read it with "
+        f"{MOVED_PREFIX} The full result ({len(lines)} lines) is in {path}; read it with "
         "read_file (an offset and limit read part of it) rather than recalling it.]\n\n"
         + "\n".join(preview)
     )
-
-
-def describe_offload(payload: dict[str, Any]) -> str:
-    """The note every front end shows for a ``context_offload`` event."""
-    from makker.context_panel import format_tokens
-
-    count = payload.get("count") or 0
-    freed = payload.get("freed_tokens")
-    text = f"Moved {count} older tool result{'s' if count != 1 else ''} to files to free context"
-    if isinstance(freed, int) and freed > 0:
-        text += f" (about {format_tokens(freed)} tokens)"
-    return text + ". The agent can read them back."

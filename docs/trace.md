@@ -35,10 +35,10 @@ than restating the strings, and the table below is the payload contract.
 | `message_user` | `TurnRunner` | `content` |
 | `message_reasoning` | recorder middleware | `content` (the model's reasoning text) |
 | `message_assistant` | recorder middleware | `content` |
-| `model_usage` | recorder middleware | `input_tokens`, `output_tokens`, `total_tokens`, provider detail fields |
-| `model` | agent builder (session start, resume, model switch) | `model`, `window` and `window_source` (`provider`, `ollama` or `assumed`), `compact_at` (the context size at which automatic compaction runs), `settings` (the reasoning and output settings the model was built with) |
+| `model_usage` | recorder middleware | `input_tokens`, `output_tokens`, `total_tokens`, provider detail fields, and `context`: what the request held, part by part (`parts`: system prompt, tool definitions, skills index, memory, summary, user, assistant, tool results; they add up to input plus output), and its `largest` tool results |
+| `model` | agent builder (session start, resume, model switch) | `model`, `window` and `window_source` (`provider`, `ollama` or `assumed`), `compact_at` (the context size at which automatic compaction runs), `offload_at` (the size at which older tool results start moving to files), `settings` (the reasoning and output settings the model was built with) |
 | `context_offload` | offload middleware | `count` (older tool results moved to files to free context), `freed_tokens` (about how many tokens that freed) |
-| `context_compaction` | summarization middleware / `/compact` | `summarized`, `kept` (message counts, null when unknown), `offloaded`, `manual`, `cutoff` (the compaction's position in the checkpointed messages; it only grows, so each compaction is recorded once) |
+| `context_compaction` | summarization middleware / `/compact` | `summarized`, `kept` (message counts, null when unknown), `offloaded`, `manual`, `cutoff` (the compaction's position in the checkpointed messages; it only grows, so each compaction is recorded once), `freed_tokens` (about how much smaller the summary made the context) |
 | `tool_call` | recorder middleware | `id`, `name`, `args` |
 | `tool_result` | recorder middleware | `tool_call_id`, `name`, `content`, `status` |
 | `hitl_request` | `TurnRunner` | the pending tool call awaiting approval |

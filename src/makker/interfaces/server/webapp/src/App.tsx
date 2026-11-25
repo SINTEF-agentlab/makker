@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiKeys } from "./components/ApiKeys";
+import { ContextView } from "./components/Context";
 import { Canvas } from "./components/Canvas";
 import { Composer } from "./components/Composer";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -94,6 +95,7 @@ export function App() {
           <Canvas />
         </ErrorBoundary>
         <ApiKeys />
+        <ContextView />
         <UpdateDialog />
       </div>
     </SessionProvider>

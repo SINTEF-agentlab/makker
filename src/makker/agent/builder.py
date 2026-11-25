@@ -30,6 +30,7 @@ from deepagents import (
     register_harness_profile,
 )
 from deepagents.backends import CompositeBackend
+from deepagents.middleware.skills import SkillsMiddleware
 from deepagents.middleware.summarization import SummarizationMiddleware
 from langchain.agents.middleware import TodoListMiddleware
 
@@ -554,6 +555,7 @@ def build_agent(
             window=budget.window,
             window_source=budget.source,
             compact_at=budget.compact_at,
+            offload_at=budget.offload_at,
             settings=_recorded_settings(built),
         ),
     )
@@ -596,7 +598,12 @@ def build_agent(
                 # after the recorder's (after_model composes in reverse): the
                 # model call is traced before a recovery jump re-enters the model.
                 InvalidToolCallRecoveryMiddleware(),
-                TraceRecorder(session.trace),
+                # The skills index joins the prompt after this middleware runs; the
+                # recorder adds it the same way to measure the request as sent.
+                TraceRecorder(
+                    session.trace,
+                    finish_request=SkillsMiddleware(backend=backend, sources=skills).modify_request,
+                ),
             )
             if m is not None
         ],

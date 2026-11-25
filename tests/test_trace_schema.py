@@ -53,6 +53,7 @@ def test_compaction_payload_shape_matches_renderers() -> None:
         "offloaded": True,
         "manual": True,
         "cutoff": 30,
+        "freed_tokens": None,
     }
 
 

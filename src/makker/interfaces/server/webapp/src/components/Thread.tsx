@@ -12,7 +12,6 @@ import {
   ArtifactFileCard,
   ArtifactImageCard,
   AssistantMessage,
-  ContextCard,
   ErrorCard,
   HelpCard,
   ReasoningBlock,
@@ -86,8 +85,6 @@ const ThreadItemView = memo(function ThreadItemView({ item }: { item: ThreadItem
       return <ErrorCard message={item.message} retry={item.retry} />;
     case "help":
       return <HelpCard />;
-    case "context":
-      return <ContextCard markdown={item.markdown} />;
   }
 });
 

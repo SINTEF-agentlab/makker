@@ -21,20 +21,20 @@ from typing import Any
 
 from makker.agent.approval import SupportsInterrupt, allowed_decisions_for_interrupt
 from makker.agent.turns import (
-    TurnContextNote,
+    TurnCompaction,
     TurnReasoningDelta,
     TurnTextDelta,
     TurnTextEnd,
     TurnToolEvent,
     final_assistant_text,
-    usage_from_messages,
 )
 from makker.tool_labels import tool_label
 
 __all__ = [
     "PROTOCOL_VERSION",
     "artifact_to_wire",
-    "context_note_to_wire",
+    "compaction_to_wire",
+    "context_to_wire",
     "credential_required_to_wire",
     "error_to_wire",
     "interrupt_to_wire",
@@ -48,14 +48,14 @@ __all__ = [
     "turn_cancelled_to_wire",
     "turn_end_to_wire",
     "ui_command",
-    "usage_to_wire",
     "viz_to_wire",
 ]
 
 # Bumped when a message kind or field changes shape incompatibly. Front ends
 # read it from ``GET /models`` and can refuse or adapt instead of mis-parsing.
 # 2: every connection opens with a ``snapshot``; a model switch is confirmed (``model``).
-PROTOCOL_VERSION = 2
+# 3: ``context`` (the context meter, also in the snapshot) replaces ``usage``.
+PROTOCOL_VERSION = 3
 
 
 def credential_required_to_wire(*, provider: str, label: str, env_var: str) -> dict[str, Any]:
@@ -105,8 +105,8 @@ def to_wire(event: Any) -> dict[str, Any] | None:
             "content": event.content,
         }
 
-    if isinstance(event, TurnContextNote):
-        return context_note_to_wire(event)
+    if isinstance(event, TurnCompaction):
+        return compaction_to_wire(event.text, event.payload)
 
     return None
 
@@ -162,20 +162,14 @@ def interrupt_to_wire(
     }
 
 
-def usage_to_wire(messages: list[Any]) -> dict[str, Any] | None:
-    """Token usage for the turn, from the newest model message that reported it."""
+def context_to_wire(meter: dict[str, Any] | None) -> dict[str, Any]:
+    """How full the context is: ``context_panel.context_meter``'s figures.
 
-    usages = usage_from_messages(messages)
-    if not usages:
-        return None
-    last = usages[-1]
-    return {
-        "type": "usage",
-        "input_tokens": int(last.get("input_tokens") or 0),
-        "output_tokens": int(last.get("output_tokens") or 0),
-        "total_tokens": int(last.get("total_tokens") or 0),
-        "model_calls": len(usages),
-    }
+    Sent after every model call, when a turn ends however it ends, after a
+    compaction and after a model switch. ``used`` is None before the first call.
+    """
+
+    return {"type": "context", **(meter or {})}
 
 
 def turn_end_to_wire(messages: list[Any]) -> dict[str, Any]:
@@ -321,6 +315,7 @@ def snapshot_to_wire(
     *,
     busy: bool,
     model: str | None,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The session as a newly connected front end finds it; the first message.
 
@@ -328,10 +323,18 @@ def snapshot_to_wire(
     /sessions/{id}/messages`` does. ``busy`` says a turn is running: ``turn``
     then holds the live messages it has sent so far, for the front end to apply
     as if it had been connected all along, before the turn's next message.
-    ``model`` is the one the session runs (``None``: the server's default).
+    ``model`` is the one the session runs (``None``: the server's default), and
+    ``context`` its context meter (see ``context_to_wire``).
     """
 
-    return {"type": "snapshot", "messages": messages, "turn": turn, "busy": busy, "model": model}
+    return {
+        "type": "snapshot",
+        "messages": messages,
+        "turn": turn,
+        "busy": busy,
+        "model": model,
+        "context": context,
+    }
 
 
 def model_to_wire(model: str | None) -> dict[str, Any]:
@@ -340,16 +343,14 @@ def model_to_wire(model: str | None) -> dict[str, Any]:
     return {"type": "model", "model": model}
 
 
-def context_note_to_wire(note: TurnContextNote) -> dict[str, Any]:
-    """The conversation was made smaller: a ``compaction`` (older turns summarized)
-    or an ``offload`` (older tool results moved to files), with the note to show and
-    the trace event's fields.
+def compaction_to_wire(text: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """The conversation was compacted: the note to show, plus the trace event's fields.
 
     Unlike ``notice`` it says nothing about a command finishing, so it can arrive
     in the middle of a turn without ending the client's busy state.
     """
 
-    return {"type": note.kind, "text": note.text, **note.payload}
+    return {"type": "compaction", "text": text, **payload}
 
 
 def notice_to_wire(text: str) -> dict[str, Any]:

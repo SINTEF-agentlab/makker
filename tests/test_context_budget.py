@@ -94,7 +94,7 @@ async def test_an_assumed_window_that_is_too_large_recovers_by_compacting(tmp_pa
     from langgraph.checkpoint.memory import InMemorySaver
 
     from makker.agent.builder import build_agent
-    from makker.agent.turns import TurnContextNote, TurnRunner
+    from makker.agent.turns import TurnCompaction, TurnRunner
     from makker.lab.fakes import FakeJulia, ScriptedChatModel, make_fake_adapter, scripted_final
     from makker.session import Session
 
@@ -119,15 +119,11 @@ async def test_an_assumed_window_that_is_too_large_recovers_by_compacting(tmp_pa
     assert session.context_budget.source == "assumed"
     runner = TurnRunner(agent, thread_id=session.session_id, trace=session.trace)
 
-    notes: list[TurnContextNote] = []
+    notes: list[TurnCompaction] = []
     for i in range(20):
         await runner.run_prompt(
             f"question {i}",
-            on_message=lambda e: (
-                notes.append(e)
-                if isinstance(e, TurnContextNote) and e.kind == "compaction"
-                else None
-            ),
+            on_message=lambda e: notes.append(e) if isinstance(e, TurnCompaction) else None,
         )
         if notes:
             break

@@ -258,17 +258,15 @@ class SessionHost:
     async def compact(self) -> tuple[str, Any | None]:
         """Summarize older turns to free context now.
 
-        Returns a human-readable outcome plus the ``CompactResult`` (``None``
-        when there was nothing to compact) so a front end can also adjust its
-        live context estimate by the freed tokens.
+        Returns the note to show and the ``CompactResult`` (``None`` when there
+        was nothing to compact).
         """
         from makker.agent.summarization import (
+            COMPACTION_NOTE,
             MANUAL_KEEP_MESSAGES,
             compact_thread,
-            describe_compaction,
         )
         from makker.models import DEFAULT_MODEL
-        from makker.trace.schema import compaction_payload
 
         result = await compact_thread(
             self.agent,
@@ -279,19 +277,10 @@ class SessionHost:
         )
         if result is None:
             return (
-                f"Nothing to compact yet: compaction keeps the newest "
-                f"{MANUAL_KEEP_MESSAGES} messages and the conversation isn't longer than that.",
+                f"Nothing to compact yet: the newest {MANUAL_KEEP_MESSAGES} messages are kept.",
                 None,
             )
-        message = describe_compaction(
-            compaction_payload(
-                summarized=result.messages_summarized,
-                kept=result.messages_kept,
-                offloaded=result.offloaded,
-                manual=True,
-            )
-        )
-        return message, result
+        return COMPACTION_NOTE, result
 
     def add_dir(self, path: str) -> str:
         """Give the agent read/write access to another folder; return a result note."""
