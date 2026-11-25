@@ -147,6 +147,7 @@ Messages from the server to the front end:
 | `notice` | A system note from a command's result (e.g. `/compact`, `/add-dir`) |
 | `model` | A `set_model` command took effect: the model the session now runs |
 | `compaction` | The conversation was compacted to free context: the note to show (`text`) and the trace event's fields. It can arrive mid-turn and does not end the turn |
+| `offload` | Older tool results were moved to files to free context: the note to show (`text`), `count` and `freed_tokens`. Like `compaction`, it can arrive mid-turn |
 | `credential_required` | A model switch needs a provider key; the front end collects it, POSTs `/credentials`, and retries |
 | `error` | Something went wrong (a bad command, a failed turn, an unknown session) |
 

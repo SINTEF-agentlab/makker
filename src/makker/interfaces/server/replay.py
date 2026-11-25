@@ -13,7 +13,7 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
-from makker.agent.summarization import describe_compaction
+from makker.agent.turns import context_note
 from makker.interfaces.server import protocol
 from makker.interfaces.server.urls import public_url
 from makker.trace import schema
@@ -153,8 +153,8 @@ def replay_events(
                     content=ev.payload.get("content"),
                 )
             )
-        elif ev.kind == schema.CONTEXT_COMPACTION:
-            items.append(protocol.compaction_to_wire(describe_compaction(ev.payload), ev.payload))
+        elif ev.kind in (schema.CONTEXT_COMPACTION, schema.CONTEXT_OFFLOAD):
+            items.append(protocol.context_note_to_wire(context_note(ev.kind, ev.payload)))
         elif ev.kind == schema.ARTIFACT:
             items.extend(
                 artifact_wire_events(

@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from makker.trace import Event, schema
-from makker.transcript.events import ArtifactPayload, model_line
+from makker.transcript.events import ArtifactPayload, model_line, offload_line
 
 
 def _artifact_meta_line(artifact: ArtifactPayload) -> str | None:
@@ -74,6 +74,8 @@ def render_markdown(events: Iterable[Event]) -> str:
             title = str(payload.get("title") or "").strip()
             if title:
                 lines += [f"**{title}**", ""]
+        elif kind == schema.CONTEXT_OFFLOAD:
+            lines += [f"_Context: {offload_line(payload)} · `{ts}`_", ""]
         elif kind == schema.MODEL:
             lines += [f"_Model: {model_line(payload)} · `{ts}`_", ""]
         elif kind == schema.CONTEXT_COMPACTION:

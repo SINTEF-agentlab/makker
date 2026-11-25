@@ -1,9 +1,8 @@
-"""How much context a model has, where that figure came from, and when compaction runs.
+"""How much context a model has, where that figure came from, and how it is kept in it.
 
 One ``ContextBudget`` per running agent, resolved when the agent is built and on
-every model switch. The model's profile (which deepagents sizes its compaction
-from), tool-result clearing, the status bar and ``/context`` all read it, so they
-agree on one window.
+every model switch. The summarizer, the tool-result offloading, the status bar and
+``/context`` all read it, so they agree on one window and one set of marks.
 """
 
 from __future__ import annotations
@@ -19,12 +18,21 @@ from typing import Any, Literal
 # waste the window.
 ASSUMED_WINDOW = 200_000
 
-# deepagents' summarizer compacts at this share of the window, and earlier when the
-# conversation would not leave room for the model's output allowance within 95% of
-# it. Mirrored here so the figure shown is the one that applies.
+# Compaction runs at this share of the window, and earlier when the conversation
+# would not leave room for the model's output allowance within 95% of it (the
+# summarizer refuses to send a request past that point anyway).
 _COMPACT_FRACTION = 0.85
 _INPUT_FRACTION = 0.95
 _OUTPUT_LIMIT_KEYS = ("max_tokens", "max_completion_tokens", "max_output_tokens")
+# Older tool results move to files once the context reaches this share of the
+# compaction point, until it is back under the lower share. Offloading in a chunk
+# rather than one result per call keeps the prompt stable between calls, which
+# provider prompt caching depends on.
+_OFFLOAD_AT = 0.7
+_OFFLOAD_TO = 0.45
+# The newest tool results always stay: the agent is working with them. Fewer on a
+# small window, so that the kept set cannot fill it.
+_SMALL_WINDOW = 100_000
 
 WindowSource = Literal["provider", "ollama", "assumed"]
 
@@ -50,6 +58,21 @@ class ContextBudget:
         if self.output_reserve:
             at = min(at, int(self.window * _INPUT_FRACTION) - self.output_reserve)
         return max(0, at)
+
+    @property
+    def offload_at(self) -> int:
+        """The context size at which older tool results start moving to files."""
+        return int(self.compact_at * _OFFLOAD_AT)
+
+    @property
+    def offload_to(self) -> int:
+        """The context size offloading brings the conversation back down to."""
+        return int(self.compact_at * _OFFLOAD_TO)
+
+    @property
+    def keep_tool_results(self) -> int:
+        """How many of the newest tool results always stay in the conversation."""
+        return 3 if self.window < _SMALL_WINDOW else 6
 
 
 def context_budget(model_id: str | None, model: Any = None) -> ContextBudget:

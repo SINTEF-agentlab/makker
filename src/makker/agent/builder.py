@@ -30,6 +30,7 @@ from deepagents import (
     register_harness_profile,
 )
 from deepagents.backends import CompositeBackend
+from deepagents.middleware.summarization import SummarizationMiddleware
 from langchain.agents.middleware import TodoListMiddleware
 
 from makker.agent.added_dirs import add_dir
@@ -43,12 +44,12 @@ from makker.agent.capabilities import (
     collect_tools,
     select_for_surface,
 )
-from makker.agent.context_editing import build_context_editing_middleware
 from makker.agent.memory import (
     build_memory_middleware,
     ensure_memory_dir,
     make_remember_tool,
 )
+from makker.agent.offload import ToolResultOffloadMiddleware
 from makker.agent.plot_julia import (
     make_close_plots_tool,
     make_plot_julia_tool,
@@ -63,7 +64,7 @@ from makker.agent.tools import (
     make_run_julia_tool,
     make_write_report_tool,
 )
-from makker.context_budget import context_budget
+from makker.context_budget import ContextBudget, context_budget
 from makker.models import PROVIDERS, is_ollama_cloud, provider_key_vars, provider_of
 from makker.paths import SHARED_SKILLS_DIR, workspace_memory_dir, workspace_root
 from makker.session import Session
@@ -363,6 +364,19 @@ def _recorded_settings(model: Any) -> dict[str, Any]:
     return settings
 
 
+def _summarizer(model: Any, backend: Any, budget: ContextBudget) -> Any:
+    """deepagents' summarizer, compacting at the budget's ``compact_at``."""
+    keep = ("tokens", budget.window // 10)
+    return SummarizationMiddleware(
+        model=model,
+        backend=backend,
+        trigger=("tokens", budget.compact_at),
+        keep=keep,
+        trim_tokens_to_summarize=None,
+        truncate_args_settings={"trigger": ("tokens", budget.compact_at), "keep": keep},
+    )
+
+
 def _primary_source_path(
     adapter: SimulatorAdapter,
     package_sources: Sequence[PackageSource] | None,
@@ -570,7 +584,10 @@ def build_agent(
                 # rendered surface in every front end.
                 TodoListMiddleware(),
                 build_memory_middleware(backend, memory_dir),
-                build_context_editing_middleware(budget.window),
+                ToolResultOffloadMiddleware(budget, backend, session.trace),
+                # Replaces deepagents' own summarizer (same name), sized from the
+                # budget instead of from fractions of the profile it reads itself.
+                _summarizer(built, backend, budget) if built is not None else None,
                 # Before the recorder in the list so its after_model hook runs
                 # after the recorder's (after_model composes in reverse): the
                 # model call is traced before a recovery jump re-enters the model.

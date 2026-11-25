@@ -11,7 +11,7 @@ from makker.agent.approval import (
     pending_allowed_decisions,
 )
 from makker.agent.turns import (
-    TurnCompaction,
+    TurnContextNote,
     TurnInterrupt,
     TurnReasoningDelta,
     TurnTextDelta,
@@ -68,8 +68,15 @@ def test_tool_event_wire() -> None:
 
 def test_compaction_wire() -> None:
     payload = {"summarized": 16, "kept": 3, "offloaded": True, "manual": False, "cutoff": 16}
-    wire = protocol.to_wire(TurnCompaction(text="Context compacted.", payload=payload))
-    assert wire == {"type": "compaction", "text": "Context compacted.", **payload}
+    note = TurnContextNote(kind="compaction", text="Context compacted.", payload=payload)
+    assert protocol.to_wire(note) == {"type": "compaction", "text": "Context compacted.", **payload}
+    moved = {"count": 5, "freed_tokens": 30_000}
+    note = TurnContextNote(kind="offload", text="Moved 5 older tool results.", payload=moved)
+    assert protocol.to_wire(note) == {
+        "type": "offload",
+        "text": "Moved 5 older tool results.",
+        **moved,
+    }
 
 
 def test_unknown_event_is_none() -> None:

@@ -529,9 +529,10 @@ export function createSessionStore() {
       }));
     };
 
-    // The conversation was compacted. It can arrive mid-turn, so it closes any open
-    // assistant/reasoning segment like a new tool step does and leaves busy alone.
-    const onCompaction = (text: string) => {
+    // The conversation was made smaller (compacted, or tool results moved to files).
+    // It can arrive mid-turn, so it closes any open assistant/reasoning segment like a
+    // new tool step does and leaves busy alone.
+    const onContextNote = (text: string) => {
       set((s) => ({
         liveAssistantId: null,
         liveReasoningId: null,
@@ -598,7 +599,8 @@ export function createSessionStore() {
           case "notice":
             return onNotice(msg.text);
           case "compaction":
-            return onCompaction(msg.text);
+          case "offload":
+            return onContextNote(msg.text);
           case "error":
             return onError(msg.message);
         }
@@ -633,7 +635,8 @@ export function createSessionStore() {
               onArtifact(m);
               break;
             case "compaction":
-              onCompaction(m.text);
+            case "offload":
+              onContextNote(m.text);
               break;
           }
         }

@@ -20,8 +20,8 @@ Every turn, the model receives:
 - The conversation so far: messages, tool calls, and tool results.
 
 Tool results enter as real content, not summaries, but they are not kept
-forever at full size: a large single result is offloaded and old ones are
-cleared as the window fills (see [Growth and its limits](#growth-and-its-limits)
+forever at full size: a large single result is offloaded at once, and older
+ones move to files as the window fills (see [Growth and its limits](#growth-and-its-limits)
 below). The Julia kernel's streamed output is rendered through a terminal
 emulator (so progress bars collapse to their final state instead of thousands of
 carriage-return frames) and tail-capped at 256 KB; result values and error
@@ -51,36 +51,38 @@ fire only when the cheaper ones are not enough:
   inline with a head/tail preview plus a pointer the agent can `read_file`. The
   full result stays recoverable; the context holds a stub. This is deepagents'
   `FilesystemMiddleware`.
-- **Clearing of old tool results.** Once the conversation passes ~60% of the
-  model's window, the older tool results (source reads, REPL output) are
-  replaced by a `[cleared]` placeholder while the most recent ones stay
-  verbatim, via langchain's `ContextEditingMiddleware` (wired in
-  `agent/context_editing.py`). It is
-  transparent (the raw log is untouched; only the model's per-call view is
-  clipped) and cleared results are re-derivable: the files are still on disk and
-  REPL commands can be re-run. The attempt log is never cleared, since the agent
-  refers back to it by value.
-- **Summarization.** When clearing is not enough and the conversation reaches
-  ~85% of the window, the older turns are replaced by a structured summary
+- **Offloading of older tool results.** Once the conversation reaches 70% of the
+  compaction point, the oldest tool results (source reads, REPL output) are
+  written to `large_tool_results/<id>` and replaced by a short preview and the
+  file's path, until it is back under 45%. The newest six (three on a window
+  under 100K) always stay, and so does the attempt log, which the agent refers
+  back to by value. The agent reads a moved result back with `read_file`. The
+  change is stored in the conversation, in one chunk per step, so the prompt
+  stays the same between calls for provider caching; the trace keeps the full
+  text. Each step is a `context_offload` trace event, and both front ends show
+  a note for it (`agent/offload.py`). This replaced clearing old results to a
+  bare `[cleared]` on every call, which left the agent nothing to read back.
+- **Summarization.** When offloading is not enough and the conversation reaches
+  the compaction point (85% of the window, earlier for a model with a large
+  output allowance), the older turns are replaced by a structured summary
   (session intent, key decisions, artifacts, next steps) while the newest turns
   stay verbatim. The summarized turns are offloaded to
   `conversation_history/<internal-session-id>.md` first, so they remain
   recoverable, and the summary embeds that path. This is deepagents' stock
-  backend-recoverable `SummarizationMiddleware`, installed by
-  `create_deep_agent`, sized from the model profile (which
-  `builder._set_profile_window` sets from the session's context budget), and
-  non-mutating; `TraceRecorder` records each compaction. We lean on the stock
-  middleware so upstream improvements arrive without porting.
+  backend-recoverable `SummarizationMiddleware`, configured with the session's
+  compaction point and replacing the one `create_deep_agent` installs (same
+  name), and non-mutating; `TraceRecorder` records each compaction. We lean on
+  the stock middleware so upstream improvements arrive without porting.
 
 `/context` shows measured usage by category (the last call's `usage_metadata`
-is exactly what the conversation costs to send) plus both the clearing and the
+is exactly what the conversation costs to send) plus both the offloading and the
 summarization thresholds, so it is clear what will happen as the window fills.
 The status bar keeps a `ctx` percentage in view (yellow at 70%, red at 90%).
 
 Every consumer reads one context budget (`context_budget.py`), resolved when
 the agent is built and on every model switch: the window, where it came from,
-and the point where compaction runs. The model's profile, tool-result clearing,
-the status bar and `/context` all use it, and the trace records it with the
+and the points where offloading and compaction run. The summarizer, the
+offloading, the status bar and `/context` all use it, and the trace records it with the
 model (a `model` event). The window comes from:
 
 - the provider package's bundled model data, read directly (no key, no model
@@ -103,7 +105,7 @@ model (a `model` event). The window comes from:
   call is tagged as internal, and `TraceRecorder` declares langchain's
   `InternalCallTransformer`, which deepagents does not, so the call never
   reaches the message stream.
-- Keep sessions task-shaped regardless: clearing and the summary preserve the
+- Keep sessions task-shaped regardless: offloading and the summary preserve the
   working set and the conclusions, not every byte. Durable knowledge belongs in
   memory, which survives the session boundary by design.
 - Token usage per model turn is recorded in the trace (`model_usage` events), so

@@ -21,7 +21,7 @@ from typing import Any
 
 from makker.agent.approval import SupportsInterrupt, allowed_decisions_for_interrupt
 from makker.agent.turns import (
-    TurnCompaction,
+    TurnContextNote,
     TurnReasoningDelta,
     TurnTextDelta,
     TurnTextEnd,
@@ -34,7 +34,7 @@ from makker.tool_labels import tool_label
 __all__ = [
     "PROTOCOL_VERSION",
     "artifact_to_wire",
-    "compaction_to_wire",
+    "context_note_to_wire",
     "credential_required_to_wire",
     "error_to_wire",
     "interrupt_to_wire",
@@ -105,8 +105,8 @@ def to_wire(event: Any) -> dict[str, Any] | None:
             "content": event.content,
         }
 
-    if isinstance(event, TurnCompaction):
-        return compaction_to_wire(event.text, event.payload)
+    if isinstance(event, TurnContextNote):
+        return context_note_to_wire(event)
 
     return None
 
@@ -340,14 +340,16 @@ def model_to_wire(model: str | None) -> dict[str, Any]:
     return {"type": "model", "model": model}
 
 
-def compaction_to_wire(text: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """The conversation was compacted: the note to show, plus the trace event's fields.
+def context_note_to_wire(note: TurnContextNote) -> dict[str, Any]:
+    """The conversation was made smaller: a ``compaction`` (older turns summarized)
+    or an ``offload`` (older tool results moved to files), with the note to show and
+    the trace event's fields.
 
     Unlike ``notice`` it says nothing about a command finishing, so it can arrive
     in the middle of a turn without ending the client's busy state.
     """
 
-    return {"type": "compaction", "text": text, **payload}
+    return {"type": note.kind, "text": note.text, **note.payload}
 
 
 def notice_to_wire(text: str) -> dict[str, Any]:

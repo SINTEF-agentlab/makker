@@ -97,7 +97,7 @@ async def test_auto_compaction_is_announced_once_and_kept_out_of_the_chat(
     """
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    from makker.agent.turns import TurnCompaction, TurnTextDelta
+    from makker.agent.turns import TurnContextNote, TurnTextDelta
 
     adapter = make_fake_adapter(tmp_path)
     session = Session.create(julia=FakeJulia(), state_root=tmp_path, simulator=adapter)
@@ -111,14 +111,14 @@ async def test_auto_compaction_is_announced_once_and_kept_out_of_the_chat(
         agent, _ = build_agent(session, model=model, checkpointer=saver)
         runner = TurnRunner(agent, thread_id=session.session_id, trace=session.trace)
 
-        async def turn(prompt: str, runner: TurnRunner) -> tuple[str, list[TurnCompaction]]:
+        async def turn(prompt: str, runner: TurnRunner) -> tuple[str, list[TurnContextNote]]:
             text: list[str] = []
-            notes: list[TurnCompaction] = []
+            notes: list[TurnContextNote] = []
 
             def on_message(event: object) -> None:
                 if isinstance(event, TurnTextDelta):
                     text.append(event.text)
-                elif isinstance(event, TurnCompaction):
+                elif isinstance(event, TurnContextNote) and event.kind == "compaction":
                     notes.append(event)
 
             await runner.run_prompt(prompt, on_message=on_message)
