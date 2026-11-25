@@ -442,3 +442,45 @@ def test_render_report_writes_file(tmp_path, snapshot) -> None:
     )
     assert out.exists()
     assert doc == snapshot
+
+
+def test_render_report_blank_notes_fall_back_to_rationale(tmp_path) -> None:
+    events = [
+        make_event(1, "attempt", _attempt(1, "a1", rationale="baseline", metrics={}, notes=" \n ")),
+    ]
+    doc = render_report(events, tmp_path / "report.html", session_id="abc", simulator="BattMo")
+    assert '<span class="idx">#1</span>baseline' in doc
+
+
+def test_render_report_names_no_best_when_direction_unknown(tmp_path) -> None:
+    """Metrics carry no direction; only an error metric is known to be better lower.
+    For an R² rising from 0.5 to 0.9, the report must not call 0.5 the best."""
+    events = [
+        make_event(1, "attempt", _attempt(1, "a1", rationale="baseline", metrics={"r2": 0.5})),
+        make_event(
+            2,
+            "attempt",
+            _attempt(2, "a2", parent_id="a1", rationale="refine", metrics={"r2": 0.9}),
+        ),
+    ]
+    doc = render_report(events, tmp_path / "report.html", session_id="abc", simulator="BattMo")
+    assert "r2 by attempt" in doc  # the values are still charted
+    assert "best" not in doc.split("</style>", 1)[1].lower()
+    assert "box improved" not in doc and "box regressed" not in doc
+    assert "Improved vs parent" not in doc
+
+
+def test_render_report_embeds_narrative_figure_with_encoded_name(tmp_path) -> None:
+    """The markdown renderer percent-encodes image links; the file still resolves."""
+    for name in ("små.png", "my plot.png", "a&b.png"):
+        (tmp_path / name).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 32)
+    doc = render_report(
+        [],
+        tmp_path / "report.html",
+        # An encoded NUL names no file; it must not crash the resolver either.
+        narrative_markdown="![a](små.png) ![b](<my plot.png>) ![c](a&b.png) ![d](a%00b.png)\n",
+        session_id="abc",
+        simulator="BattMo",
+        artifact_dirs=[tmp_path],
+    )
+    assert doc.count("data:image/png;base64,") == 3

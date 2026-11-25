@@ -134,14 +134,17 @@ class TraceRecorder(AgentMiddleware):
             # its arguments).
             result = _tool_error_result(call, exc)
 
-        if isinstance(result, ToolMessage):
+        # Tools that update state (write_todos, the task subagent, read_file on
+        # media) return a Command whose update carries the call's ToolMessage.
+        message = result if isinstance(result, ToolMessage) else _command_tool_message(result, call)
+        if message is not None:
             self._trace.append(
                 TOOL_RESULT,
                 {
-                    "tool_call_id": getattr(result, "tool_call_id", None),
-                    "name": getattr(result, "name", None),
-                    "content": content_to_str(result.content),
-                    "status": getattr(result, "status", None),
+                    "tool_call_id": message.tool_call_id,
+                    "name": message.name or call.get("name"),
+                    "content": content_to_str(message.content),
+                    "status": message.status,
                 },
             )
         return result
@@ -152,6 +155,17 @@ def _traced_cutoff(trace: TraceLog) -> int:
 
     cutoffs = [event.payload.get("cutoff") for event in trace.events_of(CONTEXT_COMPACTION)]
     return max((c for c in cutoffs if isinstance(c, int)), default=0)
+
+
+def _command_tool_message(result: Any, call: dict[str, Any]) -> ToolMessage | None:
+    """The ToolMessage answering ``call`` in a Command's update, if it has one."""
+
+    update = result.update if isinstance(result, Command) else None
+    messages = update.get("messages") if isinstance(update, dict) else None
+    for message in messages if isinstance(messages, list) else ():
+        if isinstance(message, ToolMessage) and message.tool_call_id == call.get("id"):
+            return message
+    return None
 
 
 def _tool_error_result(call: dict[str, Any], exc: Exception) -> ToolMessage:

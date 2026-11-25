@@ -22,6 +22,8 @@ MAX_INLINE_BYTES = 10 * 1024 * 1024
 
 def resolve_artifact_file(path: str, artifact_dirs: Sequence[Path]) -> Path | None:
     """The on-disk file for a recorded artifact path, contained to the run dirs."""
+    if "\0" in path:  # names no file, and resolve() would raise
+        return None
     raw = Path(path)
     for root in artifact_dirs:
         base = root.resolve()
