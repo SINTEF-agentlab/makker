@@ -162,6 +162,13 @@ function ModelMenuPopover() {
     items[(next + items.length) % items.length]?.focus();
   };
 
+  // After a choice only the list closes: the menu stays, its row showing the new
+  // value, with focus back on that row.
+  const closeSetting = (setting: Setting) => {
+    setOpen(null);
+    ref.current?.querySelector<HTMLElement>(`[data-setting=${setting}]`)?.focus();
+  };
+
   // A setting's list opens on a click (or Enter, or the right arrow) and stays open
   // until another is opened or the menu closes, so the pointer can cross other rows
   // on its way to it.
@@ -181,7 +188,9 @@ function ModelMenuPopover() {
         <span className="model-detail">{value}</span>
         <ChevronRight />
       </button>
-      {open === setting && data ? <SettingMenu setting={setting} data={data} /> : null}
+      {open === setting && data ? (
+        <SettingMenu setting={setting} data={data} onChosen={() => closeSetting(setting)} />
+      ) : null}
     </div>
   );
 
@@ -247,7 +256,15 @@ function parseTokens(text: string): number {
 
 /** The list beside a setting's row: the choices, the current one checked. A choice
  *  is saved for the model and applies to the running session from its next turn. */
-function SettingMenu({ setting, data }: { setting: Setting; data: ModelSettings }) {
+function SettingMenu({
+  setting,
+  data,
+  onChosen,
+}: {
+  setting: Setting;
+  data: ModelSettings;
+  onChosen: () => void;
+}) {
   const controller = useController();
   const busy = useSel((s) => s.busy);
   const [measuring, setMeasuring] = useState(false);
@@ -269,7 +286,7 @@ function SettingMenu({ setting, data }: { setting: Setting; data: ModelSettings 
   }, [unmeasured, busy, controller]);
 
   const choose = (patch: Partial<ModelSettings["settings"]>) => {
-    controller.closeModelMenu();
+    onChosen();
     void controller.saveModelSettings(patch);
   };
 
