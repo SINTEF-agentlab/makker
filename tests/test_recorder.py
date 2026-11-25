@@ -46,21 +46,54 @@ async def test_trace_recorder_records_compaction_once(tmp_path) -> None:
 
     summary = HumanMessage(content="a summary", id="sum-1")
     event = {"cutoff_index": 4, "summary_message": summary, "file_path": "/conv/t.md"}
-    # Six messages of which the leading four were folded into the summary.
+    # The leading four messages were folded into the summary, the model saw the
+    # summary plus the fifth, and the sixth is the reply it just produced.
     state = {"messages": [AIMessage(content=str(n)) for n in range(6)]}
     state["_summarization_event"] = event
 
     await recorder.aafter_model(state, runtime=None)
     await recorder.aafter_model(state, runtime=None)  # same event: must not re-record
+    # A recorder built later for the same session (resume, model switch) reads
+    # the trace, so it does not record the compaction still in the state again.
+    await TraceRecorder(log).aafter_model(state, runtime=None)
 
     compactions = [e for e in log.iter_events() if e.kind == "context_compaction"]
     assert len(compactions) == 1
     assert compactions[0].payload == {
         "summarized": 4,
-        "kept": 2,
+        "kept": 1,
         "offloaded": True,
         "manual": False,
+        "cutoff": 4,
     }
+
+    # The next compaction extends the cutoff; it counts only the newly folded messages.
+    state["messages"] += [AIMessage(content=str(n)) for n in range(6, 12)]
+    state["_summarization_event"] = {**event, "cutoff_index": 9}
+    await recorder.aafter_model(state, runtime=None)
+    compactions = [e for e in log.iter_events() if e.kind == "context_compaction"]
+    assert [(e.payload["summarized"], e.payload["kept"]) for e in compactions] == [(4, 1), (5, 2)]
+    log.close()
+
+
+async def test_trace_recorder_skips_a_compaction_already_traced_by_compact(tmp_path) -> None:
+    """A manual /compact writes its own event; the next turn must not add an automatic one."""
+    log = TraceLog(tmp_path / "trace.sqlite")
+    log.append(
+        "context_compaction",
+        {"summarized": 4, "kept": 8, "offloaded": True, "manual": True, "cutoff": 4},
+    )
+    state = {
+        "messages": [AIMessage(content=str(n)) for n in range(13)],
+        "_summarization_event": {
+            "cutoff_index": 4,
+            "summary_message": HumanMessage(content="a summary"),
+            "file_path": "/conv/t.md",
+        },
+    }
+    await TraceRecorder(log).aafter_model(state, runtime=None)
+    compactions = [e for e in log.iter_events() if e.kind == "context_compaction"]
+    assert [e.payload["manual"] for e in compactions] == [True]
     log.close()
 
 

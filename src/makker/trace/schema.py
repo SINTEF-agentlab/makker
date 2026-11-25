@@ -76,14 +76,23 @@ def compaction_payload(
     kept: int | None,
     offloaded: bool,
     manual: bool = False,
+    cutoff: int | None = None,
 ) -> dict[str, Any]:
     """Payload for a ``CONTEXT_COMPACTION`` event.
 
     ``summarized``/``kept`` are message counts (None when a writer cannot
     know one); ``offloaded`` says whether the summarized turns were saved
-    to a recoverable file.
+    to a recoverable file. ``cutoff`` is the compaction's position in the
+    checkpointed message list. It only grows from one compaction to the next,
+    so it identifies a compaction and keeps any one from being recorded twice.
     """
-    return {"summarized": summarized, "kept": kept, "offloaded": offloaded, "manual": manual}
+    return {
+        "summarized": summarized,
+        "kept": kept,
+        "offloaded": offloaded,
+        "manual": manual,
+        "cutoff": cutoff,
+    }
 
 
 def artifact_payload(

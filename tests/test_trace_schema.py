@@ -44,8 +44,16 @@ def test_open_readonly_does_not_create_a_missing_trace(tmp_path: Path) -> None:
 
 def test_compaction_payload_shape_matches_renderers() -> None:
     """Writers and renderers meet at this payload; keep the keys in one place."""
-    payload = schema.compaction_payload(summarized=21, kept=9, offloaded=True, manual=True)
-    assert payload == {"summarized": 21, "kept": 9, "offloaded": True, "manual": True}
+    payload = schema.compaction_payload(
+        summarized=21, kept=9, offloaded=True, manual=True, cutoff=30
+    )
+    assert payload == {
+        "summarized": 21,
+        "kept": 9,
+        "offloaded": True,
+        "manual": True,
+        "cutoff": 30,
+    }
 
 
 def test_artifact_payload_carries_the_full_field_set() -> None:

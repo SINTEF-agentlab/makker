@@ -64,6 +64,20 @@ def auto_compact_trigger_tokens(window: int | None) -> int:
     return int(window * _TRIGGER_FRACTION) if window else _FALLBACK_TRIGGER_TOKENS
 
 
+def describe_compaction(payload: dict[str, Any]) -> str:
+    """The note every front end shows for a ``context_compaction`` event."""
+    text = "Context compacted" if payload.get("manual") else "Context compacted automatically"
+    summarized, kept = payload.get("summarized"), payload.get("kept")
+    if isinstance(summarized, int):
+        text += f": summarized {summarized} older messages"
+        if isinstance(kept, int):
+            text += f" and kept the {kept} most recent"
+    text += "."
+    if payload.get("offloaded"):
+        text += " The summarized messages are saved to a file the agent can read back."
+    return text
+
+
 @dataclass(frozen=True)
 class CompactResult:
     messages_summarized: int
@@ -153,6 +167,7 @@ async def compact_thread(
                 kept=len(to_keep),
                 offloaded=file_path is not None,
                 manual=True,
+                cutoff=state_cutoff,
             ),
         )
     return CompactResult(

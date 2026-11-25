@@ -261,8 +261,13 @@ class SessionHost:
         when there was nothing to compact) so a front end can also adjust its
         live context estimate by the freed tokens.
         """
-        from makker.agent.summarization import MANUAL_KEEP_MESSAGES, compact_thread
+        from makker.agent.summarization import (
+            MANUAL_KEEP_MESSAGES,
+            compact_thread,
+            describe_compaction,
+        )
         from makker.models import DEFAULT_MODEL
+        from makker.trace.schema import compaction_payload
 
         result = await compact_thread(
             self.agent,
@@ -277,10 +282,13 @@ class SessionHost:
                 f"{MANUAL_KEEP_MESSAGES} messages and the conversation isn't longer than that.",
                 None,
             )
-        extra = " The summarized turns were saved and can be reopened." if result.offloaded else ""
-        message = (
-            f"Compacted: summarized {result.messages_summarized} older messages and kept the "
-            f"{result.messages_kept} most recent.{extra}"
+        message = describe_compaction(
+            compaction_payload(
+                summarized=result.messages_summarized,
+                kept=result.messages_kept,
+                offloaded=result.offloaded,
+                manual=True,
+            )
         )
         return message, result
 

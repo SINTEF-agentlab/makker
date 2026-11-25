@@ -36,7 +36,7 @@ than restating the strings, and the table below is the payload contract.
 | `message_reasoning` | recorder middleware | `content` (the model's reasoning text) |
 | `message_assistant` | recorder middleware | `content` |
 | `model_usage` | recorder middleware | `input_tokens`, `output_tokens`, `total_tokens`, provider detail fields |
-| `context_compaction` | summarization middleware / `/compact` | `summarized`, `kept` (message counts, null when unknown), `offloaded`, `manual` |
+| `context_compaction` | summarization middleware / `/compact` | `summarized`, `kept` (message counts, null when unknown), `offloaded`, `manual`, `cutoff` (the compaction's position in the checkpointed messages; it only grows, so each compaction is recorded once) |
 | `tool_call` | recorder middleware | `id`, `name`, `args` |
 | `tool_result` | recorder middleware | `tool_call_id`, `name`, `content`, `status` |
 | `hitl_request` | `TurnRunner` | the pending tool call awaiting approval |

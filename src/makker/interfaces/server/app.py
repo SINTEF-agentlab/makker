@@ -48,6 +48,7 @@ from makker.agent.capabilities import (
     host_context_capability,
     http_tool_capability,
 )
+from makker.agent.summarization import describe_compaction
 from makker.interfaces.server import protocol
 from makker.interfaces.server.access import OriginGuard, TokenGuard, request_is_local
 from makker.interfaces.server.manager import SessionBusyError, SessionManager
@@ -1468,6 +1469,8 @@ def replay_events(
                     content=ev.payload.get("content"),
                 )
             )
+        elif ev.kind == schema.CONTEXT_COMPACTION:
+            items.append(protocol.compaction_to_wire(describe_compaction(ev.payload), ev.payload))
         elif ev.kind == schema.ARTIFACT:
             items.extend(
                 artifact_wire_events(
