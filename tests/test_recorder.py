@@ -59,7 +59,10 @@ async def test_trace_recorder_records_compaction_once(tmp_path) -> None:
 
     compactions = [e for e in log.iter_events() if e.kind == "context_compaction"]
     assert len(compactions) == 1
-    assert compactions[0].payload == {
+    payload = dict(compactions[0].payload)
+    # About how much smaller the summary made the context.
+    assert isinstance(payload.pop("freed_tokens"), int)
+    assert payload == {
         "summarized": 4,
         "kept": 1,
         "offloaded": True,
@@ -246,4 +249,40 @@ async def test_command_tool_result_is_recorded(tmp_path) -> None:
     assert "### Tool result · `task`" in render_markdown(events)
     assert "the subagent found 7 wells" in render_markdown(events)
     assert "the subagent found 7 wells" in render_html(events)
+
+
+async def test_trace_recorder_records_what_the_request_held(tmp_path) -> None:
+    """Each call's usage carries the request measured part by part, scaled to it."""
+    from types import SimpleNamespace
+
+    from langchain_core.messages import SystemMessage
+
+    log = TraceLog(tmp_path / "trace.sqlite")
+    skills = "\n\n## Skills\n- plotting: how to plot"
+    recorder = TraceRecorder(
+        log,
+        finish_request=lambda r: SimpleNamespace(
+            system_message=SystemMessage(content=r.system_message.content + skills)
+        ),
+    )
+    request = SimpleNamespace(
+        system_message=SystemMessage(content="be careful " * 50),
+        tools=[],
+        messages=[HumanMessage(content="hi")],
+    )
+    reply = AIMessage(
+        content="hello",
+        usage_metadata={"input_tokens": 900, "output_tokens": 30, "total_tokens": 930},
+    )
+
+    async def handler(_request):
+        return reply
+
+    await recorder.awrap_model_call(request, handler)
+    await recorder.aafter_model({"messages": [HumanMessage(content="hi"), reply]}, runtime=None)
+
+    (usage,) = [e.payload for e in log.iter_events() if e.kind == "model_usage"]
+    parts = usage["context"]["parts"]
+    assert sum(parts.values()) == 930
+    assert parts["system"] > parts["skills"] > 0 and parts["assistant"] >= 30
     log.close()

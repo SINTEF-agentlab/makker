@@ -14,6 +14,29 @@ export interface InterruptAction {
   body?: string | null;
 }
 
+/** How full the context is (`context_panel.context_meter` on the server). `used`
+ *  is null before the first model call; `estimated` when something changed since
+ *  the last call measured it (a compaction, a model switch). */
+export interface ContextMeter {
+  model?: string | null;
+  window?: number | null;
+  window_source?: "provider" | "ollama" | "assumed" | null;
+  compact_at?: number | null;
+  offload_at?: number | null;
+  used?: number | null;
+  estimated?: boolean;
+}
+
+/** The context view (`GET /sessions/{id}/context`): the meter, what fills the
+ *  context (sums to `used`), the largest tool results, and how much was moved out. */
+export interface ContextReport {
+  meter: ContextMeter | null;
+  breakdown: { key: string; label: string; tokens: number }[];
+  largest: { label: string; tokens: number }[];
+  /** Tool results moved to files, and compactions, so far. */
+  moved: { results: number; compactions: number };
+}
+
 /** Messages the server streams to the client over the WebSocket. */
 export type ServerMessage =
   | { type: "text"; text: string }
@@ -36,13 +59,9 @@ export type ServerMessage =
       allowed_decisions: string[];
       allowlist: string[];
     }
-  | {
-      type: "usage";
-      input_tokens: number;
-      output_tokens: number;
-      total_tokens: number;
-      model_calls: number;
-    }
+  /** The context meter, after every model call, a turn's end, a compaction and a
+   *  model switch. */
+  | ({ type: "context" } & ContextMeter)
   | { type: "turn_end"; text: string; cancelled?: boolean }
   | {
       type: "artifact";
@@ -75,10 +94,9 @@ export type ServerMessage =
    *  held the width, so this is the echo to stage, not the client's request). */
   | { type: "refit_done"; record: string; width: number; height: number }
   | { type: "notice"; text: string }
-  /** The conversation was made smaller to free context: a `compaction` (older turns
-   *  summarized, automatically or by `/compact`) or an `offload` (older tool results
-   *  moved to files). `text` is the note to show; the rest are the trace event's
-   *  fields. Unlike `notice` it can arrive mid-turn and does not end the busy state. */
+  /** The conversation was compacted, automatically or by `/compact`. `text` is the
+   *  note to show; the rest are the trace event's fields. Unlike `notice` it can
+   *  arrive mid-turn and does not end the busy state. */
   | {
       type: "compaction";
       text: string;
@@ -87,7 +105,6 @@ export type ServerMessage =
       offloaded: boolean;
       manual: boolean;
     }
-  | { type: "offload"; text: string; count: number; freed_tokens: number }
   | { type: "ui"; action: string; payload: Record<string, unknown> }
   | { type: "credential_required"; provider: string; label: string; env_var: string }
   | { type: "error"; message: string }
@@ -101,6 +118,8 @@ export type ServerMessage =
       busy: boolean;
       /** The model the session runs; null for the server's default. */
       model: string | null;
+      /** Its context meter; null before an agent was built. */
+      context?: ContextMeter | null;
     }
   /** A model switch took effect: the session now runs `model`. */
   | { type: "model"; model: string | null };
@@ -139,7 +158,7 @@ export type ReplayMessage =
   | { type: "user"; text: string }
   | { type: "assistant"; text: string }
   | { type: "reasoning"; text: string }
-  | Extract<ServerMessage, { type: "tool" | "viz" | "artifact" | "compaction" | "offload" }>;
+  | Extract<ServerMessage, { type: "tool" | "viz" | "artifact" | "compaction" }>;
 
 /** Parse a raw WebSocket text frame, or return null if it is not a typed message. */
 export function parseServerMessage(data: string): ServerMessage | null {
@@ -151,13 +170,13 @@ export function parseServerMessage(data: string): ServerMessage | null {
   }
 }
 
-/** Side outputs (a plot/report, a usage tick, a host-app ui action) can arrive
+/** Side outputs (a plot/report, a context tick, a host-app ui action) can arrive
  *  mid-turn while the agent keeps working, so they must NOT clear the "thinking"
  *  indicator — only the agent's own content (or the turn ending) does. A `notice`
  *  is deliberately excluded: it signals a command finished (e.g. /compact), so its
  *  handler legitimately ends the working/busy state rather than passing through. */
 export const SIDE_OUTPUT_TYPES: ReadonlySet<ServerMessageType> = new Set([
-  "usage",
+  "context",
   "viz",
   "artifact",
   "ui",

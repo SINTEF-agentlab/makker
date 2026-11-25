@@ -15,8 +15,13 @@ import type {
   VersionInfo,
 } from "./api";
 import { framePool } from "./canvas/framePool";
-import { formatTokens } from "./format";
-import type { InterruptAction, ReplayMessage, ServerMessage } from "./protocol";
+import type {
+  ContextMeter,
+  ContextReport,
+  InterruptAction,
+  ReplayMessage,
+  ServerMessage,
+} from "./protocol";
 import { HISTORY_CHANGED, SIDE_OUTPUT_TYPES } from "./protocol";
 import { toolPolicy } from "./toolPolicy";
 
@@ -95,8 +100,7 @@ export type ThreadItem =
   | { kind: "ui-note"; id: string; action: string; payload: Record<string, unknown> }
   // `retry` is the prompt of the turn that failed, when it can be sent again.
   | { kind: "error"; id: string; message: string; retry: string | null }
-  | { kind: "help"; id: string }
-  | { kind: "context"; id: string; markdown: string };
+  | { kind: "help"; id: string };
 
 export interface PendingInterrupt {
   ids: string[];
@@ -170,7 +174,6 @@ export interface SessionState {
   versions: VersionInfo | null;
   model: string | null;
   models: ModelInfo[];
-  contextWindow: number | null;
   meta: string;
   // status
   busy: boolean;
@@ -191,10 +194,9 @@ export interface SessionState {
   canvasOpen: boolean;
   // approval
   pending: PendingInterrupt | null;
-  // usage
-  inputTokens: number;
-  usageLabel: string;
-  usageTitle: string;
+  // how full the context is, and the context view when it is open
+  context: ContextMeter | null;
+  contextView: { open: boolean; report: ContextReport | null };
   // history + retry
   history: HistoryEntry[];
   lastPrompt: string;
@@ -211,7 +213,7 @@ export interface SessionActions {
   setConfig: (patch: Partial<SessionState>) => void;
   setSession: (id: string, meta: string) => void;
   setModel: (model: string) => void;
-  setContextWindow: (window: number | null) => void;
+  setContextView: (patch: Partial<SessionState["contextView"]>) => void;
   setHistory: (history: HistoryEntry[]) => void;
   setWarming: (on: boolean) => void;
   setCredentials: (credentials: CredentialInfo[]) => void;
@@ -228,7 +230,6 @@ export interface SessionActions {
   markRejected: (actions: InterruptAction[]) => void;
   addSysNote: (text: string, level?: "warn") => void;
   addHelp: () => void;
-  addContext: (markdown: string) => void;
   // canvas
   openView: (id: string) => void;
   openImage: (url: string, title: string) => void;
@@ -251,7 +252,6 @@ const initialState: SessionState = {
   versions: null,
   model: null,
   models: [],
-  contextWindow: null,
   meta: "",
   busy: false,
   warming: false,
@@ -265,9 +265,8 @@ const initialState: SessionState = {
   activeView: null,
   canvasOpen: false,
   pending: null,
-  inputTokens: 0,
-  usageLabel: "",
-  usageTitle: "",
+  context: null,
+  contextView: { open: false, report: null },
   history: [],
   lastPrompt: "",
   bottomPin: 0,
@@ -502,11 +501,9 @@ export function createSessionStore() {
       }));
     };
 
-    const onUsage = (msg: Extract<ServerMessage, { type: "usage" }>) => {
-      set((s) => {
-        const inputTokens = msg.input_tokens || s.inputTokens;
-        return { inputTokens, ...usageLabels(inputTokens, s.contextWindow) };
-      });
+    const onContext = (msg: Extract<ServerMessage, { type: "context" }>) => {
+      const { type: _type, ...meter } = msg;
+      set({ context: meter });
     };
 
     const onTurnEnd = (cancelled: boolean) => {
@@ -537,10 +534,9 @@ export function createSessionStore() {
       }));
     };
 
-    // The conversation was made smaller (compacted, or tool results moved to files).
-    // It can arrive mid-turn, so it closes any open assistant/reasoning segment like a
-    // new tool step does and leaves busy alone.
-    const onContextNote = (text: string) => {
+    // The conversation was compacted. It can arrive mid-turn, so it closes any open
+    // assistant/reasoning segment like a new tool step does and leaves busy alone.
+    const onCompaction = (text: string) => {
       set((s) => ({
         liveAssistantId: null,
         liveReasoningId: null,
@@ -566,7 +562,7 @@ export function createSessionStore() {
     const onSnapshot = (msg: Extract<ServerMessage, { type: "snapshot" }>) => {
       const { sessionId, meta, warming } = get();
       get().reset();
-      set({ sessionId, meta, warming });
+      set({ sessionId, meta, warming, context: msg.context ?? null });
       get().replay(msg.messages);
       if (!msg.busy) return;
       set({ busy: true, working: true });
@@ -579,7 +575,7 @@ export function createSessionStore() {
       handle(msg) {
         if (msg.type === "snapshot") return onSnapshot(msg);
         // Anything but a side output means the agent produced content, so the
-        // "thinking" indicator clears. Side outputs (a plot, a usage tick) arrive
+        // "thinking" indicator clears. Side outputs (a plot, a context tick) arrive
         // mid-turn while the agent keeps working, so they must not clear it.
         if (!SIDE_OUTPUT_TYPES.has(msg.type)) set({ working: false });
         if (get().warming) set({ warming: false });
@@ -596,8 +592,8 @@ export function createSessionStore() {
             return onArtifact(msg);
           case "interrupt":
             return onInterrupt(msg);
-          case "usage":
-            return onUsage(msg);
+          case "context":
+            return onContext(msg);
           case "turn_end":
             return onTurnEnd(!!msg.cancelled);
           case "ui":
@@ -607,8 +603,7 @@ export function createSessionStore() {
           case "notice":
             return onNotice(msg.text);
           case "compaction":
-          case "offload":
-            return onContextNote(msg.text);
+            return onCompaction(msg.text);
           case "error":
             return onError(msg.message);
         }
@@ -643,8 +638,7 @@ export function createSessionStore() {
               onArtifact(m);
               break;
             case "compaction":
-            case "offload":
-              onContextNote(m.text);
+              onCompaction(m.text);
               break;
           }
         }
@@ -654,8 +648,7 @@ export function createSessionStore() {
       setConfig: (patch) => set(patch),
       setSession: (id, meta) => set({ sessionId: id, meta }),
       setModel: (model) => set({ model }),
-      setContextWindow: (window) =>
-        set((s) => ({ contextWindow: window, ...usageLabels(s.inputTokens, window) })),
+      setContextView: (patch) => set((s) => ({ contextView: { ...s.contextView, ...patch } })),
       setHistory: (history) => set({ history }),
       setWarming: (on) => set({ warming: on }),
       setCredentials: (credentials) => set({ credentials }),
@@ -673,7 +666,6 @@ export function createSessionStore() {
           versions: s.versions,
           model: s.model,
           models: s.models,
-          contextWindow: s.contextWindow,
           history: s.history,
           // key status is account-wide, not per-session; keep it across a reset
           credentials: s.credentials,
@@ -723,9 +715,6 @@ export function createSessionStore() {
         set((s) => ({ items: [...s.items, { kind: "sys-note", id: nextId(), text, level }] })),
 
       addHelp: () => set((s) => ({ items: [...s.items, { kind: "help", id: nextId() }] })),
-
-      addContext: (markdown) =>
-        set((s) => ({ items: [...s.items, { kind: "context", id: nextId(), markdown }] })),
 
       openView: (id) =>
         set((s) => {
@@ -806,19 +795,4 @@ export function createSessionStore() {
       },
     };
   });
-}
-
-function usageLabels(
-  inputTokens: number,
-  window: number | null,
-): { usageLabel: string; usageTitle: string } {
-  if (!inputTokens) return { usageLabel: "", usageTitle: "" };
-  const pct = window ? Math.round((inputTokens / window) * 100) : 0;
-  const usageLabel = window
-    ? `${pct < 1 ? "<1" : pct}% ctx` // some tokens used always reads as at least <1%, never 0%
-    : `${formatTokens(inputTokens)} ctx`;
-  const usageTitle = `${formatTokens(inputTokens)}${
-    window ? " / " + formatTokens(window) : ""
-  } context tokens`;
-  return { usageLabel, usageTitle };
 }

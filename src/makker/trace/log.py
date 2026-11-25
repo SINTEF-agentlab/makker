@@ -114,6 +114,20 @@ class TraceLog:
         ).fetchall()
         return [Event(id=r[0], timestamp=r[1], kind=r[2], payload=json.loads(r[3])) for r in rows]
 
+    def last_event(self, kinds: Sequence[str], *, before: int | None = None) -> Event | None:
+        """The most recent event of any of ``kinds`` (older than event ``before`` if
+        given), or None. Uses the kind index."""
+        holes = ",".join("?" * len(kinds))
+        query = f"SELECT id, timestamp, kind, payload_json FROM events WHERE kind IN ({holes})"
+        params: list[Any] = list(kinds)
+        if before is not None:
+            query += " AND id < ?"
+            params.append(before)
+        row = self._conn.execute(query + " ORDER BY id DESC LIMIT 1", params).fetchone()
+        if row is None:
+            return None
+        return Event(id=row[0], timestamp=row[1], kind=row[2], payload=json.loads(row[3]))
+
     def max_id(self) -> int:
         """The id of the most recent event, or 0 if the trace is empty (cheap, by PK)."""
         row = self._conn.execute("SELECT id FROM events ORDER BY id DESC LIMIT 1").fetchone()

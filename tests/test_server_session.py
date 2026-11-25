@@ -1557,12 +1557,14 @@ def test_command_reconfigures_session(tmp_path: Path) -> None:
             ws.send_json({"type": "command", "command": "set_approval", "arg": "auto"})
             ws.send_json({"type": "command", "command": "bogus"})
             switched = ws.receive_json()  # the page shows a switch only once it took
+            meter = ws.receive_json()  # and the context against the new window
             err = ws.receive_json()
         # A later connection is told the model the session runs.
         with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
             snapshot = ws.receive_json()
     assert calls == [{"model": "anthropic:c"}]
     assert switched == {"type": "model", "model": "anthropic:c"}
+    assert meter["type"] == "context"
     assert host.approval_mode == "auto"
     assert err["type"] == "error" and "bogus" in err["message"]
     assert snapshot["model"] == "anthropic:c"
@@ -1586,8 +1588,10 @@ def test_command_compact_and_add_dir(tmp_path: Path) -> None:
             n1 = ws.receive_json()
             ws.send_json({"type": "command", "command": "compact"})
             n2 = ws.receive_json()
+            meter = ws.receive_json()
     assert n1 == {"type": "notice", "text": "added:/data"}
     assert n2 == {"type": "notice", "text": "compacted:ok"}
+    assert meter["type"] == "context"
 
 
 def test_transcript_and_memory_endpoints(tmp_path: Path) -> None:
@@ -1602,8 +1606,8 @@ def test_transcript_and_memory_endpoints(tmp_path: Path) -> None:
         assert client.get("/sessions/nope/transcript").status_code == 404
 
 
-def test_context_endpoint_renders_panel(tmp_path: Path) -> None:
-    # /context renders the same panel as the TUI. It reads the trace from a fresh
+def test_context_endpoint_reports_the_context(tmp_path: Path) -> None:
+    # /context returns the report the TUI renders. It reads the trace from a fresh
     # connection because the endpoint runs in a threadpool and the session's own
     # SQLite connection is bound to the thread it was created on — a regression
     # guard for the cross-thread error that returned a 500.
@@ -1617,7 +1621,7 @@ def test_context_endpoint_renders_panel(tmp_path: Path) -> None:
             log.append("model_usage", {"input_tokens": 1200, "output_tokens": 80})
         resp = client.get(f"/sessions/{sid}/context")
         assert resp.status_code == 200
-        assert resp.json()["markdown"].strip()
+        assert resp.json()["breakdown"] == [{"key": "all", "label": "In context", "tokens": 1280}]
         assert client.get("/sessions/nope/context").status_code == 404
 
 
@@ -1656,7 +1660,14 @@ def test_every_connection_opens_with_the_session_as_it_stands(tmp_path: Path) ->
         with client.websocket_connect(stream) as ws:
             again = ws.receive_json()
 
-    assert first == {"type": "snapshot", "messages": [], "turn": [], "busy": False, "model": None}
+    assert first == {
+        "type": "snapshot",
+        "messages": [],
+        "turn": [],
+        "busy": False,
+        "model": None,
+        "context": None,
+    }
     assert again["type"] == "snapshot" and again["busy"] is False
     assert {"type": "user", "text": "hi"} in again["messages"]
 
@@ -2041,7 +2052,7 @@ def test_messages_endpoint_replays_conversation(tmp_path: Path) -> None:
     assert finished["tool_call_id"] == "c1" and finished["content"] == "2"
     # A compaction replays as the same note the live turn showed.
     compaction = next(m for m in msgs if m["type"] == "compaction")
-    assert compaction["text"].startswith("Context compacted automatically: summarized 16")
+    assert compaction["text"] == "Context compacted." and compaction["summarized"] == 16
 
 
 def test_messages_endpoint_finishes_resultless_tool_calls(tmp_path: Path) -> None:
@@ -2716,6 +2727,7 @@ async def test_a_socket_attaching_mid_turn_sees_all_of_it(tmp_path: Path) -> Non
     assert after == [
         ("tool", "finished", None),
         ("text", None, " again"),
+        ("context", None, None),
         ("turn_end", None, ""),
     ]
     assert len(first_ws.sent) == sent_before  # the detached socket got nothing more

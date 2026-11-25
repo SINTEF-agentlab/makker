@@ -5,6 +5,7 @@ import { api, type HistoryEntry } from "./api";
 import { registerPanel } from "./canvas/registry";
 import { Canvas } from "./components/Canvas";
 import { Composer } from "./components/Composer";
+import { ContextView } from "./components/Context";
 import { Sidebar } from "./components/Sidebar";
 import { Thread } from "./components/Thread";
 import type { ServerMessage } from "./protocol";
@@ -48,6 +49,58 @@ describe("composer", () => {
     fireEvent.keyDown(composer, { key: "Enter" });
 
     expect(composer.value).toBe("and then plot the pressure");
+  });
+});
+
+describe("context ring and view", () => {
+  const meter = {
+    model: "openai:gpt-6",
+    window: 200_000,
+    window_source: "provider" as const,
+    compact_at: 170_000,
+    offload_at: 119_000,
+    used: 52_000,
+    estimated: false,
+  };
+
+  it("opens the view from the ring, with the tool results expandable", async () => {
+    const report = vi.spyOn(api, "context").mockResolvedValue({
+      meter,
+      breakdown: [
+        { key: "system", label: "System prompt", tokens: 12_000 },
+        { key: "tool_results", label: "Tool results", tokens: 40_000 },
+      ],
+      largest: [{ label: "Read · src/model.jl", tokens: 9_000 }],
+      moved: { results: 4, compactions: 0 },
+    });
+    const { store } = renderWithStore(
+      <>
+        <Composer />
+        <ContextView />
+      </>,
+    );
+    act(() => store.setState({ sessionId: "s1", context: meter }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Context: 52k of 200k tokens (26%)" }));
+    await waitFor(() => expect(screen.getByText("System prompt")).toBeInTheDocument());
+    expect(screen.getByText("Free space")).toBeInTheDocument();
+    expect(screen.getByText("Moved out: 4 tool results to files.")).toBeInTheDocument();
+    expect(report).toHaveBeenCalledWith("s1");
+
+    // The largest results show only when asked for.
+    expect(screen.queryByText("Read · src/model.jl")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Tool results" }));
+    expect(screen.getByText("Read · src/model.jl")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(store.getState().contextView.open).toBe(false);
+    report.mockRestore();
+  });
+
+  it("shows an empty ring before the first model call", () => {
+    const { store } = renderWithStore(<Composer />);
+    act(() => store.setState({ context: { ...meter, used: null } }));
+    expect(screen.getByRole("button", { name: "Context: No model calls yet" })).toBeInTheDocument();
   });
 });
 

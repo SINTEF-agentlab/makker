@@ -11,7 +11,7 @@ from makker.agent.approval import (
     pending_allowed_decisions,
 )
 from makker.agent.turns import (
-    TurnContextNote,
+    TurnCompaction,
     TurnInterrupt,
     TurnReasoningDelta,
     TurnTextDelta,
@@ -68,15 +68,8 @@ def test_tool_event_wire() -> None:
 
 def test_compaction_wire() -> None:
     payload = {"summarized": 16, "kept": 3, "offloaded": True, "manual": False, "cutoff": 16}
-    note = TurnContextNote(kind="compaction", text="Context compacted.", payload=payload)
+    note = TurnCompaction(text="Context compacted.", payload=payload)
     assert protocol.to_wire(note) == {"type": "compaction", "text": "Context compacted.", **payload}
-    moved = {"count": 5, "freed_tokens": 30_000}
-    note = TurnContextNote(kind="offload", text="Moved 5 older tool results.", payload=moved)
-    assert protocol.to_wire(note) == {
-        "type": "offload",
-        "text": "Moved 5 older tool results.",
-        **moved,
-    }
 
 
 def test_unknown_event_is_none() -> None:
@@ -129,26 +122,10 @@ def test_interrupt_wire_carries_what_the_policy_offers_to_always_allow() -> None
     assert wire["allowlist"] == ["file_edits"]
 
 
-def test_usage_wire_takes_last() -> None:
-    m1 = AIMessage(
-        content="a",
-        usage_metadata={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
-    )
-    m2 = AIMessage(
-        content="b",
-        usage_metadata={"input_tokens": 20, "output_tokens": 4, "total_tokens": 24},
-    )
-    assert protocol.usage_to_wire([m1, m2]) == {
-        "type": "usage",
-        "input_tokens": 20,
-        "output_tokens": 4,
-        "total_tokens": 24,
-        "model_calls": 2,
-    }
-
-
-def test_usage_wire_none_when_absent() -> None:
-    assert protocol.usage_to_wire([AIMessage(content="x")]) is None
+def test_context_wire_carries_the_meter() -> None:
+    meter = {"used": 24, "window": 1000, "compact_at": 850, "estimated": False}
+    assert protocol.context_to_wire(meter) == {"type": "context", **meter}
+    assert protocol.context_to_wire(None) == {"type": "context"}
 
 
 def test_turn_end_wire() -> None:

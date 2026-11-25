@@ -7,7 +7,7 @@ from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from makker.agent.offload import ToolResultOffloadMiddleware, context_used, describe_offload
+from makker.agent.offload import ToolResultOffloadMiddleware, context_used
 from makker.context_budget import ContextBudget
 from makker.trace import TraceLog
 
@@ -105,19 +105,12 @@ def test_context_used_counts_from_the_last_measured_call() -> None:
     )
 
 
-def test_describe_offload() -> None:
-    assert describe_offload({"count": 5, "freed_tokens": 30_000}) == (
-        "Moved 5 older tool results to files to free context (about 30k tokens). "
-        "The agent can read them back."
-    )
-
-
-async def test_an_agent_offloads_mid_turn_and_announces_it(tmp_path: Path) -> None:
+async def test_an_agent_offloads_mid_turn(tmp_path: Path) -> None:
     """End to end: large tool results in a small window move to files during the turn."""
     from langgraph.checkpoint.memory import InMemorySaver
 
     from makker.agent.builder import build_agent
-    from makker.agent.turns import TurnContextNote, TurnRunner
+    from makker.agent.turns import TurnRunner
     from makker.lab.fakes import (
         FakeJulia,
         make_fake_adapter,
@@ -140,12 +133,9 @@ async def test_an_agent_offloads_mid_turn_and_announces_it(tmp_path: Path) -> No
     agent, _ = build_agent(session, model=model, checkpointer=InMemorySaver())
     runner = TurnRunner(agent, thread_id=session.session_id, trace=session.trace)
 
-    notes: list[TurnContextNote] = []
-    await runner.run_prompt(
-        "read it", on_message=lambda e: notes.append(e) if isinstance(e, TurnContextNote) else None
-    )
+    await runner.run_prompt("read it")
 
-    assert "offload" in [n.kind for n in notes]
+    assert session.trace.events_of("context_offload")
     state = await agent.aget_state({"configurable": {"thread_id": session.session_id}})
     results = [m for m in state.values["messages"] if isinstance(m, ToolMessage)]
     assert results[0].content.startswith("[Moved out of the conversation")

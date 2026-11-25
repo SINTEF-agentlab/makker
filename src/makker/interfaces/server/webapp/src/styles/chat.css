@@ -551,29 +551,6 @@ details.block .body {
 .help-desc {
   color: var(--muted);
 }
-.context-card {
-  align-self: center;
-  max-width: var(--maxw);
-  width: 100%;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  border-radius: 12px;
-  padding: 0.6rem 0.95rem;
-  box-shadow: var(--shadow);
-  font-size: 0.84rem;
-}
-.context-card code {
-  font-family: var(--mono);
-  white-space: pre;
-}
-.context-card ul {
-  margin: 0.3rem 0;
-  padding-left: 1.1rem;
-}
-.context-card li {
-  margin: 0.05rem 0;
-}
-
 /* ---- Working indicator (the "thinking" dots) ---- */
 .working {
   display: flex;
@@ -686,12 +663,47 @@ details.block .body {
   border-radius: 2px;
   background: #fff;
 }
-.hint {
+/* Below the message box, right-aligned: the context ring. */
+.composer-foot {
   max-width: var(--maxw);
-  margin: 0.35rem auto 0;
-  color: var(--muted);
-  font-size: 0.75rem;
-  text-align: center;
+  margin: 0.3rem auto 0;
+  display: flex;
+  justify-content: flex-end;
+  min-height: 1.5rem;
+}
+
+/* How full the context is, as a ring; amber, then red, as compaction nears. */
+.ctx-ring {
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+.ctx-ring:hover,
+.ctx-ring:focus-visible {
+  background: var(--surface-2);
+}
+.ctx-ring circle {
+  fill: none;
+  stroke-width: 2.5;
+}
+.ctx-ring-track {
+  stroke: var(--border);
+}
+.ctx-ring-fill {
+  stroke: var(--muted);
+  stroke-linecap: round;
+}
+.ctx-ring.warn .ctx-ring-fill {
+  stroke: #e8a317;
+}
+.ctx-ring.high .ctx-ring-fill {
+  stroke: #d03b3b;
 }
 
 /* Slash-command autocomplete and the model picker, floated above the composer. */

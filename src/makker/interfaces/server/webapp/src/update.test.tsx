@@ -198,7 +198,6 @@ describe("after the reload into the restarted server", () => {
     vi.spyOn(api, "updateStatus").mockResolvedValue(status({ latest: null, job: outcome }));
     vi.spyOn(controller, "startSession").mockResolvedValue();
     vi.spyOn(controller, "refreshHistory").mockResolvedValue();
-    vi.spyOn(controller, "refreshContextWindow").mockResolvedValue();
     await act(async () => controller.init());
     return rendered;
   }

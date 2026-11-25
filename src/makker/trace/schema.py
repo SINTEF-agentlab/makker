@@ -83,13 +83,15 @@ def model_payload(
     window: int,
     window_source: str,
     compact_at: int,
+    offload_at: int,
     settings: dict[str, Any],
 ) -> dict[str, Any]:
     """Payload for a ``MODEL`` event.
 
     ``window`` is the input window in tokens and ``window_source`` where it came
     from (``provider``, ``ollama`` or ``assumed``); ``compact_at`` is the context
-    size at which automatic compaction runs; ``settings`` are the reasoning and
+    size at which automatic compaction runs, and ``offload_at`` the one at which
+    older tool results start moving to files; ``settings`` are the reasoning and
     output settings the model was built with.
     """
     return {
@@ -97,6 +99,7 @@ def model_payload(
         "window": window,
         "window_source": window_source,
         "compact_at": compact_at,
+        "offload_at": offload_at,
         "settings": settings,
     }
 
@@ -114,6 +117,7 @@ def compaction_payload(
     offloaded: bool,
     manual: bool = False,
     cutoff: int | None = None,
+    freed_tokens: int | None = None,
 ) -> dict[str, Any]:
     """Payload for a ``CONTEXT_COMPACTION`` event.
 
@@ -122,6 +126,7 @@ def compaction_payload(
     to a recoverable file. ``cutoff`` is the compaction's position in the
     checkpointed message list. It only grows from one compaction to the next,
     so it identifies a compaction and keeps any one from being recorded twice.
+    ``freed_tokens`` is about how much smaller the summary made the context.
     """
     return {
         "summarized": summarized,
@@ -129,6 +134,7 @@ def compaction_payload(
         "offloaded": offloaded,
         "manual": manual,
         "cutoff": cutoff,
+        "freed_tokens": freed_tokens,
     }
 
 

@@ -19,7 +19,6 @@ describe.each(["", "/restricted", "/nested/prefix"])("API under %j", (prefix) =>
     await api.models();
     await api.liveModels();
     await api.credentials();
-    await api.modelWindow("provider:model");
     await api.history(10);
     await api.context("sid");
     await api.setCredential("provider", "test-key");
@@ -36,7 +35,6 @@ describe.each(["", "/restricted", "/nested/prefix"])("API under %j", (prefix) =>
       ["/models", "GET"],
       ["/models/live", "GET"],
       ["/credentials", "GET"],
-      ["/models/window?model=provider%3Amodel", "GET"],
       ["/sessions/history?limit=10", "GET"],
       ["/sessions/sid/context", "GET"],
       ["/credentials", "POST"],
@@ -47,11 +45,11 @@ describe.each(["", "/restricted", "/nested/prefix"])("API under %j", (prefix) =>
     ].map(([path, method]) => [prefix + path, method]));
 
     const calls = vi.mocked(fetch).mock.calls;
-    expect(calls[7][1]).toMatchObject({
+    expect(calls[6][1]).toMatchObject({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ provider: "provider", value: "test-key" }),
     });
-    const upload = calls[11][1]!;
+    const upload = calls[10][1]!;
     expect(upload.body).toBeInstanceOf(FormData);
     expect((upload.body as FormData).get("file")).toBeInstanceOf(File);
     expect(upload.headers).toBeUndefined();

@@ -38,13 +38,12 @@ describe("model catalog refresh", () => {
     const controller = new Controller(store);
     const start = vi.spyOn(controller, "startSession").mockResolvedValue();
     const history = vi.spyOn(controller, "refreshHistory").mockResolvedValue();
-    const context = vi.spyOn(controller, "refreshContextWindow").mockResolvedValue();
 
     try {
       await controller.init();
       await vi.waitFor(() => expect(store.getState().models).toContainEqual(liveModel));
     } finally {
-      for (const spy of [...spies, start, history, context]) spy.mockRestore();
+      for (const spy of [...spies, start, history]) spy.mockRestore();
     }
   });
 });
@@ -210,7 +209,6 @@ describe("session lifecycle", () => {
 
   it("shows a model switch only once the server confirms it", async () => {
     vi.spyOn(api, "createSession").mockResolvedValue({ session_id: "s1" });
-    vi.spyOn(api, "modelWindow").mockResolvedValue({ model: "", window: null });
     const { store, controller } = setup();
     store.setState({ model: "openai:a" });
     await controller.startSession();
@@ -232,7 +230,6 @@ describe("session lifecycle", () => {
 
   it("shows the model a reattached session runs", async () => {
     vi.spyOn(api, "createSession").mockResolvedValue({ session_id: "s1" });
-    vi.spyOn(api, "modelWindow").mockResolvedValue({ model: "", window: null });
     const { store, controller } = setup();
     store.setState({ model: "openai:a" });
     await controller.startSession();

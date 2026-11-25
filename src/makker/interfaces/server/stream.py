@@ -16,6 +16,8 @@ from urllib.parse import quote
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from makker.agent.approval import SUPPORTED_APPROVAL_DECISIONS, build_resume_payload
+from makker.agent.turns import TurnUsage
+from makker.context_panel import context_meter
 from makker.interfaces.server import protocol
 from makker.interfaces.server.deps import ManagerDep
 from makker.interfaces.server.live import _authored_of, _fit_target, _sane_size
@@ -292,6 +294,7 @@ class _SessionStream:
                 self._host.reconfigure(model=arg)
                 # The page shows the switch only once it has taken effect.
                 await self._send(protocol.model_to_wire(self._host.model))
+                await self._send_context()
             elif command == "set_approval":
                 self._host.set_approval_mode(arg)
                 # A pending approval the new policy already allows resumes now
@@ -302,6 +305,7 @@ class _SessionStream:
             elif command == "compact":
                 note, _result = await self._host.compact()
                 await self._send(protocol.notice_to_wire(note))
+                await self._send_context()
             else:
                 await self._send(protocol.error_to_wire(f"unknown command {command!r}"))
                 return
@@ -602,8 +606,17 @@ class _SessionStream:
         if busy and self._turn_prompt:
             messages.append(protocol.replay_message("user", self._turn_prompt))
         return protocol.snapshot_to_wire(
-            messages, self._turn_log if busy else [], busy=busy, model=self._host.model
+            messages,
+            self._turn_log if busy else [],
+            busy=busy,
+            model=self._host.model,
+            context=context_meter(session.trace),
         )
+
+    async def _send_context(self) -> None:
+        """Send the context meter as the trace has it now."""
+        with contextlib.suppress(Exception):
+            await self._send(protocol.context_to_wire(context_meter(self._host.session.trace)))
 
     async def _send(self, message: dict[str, Any]) -> None:
         """Send to the attached socket, if any, keeping the running turn's content."""
@@ -676,11 +689,14 @@ class _SessionStream:
             # Surface whatever the turn produced before it was stopped.
             with contextlib.suppress(Exception):
                 await self._flush_side_outputs()
+            # However the turn ended, its model calls may have changed the context.
+            await self._send_context()
             await self._end_turn(protocol.turn_cancelled_to_wire())
             raise
         except Exception as exc:
             with contextlib.suppress(Exception):
                 await self._flush_side_outputs()
+            await self._send_context()
             await self._end_turn(protocol.turn_end_to_wire([]), error=str(exc))
         finally:
             # A turn that reached here without ending raised somewhere the client
@@ -723,13 +739,11 @@ class _SessionStream:
             # The turn paused for approval. Send the requests and wait for a
             # decision; the turn ends only once it runs to completion.
             self._turn_ended = True
+            await self._send_context()
             for interrupt in self._pending:
                 await self._send_interrupt(interrupt)
             return
-        with contextlib.suppress(Exception):
-            usage = protocol.usage_to_wire(result.messages)
-            if usage is not None:
-                await self._send(usage)
+        await self._send_context()
         await self._end_turn(protocol.turn_end_to_wire(result.messages))
         with contextlib.suppress(Exception):
             await self._flush_host_context()
@@ -783,6 +797,9 @@ class _SessionStream:
 
     async def _on_message(self, event: Any) -> None:
         await self._announce_history_once()
+        if isinstance(event, TurnUsage):
+            await self._send_context()
+            return
         wire = protocol.to_wire(event)
         if wire is None:
             return

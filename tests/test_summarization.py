@@ -97,7 +97,7 @@ async def test_auto_compaction_is_announced_once_and_kept_out_of_the_chat(
     """
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    from makker.agent.turns import TurnContextNote, TurnTextDelta
+    from makker.agent.turns import TurnCompaction, TurnTextDelta
 
     adapter = make_fake_adapter(tmp_path)
     session = Session.create(julia=FakeJulia(), state_root=tmp_path, simulator=adapter)
@@ -111,14 +111,14 @@ async def test_auto_compaction_is_announced_once_and_kept_out_of_the_chat(
         agent, _ = build_agent(session, model=model, checkpointer=saver)
         runner = TurnRunner(agent, thread_id=session.session_id, trace=session.trace)
 
-        async def turn(prompt: str, runner: TurnRunner) -> tuple[str, list[TurnContextNote]]:
+        async def turn(prompt: str, runner: TurnRunner) -> tuple[str, list[TurnCompaction]]:
             text: list[str] = []
-            notes: list[TurnContextNote] = []
+            notes: list[TurnCompaction] = []
 
             def on_message(event: object) -> None:
                 if isinstance(event, TurnTextDelta):
                     text.append(event.text)
-                elif isinstance(event, TurnContextNote) and event.kind == "compaction":
+                elif isinstance(event, TurnCompaction):
                     notes.append(event)
 
             await runner.run_prompt(prompt, on_message=on_message)
@@ -134,7 +134,8 @@ async def test_auto_compaction_is_announced_once_and_kept_out_of_the_chat(
         payload = notes[0].payload
         assert payload["manual"] is False and payload["offloaded"] is True
         assert payload["summarized"] == payload["cutoff"] > 0
-        assert notes[0].text.startswith("Context compacted automatically: summarized")
+        assert notes[0].text == "Context compacted."
+        assert notes[0].payload["manual"] is False
 
         # The next turn and a rebuilt agent see the same compaction in the state.
         assert (await turn("next", runner))[1] == []

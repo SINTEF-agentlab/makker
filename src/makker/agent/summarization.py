@@ -52,18 +52,9 @@ def manual_compaction_available() -> bool:
     return all(hasattr(SummarizationMiddleware, name) for name in _ENGINE_METHODS)
 
 
-def describe_compaction(payload: dict[str, Any]) -> str:
-    """The note every front end shows for a ``context_compaction`` event."""
-    text = "Context compacted" if payload.get("manual") else "Context compacted automatically"
-    summarized, kept = payload.get("summarized"), payload.get("kept")
-    if isinstance(summarized, int):
-        text += f": summarized {summarized} older messages"
-        if isinstance(kept, int):
-            text += f" and kept the {kept} most recent"
-    text += "."
-    if payload.get("offloaded"):
-        text += " The summarized messages are saved to a file the agent can read back."
-    return text
+# The note every front end shows when the conversation was compacted, by /compact
+# or automatically. The trace and transcripts keep the details.
+COMPACTION_NOTE = "Context compacted."
 
 
 @dataclass(frozen=True)
@@ -164,6 +155,7 @@ async def compact_thread(
                 offloaded=file_path is not None,
                 manual=True,
                 cutoff=state_cutoff,
+                freed_tokens=freed,
             ),
         )
     return CompactResult(

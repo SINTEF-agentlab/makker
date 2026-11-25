@@ -81,11 +81,6 @@
   gap: 0.5rem;
   align-items: center;
 }
-.usage {
-  font-size: 0.75rem;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
 .views-btn {
   display: inline-flex;
   align-items: center;
@@ -656,6 +651,163 @@ body.canvas-resizing iframe {
   margin: 0.8rem 0 0;
   color: #b91c1c;
   font-size: 0.85rem;
+}
+
+/* --- Context view ----------------------------------------------------------- */
+/* What fills the context, as one bar split into its parts. The eight parts take
+   the categorical palette in its fixed (validated) order; free space is the bar's
+   track, and the compaction buffer is hatched. The table below the bar names every
+   part with its figure, so no part is told by colour alone. */
+
+.ctx-view {
+  width: 600px;
+  --part-system: #2a78d6;
+  --part-tools: #eb6834;
+  --part-skills: #1baf7a;
+  --part-memory: #eda100;
+  --part-summary: #e87ba4;
+  --part-user: #008300;
+  --part-assistant: #6250d6;
+  --part-tool_results: #e34948;
+  --part-all: var(--accent);
+  --part-track: var(--surface-2);
+}
+@media (prefers-color-scheme: dark) {
+  .ctx-view {
+    --part-system: #3987e5;
+    --part-tools: #d95926;
+    --part-skills: #199e70;
+    --part-memory: #c98500;
+    --part-summary: #d55181;
+    --part-user: #0ca30c;
+    --part-assistant: #9085e9;
+    --part-tool_results: #e66767;
+  }
+}
+
+.ctx-headline {
+  margin: 0.5rem 0 0.1rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ctx-sub {
+  margin: 0.15rem 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.ctx-sub code {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.ctx-bar-wrap {
+  position: relative;
+  margin: 0.8rem 0 0.6rem;
+}
+.ctx-bar {
+  display: flex;
+  gap: 2px;
+  height: 12px;
+}
+.ctx-seg {
+  min-width: 2px;
+  border-radius: 4px;
+  background: var(--part-all);
+}
+.ctx-seg.part-system, .ctx-swatch.part-system { background: var(--part-system); }
+.ctx-seg.part-tools, .ctx-swatch.part-tools { background: var(--part-tools); }
+.ctx-seg.part-skills, .ctx-swatch.part-skills { background: var(--part-skills); }
+.ctx-seg.part-memory, .ctx-swatch.part-memory { background: var(--part-memory); }
+.ctx-seg.part-summary, .ctx-swatch.part-summary { background: var(--part-summary); }
+.ctx-seg.part-user, .ctx-swatch.part-user { background: var(--part-user); }
+.ctx-seg.part-assistant, .ctx-swatch.part-assistant { background: var(--part-assistant); }
+.ctx-seg.part-tool_results, .ctx-swatch.part-tool_results { background: var(--part-tool_results); }
+.ctx-seg.part-free, .ctx-swatch.part-free {
+  background: var(--part-track);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.ctx-seg.part-buffer, .ctx-swatch.part-buffer {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--part-track) 0 3px,
+    var(--border) 3px 5px
+  );
+}
+.ctx-mark {
+  position: absolute;
+  top: -4px;
+  width: 2px;
+  height: 20px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--text);
+}
+
+.ctx-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+.ctx-table td {
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.ctx-table td:nth-child(2),
+.ctx-table td:nth-child(3) {
+  text-align: right;
+  width: 5.5rem;
+}
+.ctx-table td:nth-child(3) {
+  color: var(--muted);
+}
+.ctx-table tr.ctx-free td {
+  color: var(--muted);
+}
+.ctx-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-right: 0.55rem;
+  vertical-align: -1px;
+  background: var(--part-all);
+}
+
+.ctx-expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.ctx-chevron {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+.ctx-expand[aria-expanded="true"] .ctx-chevron {
+  transform: rotate(45deg);
+}
+.ctx-table tr.ctx-detail td {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.ctx-table tr.ctx-detail td:first-child {
+  padding-left: 1.4rem;
+  overflow-wrap: anywhere;
+}
+.ctx-moved {
+  margin-top: 0.7rem;
 }
 
 /* --- Update dialog --------------------------------------------------------- */

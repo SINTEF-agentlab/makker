@@ -112,10 +112,10 @@ second is refused while the first is open.
 | `GET` | `/sessions/{id}/transcript` | The transcript (`?format=html` or `md`) |
 | `GET` | `/sessions/{id}/memory` | The session's workspace memory, as a page |
 | `POST` | `/sessions/{id}/upload` | Add a file to the session workspace (`uploads/<name>`) |
-| `GET` | `/sessions/{id}/context` | The context-usage panel as markdown (same figures as the TUI's `/context`) |
+| `GET` | `/sessions/{id}/context` | The context view as data: the meter (as in the `context` message), what fills the context part by part, the largest tool results, and how many tool results and compactions were moved out. The TUI's `/context` renders the same report |
 | `GET` | `/models` | List the models that can be selected; also carries `protocol`, the wire-contract version |
 | `GET` | `/models/live` | Refresh the model list from configured provider APIs (best effort; API-listed tool support is unverified) |
-| `GET` | `/models/window` | A model's context window, for a usage indicator: `window`, `window_source` (`provider`, `ollama` or `assumed`) and `compact_at` |
+| `GET` | `/models/window` | A model's context window: `window`, `window_source` (`provider`, `ollama` or `assumed`) and `compact_at` |
 | `GET` | `/credentials` | Which providers have keys, and whether a shell variable shadows a saved one |
 | `POST` | `/credentials` | Save a provider API key (used by the missing-key prompt) |
 | `GET` | `/simulators` | List installed simulators (the server is bound to one, returned as `default`), each with its display name and starter prompts, plus the `branding` an installed capability puts in their place |
@@ -133,7 +133,7 @@ Messages from the server to the front end:
 
 | Message | Carries |
 | --- | --- |
-| `snapshot` | The first message on every connection: `messages`, the conversation replayed as `/sessions/{id}/messages` gives it; `busy`, whether a turn is running; `turn`, the messages that turn has sent so far, to apply as if they had arrived live; and `model`, the model the session runs (`null` for the server's default) |
+| `snapshot` | The first message on every connection: `messages`, the conversation replayed as `/sessions/{id}/messages` gives it; `busy`, whether a turn is running; `turn`, the messages that turn has sent so far, to apply as if they had arrived live; `model`, the model the session runs (`null` for the server's default); and `context`, its context meter (`null` before an agent was built) |
 | `text` | A piece of the assistant's reply |
 | `reasoning` | A piece of the assistant's reasoning |
 | `tool` | A step in a tool call: requested, started, finished, or failed |
@@ -141,13 +141,12 @@ Messages from the server to the front end:
 | `artifact` | A file the session produced, given as a URL |
 | `viz` | An interactive view to pin in the side panel: a plot or a report, given as a URL |
 | `popout_ready` | The answer to a popout `replot`: the popup's independent live view URL, or why there is none |
-| `usage` | The token usage for the turn |
+| `context` | The context meter: `used` (the last call's input plus output, `null` before the first call), `window` and `window_source`, `compact_at`, `offload_at`, `model`, and `estimated` (something changed since the last call measured it: a compaction or a model switch). Sent after every model call, when a turn ends however it ends, after `/compact` and after a model switch; it can arrive mid-turn |
 | `turn_end` | The turn has finished |
 | `ui` | A command for the front end to apply to its interface |
 | `notice` | A system note from a command's result (e.g. `/compact`, `/add-dir`) |
 | `model` | A `set_model` command took effect: the model the session now runs |
 | `compaction` | The conversation was compacted to free context: the note to show (`text`) and the trace event's fields. It can arrive mid-turn and does not end the turn |
-| `offload` | Older tool results were moved to files to free context: the note to show (`text`), `count` and `freed_tokens`. Like `compaction`, it can arrive mid-turn |
 | `credential_required` | A model switch needs a provider key; the front end collects it, POSTs `/credentials`, and retries |
 | `error` | Something went wrong (a bad command, a failed turn, an unknown session) |
 

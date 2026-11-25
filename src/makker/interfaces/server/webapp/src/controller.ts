@@ -24,7 +24,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/clear", desc: "clear the visible conversation" },
   { name: "/new", desc: "start a new chat" },
   { name: "/copy", desc: "copy the last assistant message" },
-  { name: "/context", desc: "show how much context the last turn used" },
+  { name: "/context", desc: "show what fills the context and how close compaction is" },
   { name: "/model", hint: "[provider:model]", desc: "switch the model (keeps the session)" },
   { name: "/approval-mode", hint: "[ask|workspace|auto]", desc: "set the approval policy" },
   { name: "/transcript", hint: "[md]", desc: "download the conversation to share" },
@@ -173,7 +173,6 @@ export class Controller {
     });
     void this.refreshAvailableModels();
     this.refreshHistory();
-    this.refreshContextWindow();
     this.watchHostContext();
     await this.startSession();
     await this.noteFinishedUpdate();
@@ -203,12 +202,6 @@ export class Controller {
   async refreshAvailableModels(): Promise<void> {
     const available = await api.liveModels();
     if (available.models.length) this.store.setState({ models: available.models });
-  }
-
-  async refreshContextWindow(): Promise<void> {
-    const { model } = this.s;
-    const data = await api.modelWindow(model || "");
-    this.s.setContextWindow(data.window ?? null);
   }
 
   async startSession(): Promise<void> {
@@ -402,7 +395,6 @@ export class Controller {
       if (msg.model && msg.model !== this.s.model) {
         this.s.setModel(msg.model);
         this.store.setState({ meta: this.meta() });
-        void this.refreshContextWindow();
       }
       if (this.arrivalNote) this.s.addSysNote(this.arrivalNote);
       this.arrivalNote = null;
@@ -410,7 +402,6 @@ export class Controller {
       this.s.setModel(msg.model);
       this.store.setState({ meta: this.meta() });
       this.s.addSysNote(`Switched the model to ${msg.model}.`);
-      void this.refreshContextWindow();
     } else if (msg.type === "turn_end") {
       this.refreshHistory();
       if (!msg.cancelled) this.notifyDone("The agent finished your turn.");
@@ -628,8 +619,7 @@ export class Controller {
       case "/copy":
         return this.copyLast();
       case "/context":
-        void this.showContext();
-        return;
+        return this.openContext();
       case "/model":
         return this.setModel(arg); // empty arg opens the picker via the composer
       case "/approval-mode":
@@ -730,7 +720,6 @@ export class Controller {
     // would trip sendCommand's own busy guard and strand the spinner with no turn to
     // end it. The server's notice (or an error) clears it.
     if (this.sendCommand("compact", "")) {
-      this.s.addSysNote("Compacting the conversation…");
       this.s.beginWorking();
     }
   }
@@ -761,12 +750,25 @@ export class Controller {
     this.s.pinDoc(api.memoryUrl(sessionId), "Workspace memory", "memory");
   }
 
-  private async showContext(): Promise<void> {
+  /** Open the context view; it loads its report (`refreshContext`) while open. */
+  openContext(): void {
+    if (!this.s.sessionId) return this.s.addSysNote("No active session.");
+    this.s.setContextView({ open: true });
+  }
+
+  closeContext(): void {
+    this.s.setContextView({ open: false });
+  }
+
+  /** Load the context report for the open view. A stale answer (another session by
+   *  then) is dropped. */
+  async refreshContext(): Promise<void> {
     const { sessionId } = this.s;
-    if (!sessionId) return this.s.addSysNote("No active session.");
-    const data = await api.context(sessionId);
-    if (!data.markdown) return this.s.addSysNote("Could not read context usage.", "warn");
-    this.s.addContext(data.markdown);
+    if (!sessionId) return;
+    const report = await api.context(sessionId);
+    if (this.s.sessionId !== sessionId) return;
+    if (!report) return this.s.addSysNote("Could not read the context usage.", "warn");
+    this.s.setContextView({ report });
   }
 
   private copyLast(): void {

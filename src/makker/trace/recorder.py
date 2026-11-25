@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain.agents.middleware.internal_call_transformer import InternalCallTransformer
-from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
+from langchain.agents.middleware.types import (
+    AgentMiddleware,
+    ModelRequest,
+    ModelResponse,
+    ToolCallRequest,
+)
 from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages.utils import count_tokens_approximately
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command
 
+from makker.agent.context_measure import measure_request, scale_to_usage
 from makker.trace import TraceLog
 from makker.trace.messages import content_to_str, reasoning_to_str
 from makker.trace.schema import (
@@ -34,10 +42,32 @@ class TraceRecorder(AgentMiddleware):
     # registers it once), so it sits on this one, which every agent has.
     transformers = (InternalCallTransformer,)
 
-    def __init__(self, trace: TraceLog) -> None:
+    def __init__(
+        self,
+        trace: TraceLog,
+        *,
+        finish_request: Callable[[ModelRequest], ModelRequest] | None = None,
+    ) -> None:
+        """``finish_request`` adds what middleware running after this one add to a
+        request (the skills index), so the measured request is the one sent."""
         super().__init__()
         self._trace = trace
         self._traced_cutoff: int | None = None
+        self._finish_request = finish_request
+        self._measured: dict[str, Any] | None = None
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        # What the request holds, part by part, for the context view; recorded
+        # with the call's usage once the provider has reported it.
+        self._measured = None
+        with contextlib.suppress(Exception):
+            finished = self._finish_request(request) if self._finish_request else None
+            self._measured = measure_request(request, finished=finished)
+        return await handler(request)
 
     def _record_compaction(self, state: Any) -> None:
         """Emit a ``context_compaction`` event when the stock summarizer compacts.
@@ -66,12 +96,19 @@ class TraceRecorder(AgentMiddleware):
         # what the model saw after the cut is directly computable. The reply just
         # produced came after the compaction: it is new, not kept.
         messages = state.get("messages")
-        kept = None
+        kept = freed = None
         if isinstance(messages, list) and len(messages) >= cutoff:
             tail = messages[cutoff:]
             if tail and isinstance(tail[-1], AIMessage):
                 tail = tail[:-1]
             kept = len(tail)
+            with contextlib.suppress(Exception):
+                summary = event.get("summary_message")
+                freed = max(
+                    0,
+                    int(count_tokens_approximately(messages[prior:cutoff]))
+                    - int(count_tokens_approximately([summary] if summary else [])),
+                )
         self._trace.append(
             CONTEXT_COMPACTION,
             compaction_payload(
@@ -79,6 +116,7 @@ class TraceRecorder(AgentMiddleware):
                 kept=kept,
                 offloaded=event.get("file_path") is not None,
                 cutoff=cutoff,
+                freed_tokens=freed,
             ),
         )
 
@@ -105,8 +143,13 @@ class TraceRecorder(AgentMiddleware):
         usage = getattr(last, "usage_metadata", None)
         if usage:
             # Token accounting per model turn; cost and efficiency analyses
-            # read these events instead of re-deriving counts from text.
-            self._trace.append(MODEL_USAGE, dict(usage))
+            # read these events instead of re-deriving counts from text. The
+            # context view reads what the request held from ``context``.
+            payload = dict(usage)
+            if self._measured is not None:
+                payload["context"] = scale_to_usage(self._measured, payload)
+            self._trace.append(MODEL_USAGE, payload)
+        self._measured = None
         return None
 
     async def awrap_tool_call(

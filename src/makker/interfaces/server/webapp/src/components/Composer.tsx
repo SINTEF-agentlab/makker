@@ -6,6 +6,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { SLASH_COMMANDS, type SlashCommand } from "../controller";
 import { useController, useSel } from "../context";
+import { ContextMeter } from "./Context";
 import { AttachIcon, SendIcon } from "../icons";
 import { replyDecision } from "../store";
 
@@ -283,7 +284,9 @@ export function Composer() {
           <SendIcon />
         </button>
       </div>
-      <div className="hint">Enter to send · Shift+Enter for a newline · / for commands</div>
+      <div className="composer-foot">
+        <ContextMeter />
+      </div>
     </footer>
   );
 }

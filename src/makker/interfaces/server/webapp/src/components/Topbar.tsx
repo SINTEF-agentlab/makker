@@ -1,5 +1,5 @@
 // The top bar: sidebar toggle, the folder's simulator chip, the meta line
-// (model · session), the warming hint, the context-usage figure, and a "Views"
+// (model · session), the warming hint, and a "Views"
 // button to reopen the canvas after it was closed.
 
 import { useController, useSel } from "../context";
@@ -11,8 +11,6 @@ export function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   const details = useSel((s) => s.simDetails);
   const meta = useSel((s) => s.meta);
   const warming = useSel((s) => s.warming);
-  const usageLabel = useSel((s) => s.usageLabel);
-  const usageTitle = useSel((s) => s.usageTitle);
   const viewCount = useSel((s) => s.viewOrder.length);
   const canvasOpen = useSel((s) => s.canvasOpen);
   const activeView = useSel((s) => s.activeView);
@@ -43,11 +41,6 @@ export function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
       <div className="meta">{meta}</div>
       <div className="actions">
         {warming ? <span className="warming">warming up Julia…</span> : null}
-        {usageLabel ? (
-          <span className="usage" title={usageTitle}>
-            {usageLabel}
-          </span>
-        ) : null}
         {showViews ? (
           <button className="ghost views-btn" onClick={() => activeView && openView(activeView)}>
             <ViewsIcon /> Views <span className="count">{viewCount}</span>

@@ -123,44 +123,20 @@ def get_memory(session_id: str, manager: ManagerDep) -> Response:
 
 @router.get("/sessions/{session_id}/context")
 def get_context(session_id: str, manager: ManagerDep) -> dict[str, Any]:
-    """The full context-usage panel (same render as the TUI), as markdown.
+    """The context view (``context_panel.context_report``) as data, for the web panel.
 
-    Usage figures come from the session's ``model_usage`` trace events (the
-    first/last call and the count); the system-prompt and memory-index sizes
-    are approximated the same way the TUI does. Rendered server-side so the web
-    UI and the terminal show identical detail.
+    The TUI renders the same report, so both show the same figures.
     """
     host = manager.get(session_id)
     if host is None:
         raise HTTPException(status_code=404, detail="no such session")
-    from makker.agent.memory import list_memory_notes
-    from makker.context_budget import context_budget
-    from makker.context_panel import context_component_estimates, render_context_panel
-    from makker.models import DEFAULT_MODEL
+    from makker.context_panel import context_report
     from makker.trace import TraceLog
 
-    # Read usage from a fresh connection on the trace file: this endpoint runs in
-    # a threadpool, and the session's own SQLite connection is bound to the thread
-    # it was created on (the event loop), so reusing it here raises.
+    # A fresh connection on the trace file: this endpoint runs in a threadpool, and
+    # the session's own SQLite connection is bound to the event loop's thread.
     with TraceLog(host.session.state_dir / "trace.sqlite") as log:
-        usages = [e.payload for e in log.events_of(schema.MODEL_USAGE)]
-    model = host.model or DEFAULT_MODEL
-    budget = host.session.context_budget or context_budget(model)
-
-    memory_dir = host.memory_dir
-    system_tokens, memory_tokens = context_component_estimates(host.session, memory_dir)
-
-    body = render_context_panel(
-        model_label=model,
-        usage=usages[-1] if usages else None,
-        budget=budget,
-        first_usage=usages[0] if usages else None,
-        model_calls=len(usages),
-        system_prompt_tokens=system_tokens,
-        memory_index_tokens=memory_tokens,
-        memory_notes=len(list_memory_notes(memory_dir)),
-    )
-    return {"markdown": body}
+        return context_report(log)
 
 
 @router.post("/sessions/{session_id}/upload")

@@ -413,6 +413,7 @@ def test_a_selection_change_while_paused_on_approval_keeps_the_turn_answerable(
 
         with open_stream(client, sid) as ws:
             ws.send_json({"type": "prompt", "text": "do something needing approval"})
+            assert ws.receive_json()["type"] == "context"
             assert ws.receive_json()["type"] == "interrupt"
 
             ws.send_json({"type": "host_context", "context": OTHER_SELECTION})

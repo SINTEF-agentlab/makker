@@ -2,6 +2,7 @@
 // typed. Mirrors the FastAPI routes in interfaces/server/routes/.
 
 import type { HostContext } from "./hostContext";
+import type { ContextReport } from "./protocol";
 import { withBase } from "./basePath";
 
 export interface ModelInfo {
@@ -200,12 +201,6 @@ export const api = {
       value,
     }),
 
-  modelWindow: (model: string) =>
-    getJSON<{ model: string; window: number | null }>(
-      `/models/window?model=${encodeURIComponent(model)}`,
-      { model, window: null },
-    ),
-
   history: async (limit = 40): Promise<HistoryEntry[]> => {
     const data = await getJSON<{ sessions: HistoryEntry[] }>(
       `/sessions/history?limit=${limit}`,
@@ -239,8 +234,7 @@ export const api = {
   deleteSession: (id: string) =>
     request(`/sessions/${id}`, { method: "DELETE" }).catch(() => undefined),
 
-  context: (id: string) =>
-    getJSON<{ markdown: string }>(`/sessions/${id}/context`, { markdown: "" }),
+  context: (id: string) => getJSON<ContextReport | null>(`/sessions/${id}/context`, null),
 
   uploadFile: async (id: string, file: File): Promise<{ path: string }> => {
     const fd = new FormData();

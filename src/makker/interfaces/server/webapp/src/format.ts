@@ -11,8 +11,9 @@ export function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
-/** Token counts as compact figures: 1500 -> "1.5k", 24000 -> "24k". */
+/** Token counts as compact figures: 1500 -> "1.5k", 24000 -> "24k", 1.2M. */
 export function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;
   return String(n);
 }
