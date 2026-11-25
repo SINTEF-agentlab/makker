@@ -175,11 +175,64 @@ def test_num_ctx_is_the_maximum_when_it_fits_and_is_remembered(
     monkeypatch.setattr(ollama_client, "_load", _gpu_holding(10**9, loads))
     assert ollama_client.num_ctx("qwen3.8:27b") == 262_144
     assert ollama_client.num_ctx("qwen3.8:27b") == 262_144
-    assert loads == [262_144]  # one load, then the remembered answer
+    # Two loads (the second gives the memory slope), then the remembered answer.
+    assert loads == [262_144, ollama_client.MIN_NUM_CTX]
     # A new version of the model (another digest) is measured again.
     _local_model(monkeypatch, digest="d2")
     ollama_client.num_ctx("qwen3.8:27b")
-    assert loads == [262_144, 262_144]
+    assert loads == [262_144, ollama_client.MIN_NUM_CTX] * 2
+
+
+def test_calibration_gives_the_memory_of_every_context_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _local_model(monkeypatch)
+    monkeypatch.setattr(ollama_client, "_load", _gpu_holding(111_000, []))
+    found = ollama_client.calibration("qwen3.8:27b")
+    assert found is not None and found.fits <= 111_000
+    # Memory grows in a line through the loads that stayed on the GPU.
+    assert found.memory(65_536) == 16 * 2**30 + 65_536 * 9_000
+    assert found.memory(262_144) == 16 * 2**30 + 262_144 * 9_000
+    # Remembered, so asking again (even without measuring) loads nothing.
+    monkeypatch.setattr(ollama_client, "_load", lambda *a: pytest.fail("loaded a model"))
+    assert ollama_client.calibration("qwen3.8:27b", measure=False) == found
+
+
+def test_a_context_remembered_without_memory_still_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _local_model(monkeypatch)
+    key = f"{ollama_client.platform.node()} {ollama_client.host()} d1"
+    ollama_client._remember(key, 131_072)  # what an earlier version kept
+    monkeypatch.setattr(ollama_client, "_load", lambda *a: pytest.fail("loaded a model"))
+    assert ollama_client.num_ctx("qwen3.8:27b") == 131_072
+    found = ollama_client.calibration("qwen3.8:27b", measure=False)
+    assert found is not None and found.memory(65_536) is None
+    # Not measured at all: nothing to report, and nothing loaded.
+    _local_model(monkeypatch, digest="d2")
+    assert ollama_client.num_ctx("qwen3.8:27b", measure=False) is None
+
+
+def test_thinking_levels_read_the_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    replies = {
+        "qwen3.8:27b": {"values": [False, "low", "medium", "xhigh"], "default": "medium"},
+        "qwen3:0.6b": {"values": [False, True], "default": True},
+        "qwen3-coder:30b": {"values": [False], "default": False},
+    }
+
+    def post(url, json, timeout):
+        return httpx.Response(200, json={"thinking": replies[json["model"]]})
+
+    monkeypatch.setattr(httpx, "post", post)
+    assert ollama_client.thinking_levels("qwen3.8:27b") == (
+        ["none", "low", "medium", "xhigh"],
+        "medium",
+    )
+    # Thinking that can only be on or off offers no levels.
+    assert ollama_client.thinking_levels("qwen3:0.6b") == ([], None)
+    assert ollama_client.thinking_levels("qwen3-coder:30b") == ([], None)
 
 
 def test_num_ctx_finds_the_largest_context_that_stays_on_the_gpu(

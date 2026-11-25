@@ -112,6 +112,30 @@ def thinks(name: str) -> bool:
     return False
 
 
+def thinking_levels(name: str) -> tuple[list[str], str | None]:
+    """The thinking levels the daemon reports for ``name``, and its default.
+
+    ``False`` (no thinking) reads as ``"none"``. A model that can only turn
+    thinking on or off has no levels to offer. Sync because it runs at
+    model-build time; best-effort (no levels when the daemon can't answer). The
+    ``ollama`` package drops this field, so the API is asked directly.
+    """
+    with contextlib.suppress(Exception):
+        import httpx
+
+        response = httpx.post(f"{host()}/api/show", json={"model": name}, timeout=2.0)
+        thinking = response.json().get("thinking") or {}
+        values = thinking.get("values") or []
+        named = [v for v in values if isinstance(v, str)]
+        if not named:
+            return [], None
+        levels = (["none"] if False in values else []) + named
+        default = thinking.get("default")
+        default = "none" if default is False else default
+        return levels, default if default in levels else None
+    return [], None
+
+
 def context_window(name: str) -> int | None:
     """The model's max context length (tokens) the daemon reports, or None.
 
@@ -135,19 +159,19 @@ def context_window(name: str) -> int | None:
     return None
 
 
-def num_ctx(name: str) -> int | None:
+def num_ctx(name: str, *, measure: bool = True) -> int | None:
     """Context window (tokens) to load the local model ``name`` with.
 
     The ``num_ctx`` its Modelfile sets, when it sets one. Otherwise the largest
     context, up to the model's maximum, that Ollama keeps entirely on this
     machine's GPU: measured by loading the model, once per model version and
     machine, and remembered in the state home. ``None`` when the daemon cannot
-    report the model.
+    report the model, or, with ``measure=False``, when it has not been measured.
 
-    This is the *loaded* window, the single figure the rest of the app sizes
-    against: the model is built with it, and the context budget (compaction,
-    ``/context``) reads it, so compaction is never scheduled past a window the
-    model was not loaded with.
+    This is the *loaded* window unless the user set one (``model_settings``), the
+    single figure the rest of the app sizes against: the model is built with it,
+    and the context budget (compaction, ``/context``) reads it, so compaction is
+    never scheduled past a window the model was not loaded with.
     """
     maximum = context_window(name)
     if maximum is None:
@@ -155,20 +179,68 @@ def num_ctx(name: str) -> int | None:
     configured = _modelfile_num_ctx(name)
     if configured:
         return min(configured, maximum)
+    # What is remembered answers first, even from before the memory figures were
+    # kept; only a model never measured is loaded.
+    found = calibration(name, maximum=maximum, measure=False)
+    if found is None and measure:
+        found = calibration(name, maximum=maximum)
+    if found is None:
+        # The daemon stopped answering mid-way: use the floor for now and
+        # measure again next time.
+        return min(maximum, MIN_NUM_CTX) if measure else None
+    return found.fits
+
+
+@dataclass(frozen=True)
+class Calibration:
+    """How much memory a local model takes on this machine as its context grows.
+
+    ``fits`` is the largest context measured to stay entirely on the GPU, and
+    ``points`` the (context, bytes) of the loads that did. Memory grows in a
+    straight line with the context above ``MIN_NUM_CTX`` (below it, it does not),
+    so two loads there give every other size.
+    """
+
+    fits: int
+    points: tuple[tuple[int, int], ...] = ()
+
+    def memory(self, num_ctx: int) -> int | None:
+        """Bytes the model takes when loaded with ``num_ctx``, or None if unknown."""
+        points = sorted(set(self.points))
+        if len(points) < 2:
+            return points[0][1] if points and points[0][0] == num_ctx else None
+        (c0, m0), (c1, m1) = points[0], points[-1]
+        return round(m0 + (m1 - m0) * (num_ctx - c0) / (c1 - c0))
+
+
+def calibration(
+    name: str, *, maximum: int | None = None, measure: bool = True
+) -> Calibration | None:
+    """The model's measured memory use, remembered per model version and machine.
+
+    Measured by loading the model when nothing is remembered (or what is
+    remembered predates the memory figures) and ``measure`` is set; ``None`` when
+    it is not, or the daemon stops answering.
+    """
+    maximum = maximum or context_window(name)
+    if maximum is None:
+        return None
     digest = _digest(name)
     key = f"{platform.node()} {host()} {digest}"
     remembered = _measured().get(key)
-    if isinstance(remembered, int):
-        return remembered
+    if isinstance(remembered, dict):
+        points = tuple((int(c), int(b)) for c, b in remembered.get("points", []))
+        return Calibration(int(remembered["fits"]), points)
+    if not measure:
+        # A context measured before the memory figures were kept still answers.
+        return Calibration(remembered) if isinstance(remembered, int) else None
     try:
-        measured = _largest_on_gpu(name, maximum)
+        found = _calibrate(name, maximum)
     except Exception:
-        # The daemon stopped answering mid-way: use the floor for now and
-        # measure again next time.
-        return min(maximum, MIN_NUM_CTX)
+        return None
     if digest:
-        _remember(key, measured)
-    return measured
+        _remember(key, {"fits": found.fits, "points": [list(p) for p in found.points]})
+    return found
 
 
 def _modelfile_num_ctx(name: str) -> int | None:
@@ -228,35 +300,44 @@ def _load(name: str, num_ctx: int) -> _Load | None:
     return None
 
 
-def _largest_on_gpu(name: str, maximum: int) -> int:
-    """The largest context, up to ``maximum``, that Ollama keeps entirely on the GPU.
+def _calibrate(name: str, maximum: int) -> Calibration:
+    """The largest context, up to ``maximum``, that Ollama keeps entirely on the GPU,
+    and the memory of the loads that stayed there.
 
     Ollama places each load itself and reports where it went, so it decides,
     not an estimate (memory per token differs between models and between small
     and large contexts, and a load that spills reports sizes unlike one that
-    fits). One load at the maximum settles it when the GPU has room. Otherwise
-    the answer lies between a load that fits and one that spills, and halving
-    the gap narrows it to within an eighth. Below ``MIN_NUM_CTX`` it does not
-    look.
+    fits). One load at the maximum settles it when the GPU has room, and one at
+    ``MIN_NUM_CTX`` then gives the memory slope. Otherwise the answer lies
+    between a load that fits and one that spills, and halving the gap narrows it
+    to within an eighth. Below ``MIN_NUM_CTX`` it does not look.
     """
-    top = _load(name, maximum)
+    points: list[tuple[int, int]] = []
+
+    def load(num_ctx: int) -> _Load | None:
+        found = _load(name, num_ctx)
+        if found is not None and found.fits:
+            points.append((found.num_ctx, found.size))
+        return found
+
+    top = load(maximum)
+    low = load(MIN_NUM_CTX) if maximum > MIN_NUM_CTX else None
     if top is not None and top.fits:
-        return top.num_ctx
-    low = _load(name, MIN_NUM_CTX) if maximum > MIN_NUM_CTX else None
+        return Calibration(top.num_ctx, tuple(points))
     if low is None or not low.fits:
         # Too large for the GPU at any useful size: part of it runs on the CPU.
-        return min(maximum, MIN_NUM_CTX)
+        return Calibration(min(maximum, MIN_NUM_CTX), tuple(points))
     fits, spills = low.num_ctx, maximum
     for _ in range(_MAX_PROBES):
         if spills - fits <= fits // 8:
             break
         guess = (fits + spills) // 2 // 1024 * 1024
-        probe = _load(name, guess)
+        probe = load(guess)
         if probe is not None and probe.fits:
             fits = probe.num_ctx
         else:
             spills = guess
-    return fits
+    return Calibration(fits, tuple(points))
 
 
 def _measured_path():
@@ -266,7 +347,7 @@ def _measured_path():
 
 
 def _measured() -> dict:
-    """Measured contexts, keyed by machine, Ollama host and model digest."""
+    """Measured contexts and memory, keyed by machine, Ollama host and model digest."""
     with contextlib.suppress(OSError, ValueError):
         data = json.loads(_measured_path().read_text(encoding="utf-8"))
         if isinstance(data, dict):
@@ -274,7 +355,7 @@ def _measured() -> dict:
     return {}
 
 
-def _remember(key: str, value: int) -> None:
+def _remember(key: str, value: dict) -> None:
     path = _measured_path()
     with contextlib.suppress(OSError):
         path.parent.mkdir(parents=True, exist_ok=True)
