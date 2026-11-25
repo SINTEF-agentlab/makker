@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -30,9 +31,7 @@ def _fake_julia(monkeypatch: pytest.MonkeyPatch, version: str | None) -> None:
         requirements.shutil, "which", lambda _: None if version is None else "julia"
     )
     if version is not None:
-        monkeypatch.setattr(
-            requirements.subprocess, "run", lambda *a, **kw: _Proc(f"julia version {version}\n")
-        )
+        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _Proc(f"julia version {version}\n"))
 
 
 def test_check_julia_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -46,10 +45,10 @@ def test_check_julia_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_check_julia_reports_a_timeout_instead_of_raising(monkeypatch: pytest.MonkeyPatch) -> None:
     # `julia --version` through the juliaup launcher can stall on its update check.
     def stalled(*args, **kwargs):
-        raise requirements.subprocess.TimeoutExpired(cmd="julia", timeout=30)
+        raise subprocess.TimeoutExpired(cmd="julia", timeout=30)
 
     monkeypatch.setattr(requirements.shutil, "which", lambda _: "julia")
-    monkeypatch.setattr(requirements.subprocess, "run", stalled)
+    monkeypatch.setattr(subprocess, "run", stalled)
 
     check = requirements.check_julia()
     assert check.found

@@ -34,6 +34,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from makker.julia.run import JuliaRunError, failure, output_tail, run_julia
 from makker.sysimage import (
     image_suffix,
     on_windows,
@@ -602,16 +603,12 @@ def _precompile_for_the_build(julia_project: Path) -> None:
 
     print("Precompiling the environment for the build (its heaviest step)...")
     result = _run_julia(
-        [
-            "julia",
-            f"--project={julia_project}",
-            "--startup-file=no",
-            # The flag is the whole point; without it this precompiles a different
-            # set of caches than the ones PackageCompiler will look for.
-            "--pkgimages=no",
-            "-e",
-            "using Pkg; Pkg.precompile()",
-        ],
+        # The flag is the whole point; without it this precompiles a different
+        # set of caches than the ones PackageCompiler will look for.
+        "--pkgimages=no",
+        "-e",
+        "using Pkg; Pkg.precompile()",
+        project=julia_project,
     )
     if result.returncode == 0:
         return
@@ -644,14 +641,7 @@ def _precompile_against(image: Path, julia_project: Path) -> None:
 
     print("Refreshing precompile caches against the new image (usually instant)...")
     result = _run_julia(
-        [
-            "julia",
-            f"--sysimage={image}",
-            f"--project={julia_project}",
-            "--startup-file=no",
-            "-e",
-            "using Pkg; Pkg.precompile()",
-        ],
+        f"--sysimage={image}", "-e", "using Pkg; Pkg.precompile()", project=julia_project
     )
     if result.returncode != 0:
         print("note: could not precompile against the new image; the first session may be slower.")
@@ -675,19 +665,9 @@ def verify_image(image: Path, julia_project: Path, packages: tuple[str, ...]) ->
     """
 
     script = _verify_script(packages, deps=_project_deps(julia_project))
-    result = _run_julia(
-        [
-            "julia",
-            f"--sysimage={image}",
-            f"--project={julia_project}",
-            "--startup-file=no",
-            "-e",
-            script,
-        ],
-        capture=True,
-    )
+    result = _run_julia(f"--sysimage={image}", "-e", script, project=julia_project, capture=True)
     if result.returncode != 0 or "sysimage-verify: ok" not in (result.stdout or ""):
-        tail = "\n".join(((result.stdout or "") + (result.stderr or "")).strip().splitlines()[-15:])
+        tail = output_tail(result, 15)
         # The loader-size check runs first, so this only fires if the real limit
         # is below WINDOWS_IMAGE_LIMIT; better a translated error than the
         # loader's.
@@ -792,11 +772,10 @@ def _julia(cmds: list[str], *, project: Path, what: str, crash_hint: str | None 
     the whole explanation.
     """
 
-    argv = ["julia", f"--project={project}", "--startup-file=no", "-e", "\n".join(cmds)]
-    result = _run_julia(argv)
+    result = _run_julia("-e", "\n".join(cmds), project=project)
     if result.returncode == 0:
         return
-    message = f"{what} failed ({describe_exit(result.returncode)})"
+    message = failure(result, what)
     if crash_hint and crashed(result.returncode):
         message = f"{message}. {crash_hint}"
     raise SysimageBuildError(message)
@@ -820,29 +799,16 @@ def crashed(code: int | None) -> bool:
     return code is not None and (code < 0 or code > 0xFF)
 
 
-def _run_julia(argv: list[str], *, capture: bool = False) -> subprocess.CompletedProcess[str]:
-    if shutil.which("julia") is None:
-        raise SysimageBuildError("`julia` is not on PATH")
-
-    # The same wrap the runtime and the env bootstrap use: the Makie workloads
-    # that run while building and verifying want a GL context, and headless Linux
-    # has none without it.
-    from makker.display import should_wrap_xvfb
-
-    if should_wrap_xvfb():
-        argv = ["xvfb-run", "-a", "-s", "-screen 0 1280x1024x24", *argv]
-
-    # The precompile ceiling travels by inheritance rather than on a command line:
-    # the process it matters most for is not one we launch, but the one
-    # PackageCompiler runs from inside ``create_sysimage``.
-    from makker.julia.precompile import julia_environment
-
+def _run_julia(
+    *args: str, project: Path, capture: bool = False
+) -> subprocess.CompletedProcess[str]:
+    # Under a virtual display on headless Linux: the Makie workloads that run while
+    # building and verifying want a GL context. The precompile ceiling travels by
+    # inheritance, to the precompile PackageCompiler runs inside ``create_sysimage``.
     try:
-        return subprocess.run(
-            argv, capture_output=capture, text=True, check=False, env=julia_environment()
-        )
-    except OSError as exc:
-        raise SysimageBuildError(f"could not run julia: {exc}") from exc
+        return run_julia(*args, project=project, capture=capture, display=True)
+    except JuliaRunError as exc:
+        raise SysimageBuildError(str(exc)) from exc
 
 
 def describe(workspace: Path, julia_project: Path) -> str:

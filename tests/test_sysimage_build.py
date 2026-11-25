@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from makker import sysimage, sysimage_build
+from makker.julia.requirements import JuliaCheck
 from makker.sysimage_build import (
     _VSCALE_GUARDED,
     _VSCALE_UNGUARDED,
@@ -64,8 +65,9 @@ class _FakeJulia:
         # What the "build" writes; a test can swap in real PE bytes.
         self.image = b"image"
 
-    def __call__(self, argv, *, capture: bool = False):
-        self.calls.append(list(argv))
+    def __call__(self, *args: str, project: Path, capture: bool = False):
+        argv = [f"--project={project}", *args]
+        self.calls.append(argv)
         script = argv[-1]
         # The flag, not the script: the post-build refresh runs the same code.
         if "--pkgimages=no" in argv:
@@ -98,7 +100,7 @@ def _quoted_path(script: str, key: str) -> str:
 def julia(monkeypatch: pytest.MonkeyPatch) -> _FakeJulia:
     fake = _FakeJulia()
     monkeypatch.setattr(sysimage_build, "_run_julia", fake)
-    monkeypatch.setattr(sysimage, "julia_version", lambda: "1.12.4")
+    monkeypatch.setattr(sysimage, "check_julia", lambda: JuliaCheck(True, version_str="1.12.4"))
     return fake
 
 
@@ -188,8 +190,8 @@ def test_source_edit_during_build_does_not_install_stale_image(
     env = write_project(tmp_path / "env", {"JutulDarcy": "a"})
     original = sysimage_build._run_julia
 
-    def editing(argv, *, capture: bool = False):
-        result = original(argv, capture=capture)
+    def editing(*argv, project, capture: bool = False):
+        result = original(*argv, project=project, capture=capture)
         if "create_sysimage" in argv[-1]:
             (env / "Manifest.toml").write_text(
                 (env / "Manifest.toml").read_text(encoding="utf-8").replace("1.0.0", "1.0.1"),
@@ -673,13 +675,13 @@ def test_the_warmup_workload_reaches_the_build(
     env = write_project(tmp_path / "env", {"JutulDarcy": "a"})
     seen: dict[str, object] = {}
 
-    def capturing(argv, *, capture: bool = False):
+    def capturing(*argv, project, capture: bool = False):
         script = argv[-1]
         if "precompile_execution_file" in script:
             path = Path(_quoted_path(script, "precompile_execution_file"))
             seen["path"] = path
             seen["content"] = path.read_text(encoding="utf-8")
-        return julia(argv, capture=capture)
+        return julia(*argv, project=project, capture=capture)
 
     monkeypatch.setattr(sysimage_build, "_run_julia", capturing)
 
@@ -706,7 +708,7 @@ def test_a_warmup_snippet_that_threw_is_reported_by_the_build(
     ws = tmp_path / "ws"
     env = write_project(tmp_path / "env", {"JutulDarcy": "a"})
 
-    def failing_warmup(argv, *, capture: bool = False):
+    def failing_warmup(*argv, project, capture: bool = False):
         script = argv[-1]
         if "precompile_execution_file" in script:
             # Stand in for the snippet's own `catch`: the build reads what the
@@ -715,7 +717,7 @@ def test_a_warmup_snippet_that_threw_is_reported_by_the_build(
             report.with_suffix(".failed").write_text(
                 "snippet 1: UndefRefError: access to undefined reference\n", encoding="utf-8"
             )
-        return julia(argv, capture=capture)
+        return julia(*argv, project=project, capture=capture)
 
     monkeypatch.setattr(sysimage_build, "_run_julia", failing_warmup)
 

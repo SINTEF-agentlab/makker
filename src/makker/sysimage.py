@@ -33,13 +33,13 @@ import json
 import os
 import platform
 import shutil
-import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from makker.julia.requirements import check_julia
 from makker.workspace import package_source_digest, workspace_dir
 
 # The image and its stamp live under the workspace's own state directory rather
@@ -187,28 +187,6 @@ def _preferences_digest(julia_project: Path) -> str | None:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def julia_version() -> str | None:
-    """The version of the ``julia`` on PATH, or ``None`` if it cannot be asked.
-
-    ``julia --version`` short-circuits before the runtime comes up (about 10ms
-    here), so this is cheap enough for the launch path, unlike anything that has
-    to evaluate code.
-    """
-
-    if shutil.which("julia") is None:
-        return None
-    try:
-        result = subprocess.run(
-            ["julia", "--version"], capture_output=True, text=True, timeout=30, check=False
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if result.returncode != 0:
-        return None
-    # "julia version 1.12.4"
-    return result.stdout.strip().rsplit(" ", 1)[-1] or None
-
-
 def platform_tag() -> str:
     """A coarse platform identity, from Python alone.
 
@@ -245,7 +223,7 @@ def write_stamp(
     state = state or read_env_state(julia_project)
     payload = {
         "recipe": RECIPE_VERSION,
-        "julia": julia or julia_version(),
+        "julia": julia or check_julia().version_str,
         "platform": platform_tag(),
         "cpu_target": cpu_target,
         # Metadata, not a check. Makker's version moves with every commit,
@@ -415,7 +393,7 @@ def _compare(stamp: dict, state: EnvState) -> tuple[list[tuple[str, list[str]]],
     if stamp.get("recipe") != RECIPE_VERSION:
         divergences.append(("built by a different version of Makker", []))
 
-    current_julia = julia_version()
+    current_julia = check_julia().version_str
     if current_julia and stamp.get("julia") and stamp["julia"] != current_julia:
         divergences.append((f"built with Julia {stamp['julia']}, this is {current_julia}", []))
 

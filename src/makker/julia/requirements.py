@@ -6,16 +6,18 @@ and ``doctor`` all agree on the same answer and the same remediation text.
 
 from __future__ import annotations
 
+import functools
 import re
 import shutil
-import subprocess
 from dataclasses import dataclass
+
+from makker.julia.run import JuliaRunError, run_julia
 
 # Floor set by the simulators, not the kernel (server.jl is stdlib-only): Mocca
 # and JutulDarcy need 1.10. 1.10 is also the current Julia LTS.
 MIN_JULIA_VERSION: tuple[int, int] = (1, 10)
 
-_VERSION_RE = re.compile(r"julia version (\d+)\.(\d+)\.(\d+)")
+_VERSION_RE = re.compile(r"julia version ((\d+)\.(\d+)\.(\d+)\S*)")
 
 
 @dataclass(frozen=True)
@@ -25,13 +27,10 @@ class JuliaCheck:
     found: bool
     path: str | None = None
     version: tuple[int, int, int] | None = None
+    # As Julia prints it, so a prerelease keeps its suffix ("1.13.0-beta1"): a
+    # system image is tied to the exact build.
+    version_str: str | None = None
     error: str | None = None
-
-    @property
-    def version_str(self) -> str | None:
-        if self.version is None:
-            return None
-        return ".".join(str(n) for n in self.version)
 
     @property
     def version_ok(self) -> bool:
@@ -46,52 +45,47 @@ def _min_version_str() -> str:
     return ".".join(str(n) for n in MIN_JULIA_VERSION)
 
 
-def check_julia(executable: str = "julia") -> JuliaCheck:
-    """Probe for ``julia`` on PATH and parse its version.
+@functools.cache
+def check_julia() -> JuliaCheck:
+    """Probe for ``julia`` on PATH and parse its version, once per process.
 
     Never raises — failures are reported in the returned ``JuliaCheck``.
     """
 
-    path = shutil.which(executable)
+    path = shutil.which("julia")
     if path is None:
-        return JuliaCheck(found=False, error=f"`{executable}` is not on PATH")
+        return JuliaCheck(found=False, error="`julia` is not on PATH")
 
     try:
-        proc = subprocess.run(
-            [executable, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
         # A timeout too: the juliaup launcher can stall for minutes on its update check.
-        return JuliaCheck(found=True, path=path, error=f"could not run `{executable}`: {exc}")
+        proc = run_julia("--version", timeout=30)
+    except JuliaRunError as exc:
+        return JuliaCheck(found=True, path=path, error=str(exc))
 
-    match = _VERSION_RE.search(proc.stdout or "")
+    match = _VERSION_RE.search(proc.stdout)
     if match is None:
         return JuliaCheck(
             found=True,
             path=path,
-            error=f"could not parse version from `{executable} --version`: {proc.stdout!r}",
+            error=f"could not parse version from `julia --version`: {proc.stdout!r}",
         )
 
-    version = (int(match[1]), int(match[2]), int(match[3]))
-    return JuliaCheck(found=True, path=path, version=version)
+    version = (int(match[2]), int(match[3]), int(match[4]))
+    return JuliaCheck(found=True, path=path, version=version, version_str=match[1])
 
 
-def require_julia(executable: str = "julia") -> JuliaCheck:
+def require_julia() -> JuliaCheck:
     """Like :func:`check_julia` but raises ``JuliaRequirementError`` if unusable."""
 
-    check = check_julia(executable)
+    check = check_julia()
     if not check.found:
         raise JuliaRequirementError(
-            f"`{executable}` is not on PATH. Install Julia {_min_version_str()}+ via "
+            f"`julia` is not on PATH. Install Julia {_min_version_str()}+ via "
             "juliaup (https://github.com/JuliaLang/juliaup), then open a new terminal."
         )
     if not check.version_ok:
         raise JuliaRequirementError(
-            f"Julia {_min_version_str()}+ is required, but `{executable}` is "
+            f"Julia {_min_version_str()}+ is required, but `julia` is "
             f"{check.version_str or 'an unknown version'}. "
             f"Run `juliaup add {_min_version_str()} && juliaup default {_min_version_str()}`."
         )

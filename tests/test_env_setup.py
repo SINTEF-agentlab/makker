@@ -296,6 +296,7 @@ def test_bootstrap_with_source_path_runs_pkg_develop(
 
     class _Result:
         returncode = 1 if fails else 0
+        stdout = None
 
     def _fake_run(argv, **_kwargs):
         project = workspace if root_project else workspace_julia_env(workspace)
@@ -307,7 +308,7 @@ def test_bootstrap_with_source_path_runs_pkg_develop(
         return _Result()
 
     monkeypatch.setattr(env_setup.shutil, "which", lambda _: "/usr/bin/julia")
-    monkeypatch.setattr(env_setup.subprocess, "run", _fake_run)
+    monkeypatch.setattr(subprocess, "run", _fake_run)
 
     if fails:
         with pytest.raises(env_setup.EnvSetupError):
@@ -320,7 +321,7 @@ def test_bootstrap_with_source_path_runs_pkg_develop(
         env_setup.bootstrap_workspace(_adapter(module_dir), workspace=workspace, source_path=source)
 
     argv = captured["argv"]
-    assert "julia" in argv  # argv[0] may be `xvfb-run` on headless Linux
+    assert "/usr/bin/julia" in argv  # argv[0] may be `xvfb-run` on headless Linux
     assert any(arg.startswith("--project=") for arg in argv)
     code = argv[-1]
     assert "using Pkg" in code
@@ -359,7 +360,7 @@ def test_a_checkout_ahead_of_the_registry_brings_its_own_bounds(
         return _Result()
 
     monkeypatch.setattr(env_setup.shutil, "which", lambda _: "/usr/bin/julia")
-    monkeypatch.setattr(env_setup.subprocess, "run", _fake_run)
+    monkeypatch.setattr(subprocess, "run", _fake_run)
 
     env_setup.bootstrap_workspace(_adapter(module_dir), workspace=workspace, source_path=source)
 
@@ -385,7 +386,7 @@ def test_precompile_runs_instantiate_and_precompile(
         return _Result()
 
     monkeypatch.setattr(env_setup.shutil, "which", lambda _: "/usr/bin/julia")
-    monkeypatch.setattr(env_setup.subprocess, "run", _fake_run)
+    monkeypatch.setattr(subprocess, "run", _fake_run)
 
     env_setup.bootstrap_workspace(_adapter(module_dir), workspace=workspace, precompile=True)
 
@@ -421,9 +422,10 @@ def test_bootstrap_raises_on_nonzero_exit(tmp_path: Path, monkeypatch: pytest.Mo
 
     class _Result:
         returncode = 17
+        stdout = None
 
     monkeypatch.setattr(env_setup.shutil, "which", lambda _: "/usr/bin/julia")
-    monkeypatch.setattr(env_setup.subprocess, "run", lambda *a, **kw: _Result())
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _Result())
     with pytest.raises(env_setup.EnvSetupError, match="code 17"):
         env_setup.bootstrap_workspace(_adapter(module_dir), workspace=workspace, source_path=source)
 
@@ -442,7 +444,7 @@ def test_bootstrap_skips_dev_when_workspace_is_source(
         nonlocal called
         called = True
 
-    monkeypatch.setattr(env_setup.subprocess, "run", _should_not_be_called)
+    monkeypatch.setattr(subprocess, "run", _should_not_be_called)
     monkeypatch.setattr(env_setup.shutil, "which", lambda _: "/usr/bin/julia")
 
     env_setup.bootstrap_workspace(

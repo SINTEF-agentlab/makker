@@ -8,6 +8,7 @@ it, nothing tries it twice, and the user is told instead of reading "done".
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -39,7 +40,7 @@ def julia(monkeypatch: pytest.MonkeyPatch):
 
     def install(version: str) -> None:
         numbers = tuple(int(part) for part in version.split("."))
-        check = requirements.JuliaCheck(found=True, version=numbers)
+        check = requirements.JuliaCheck(found=True, version=numbers, version_str=version)
         monkeypatch.setattr(requirements, "check_julia", lambda *a, **k: check)
 
     install("1.12.6")
@@ -265,7 +266,7 @@ def test_init_only_calls_the_precompile_done_when_the_warm_package_built(
         return _Result()
 
     monkeypatch.setattr(env_setup.shutil, "which", lambda _: "/usr/bin/julia")
-    monkeypatch.setattr(env_setup.subprocess, "run", _fake_run)
+    monkeypatch.setattr(subprocess, "run", _fake_run)
     ws = tmp_path / "ws"
     ws.mkdir()
     code = main(["init", "--sim", "jutuldarcy", "--workspace", str(ws), "--state-home", str(ws)])
