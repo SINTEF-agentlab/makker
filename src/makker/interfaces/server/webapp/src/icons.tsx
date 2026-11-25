@@ -43,10 +43,11 @@ export function KindIcon({ kind }: { kind: ViewKind }) {
   return <PlotIcon />;
 }
 
-export function MenuIcon() {
+export function SidebarIcon() {
   return (
     <svg viewBox="0 0 24 24" width="18" height="18" {...stroke}>
-      <path d="M3 6h18M3 12h18M3 18h18" />
+      <rect x="3" y="4.5" width="18" height="15" rx="3" />
+      <path d="M9.5 4.5v15" />
     </svg>
   );
 }
@@ -75,10 +76,19 @@ export function AttachIcon() {
   );
 }
 
-export function SendIcon() {
+export function ReturnIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="20" height="20">
-      <path d="M3 20.5l18-8.5L3 3.5l0 6.5l12 2l-12 2z" fill="currentColor" />
+    <svg viewBox="0 0 24 24" width="18" height="18" {...stroke}>
+      <path d="M9 10l-5 5 5 5" />
+      <path d="M20 4v7a4 4 0 0 1-4 4H4" />
+    </svg>
+  );
+}
+
+export function StopIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14">
+      <rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor" />
     </svg>
   );
 }

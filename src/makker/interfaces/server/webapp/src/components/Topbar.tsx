@@ -1,11 +1,11 @@
-// The top bar: sidebar toggle, the name, the folder's simulator chip, the status line while a
+// The top bar: the name, the folder's simulator chip, the status line while a
 // session starts, the warming hint, and a "Views" button to reopen the canvas after
 // it was closed.
 
 import { useSel } from "../context";
-import { MenuIcon, ViewsIcon } from "../icons";
+import { ViewsIcon } from "../icons";
 
-export function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
+export function Topbar() {
   const sim = useSel((s) => s.sim);
   const details = useSel((s) => s.simDetails);
   const meta = useSel((s) => s.meta);
@@ -21,14 +21,6 @@ export function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
 
   return (
     <header className="topbar">
-      <button
-        className="icon-btn sidebar-toggle"
-        title="Show or hide chats"
-        aria-label="Toggle sidebar"
-        onClick={onToggleSidebar}
-      >
-        <MenuIcon />
-      </button>
       <span className="brand">
         <span className="brand-mark" aria-hidden="true" /> Makker
       </span>

@@ -16,6 +16,7 @@ import { UpdateDialog } from "./components/UpdateDialog";
 import { Controller } from "./controller";
 import { SessionProvider, useSel } from "./context";
 import { installDebug } from "./debug";
+import { SidebarIcon } from "./icons";
 import { readStored, writeStored } from "./storage";
 import { createSessionStore } from "./store";
 
@@ -60,7 +61,17 @@ export function App() {
 
   return (
     <SessionProvider value={ctx}>
-      <div className="workspace">
+      <div className={`workspace${collapsed ? " sidebar-closed" : ""}`}>
+        {/* Outside both panes, so it stays put whether the sidebar is open or not. */}
+        <button
+          className="icon-btn sidebar-toggle"
+          title={collapsed ? "Show chats" : "Hide chats"}
+          aria-label="Toggle sidebar"
+          aria-expanded={!collapsed}
+          onClick={toggleSidebar}
+        >
+          <SidebarIcon />
+        </button>
         <Sidebar collapsed={collapsed} />
         <div
           className={`app${dropping ? " dropping" : ""}`}
@@ -86,7 +97,7 @@ export function App() {
             for (const f of Array.from(e.dataTransfer.files)) void ctx.controller.upload(f);
           }}
         >
-          <Topbar onToggleSidebar={toggleSidebar} />
+          <Topbar />
           <ReconnectingBar />
           <Thread />
           <Composer />
