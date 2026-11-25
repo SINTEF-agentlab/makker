@@ -153,6 +153,27 @@ def test_refresh_cache_refetches_when_stale(monkeypatch) -> None:
     assert u.refresh_cache() == "2.0.0"
 
 
+def test_an_offline_check_waits_out_the_interval(monkeypatch) -> None:
+    fetches: list[int] = []
+
+    def _offline() -> None:
+        fetches.append(1)
+        return None
+
+    monkeypatch.setattr(u, "fetch_latest_version", _offline)
+    assert u.refresh_cache() is None
+    assert u.refresh_cache() is None  # a later launch: no second try
+    assert fetches == [1]
+    assert u.pending_update() is None
+
+    # What was known before going offline is kept.
+    path = u._cache_path()
+    stale = time.time() - (u._CACHE_TTL_SECONDS + 1)
+    path.write_text(json.dumps({"checked_at": stale, "latest": "9.9.9"}), encoding="utf-8")
+    u.refresh_cache()
+    assert u.pending_update() == "9.9.9"
+
+
 # ---------------------------------------------------------------------------
 # The launch notice.
 

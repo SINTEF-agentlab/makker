@@ -1120,7 +1120,8 @@ def bootstrap_julia_env(
         return ws
 
     target = workspace_julia_env(ws)
-    if target.exists() and not force:
+    # A folder without its Project.toml is a copy that was cut short, not an env.
+    if (target / "Project.toml").exists() and not force:
         return target
 
     if not template_path.exists():

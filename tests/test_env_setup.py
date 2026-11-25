@@ -183,6 +183,18 @@ def test_bootstrap_copies_template_into_workspace(tmp_path: Path) -> None:
     assert not (project / "Manifest.toml").exists()
 
 
+def test_bootstrap_finishes_a_copy_that_was_cut_short(tmp_path: Path) -> None:
+    module_dir = _make_template(tmp_path)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    partial = workspace_julia_env(workspace)
+    partial.mkdir(parents=True)  # an earlier first bootstrap, interrupted mid-copy
+
+    project = env_setup.bootstrap_workspace(_adapter(module_dir), workspace=workspace)
+
+    assert (project / "Project.toml").read_text(encoding="utf-8").startswith("[deps]")
+
+
 def test_bootstrap_uses_root_project_when_present(tmp_path: Path) -> None:
     module_dir = _make_template(tmp_path)
     workspace = tmp_path / "ws"

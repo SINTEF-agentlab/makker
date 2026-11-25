@@ -113,14 +113,17 @@ def _visible_text(message: AIMessage) -> str:
 
 
 def _consecutive_marked(messages: list[Any], kind: type, mark: str) -> int:
-    """Count trailing ``kind`` messages bearing ``mark``, since the user last spoke.
+    """Count the ``kind`` messages bearing ``mark`` since the model last made progress.
 
-    A real (unmarked) user message resets the count. The marked recovery
-    messages this middleware injects are what we tally.
+    Progress is a real user message or a tool result that is not a recovery. A
+    model that recovers and works on starts the count again, so a long turn is not
+    ended by its third, unrelated slip.
     """
     count = 0
     for message in reversed(messages):
-        if isinstance(message, HumanMessage) and not (message.additional_kwargs or {}).get(mark):
+        kwargs = message.additional_kwargs or {}
+        recovery = kwargs.get(_RECOVERY_MARK) or kwargs.get(_EMPTY_TURN_MARK)
+        if isinstance(message, HumanMessage | ToolMessage) and not recovery:
             break
         if isinstance(message, kind) and (message.additional_kwargs or {}).get(mark):
             count += 1

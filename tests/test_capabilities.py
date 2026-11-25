@@ -203,6 +203,17 @@ def test_http_tool_returns_a_status_error_as_text() -> None:
     assert "HTTP 500" in result and "boom" in result
 
 
+def test_a_host_call_that_times_out_says_it_may_still_be_running() -> None:
+    import httpx
+
+    class _Client:
+        async def post(self, url: str, json: dict) -> Any:
+            raise httpx.ReadTimeout("timed out")
+
+    result = asyncio.run(_http_tool(_Client()).ainvoke({}))
+    assert "may still be running" in result and "could not be reached" not in result
+
+
 def test_http_tool_returns_a_transport_error_as_text() -> None:
     import httpx
 

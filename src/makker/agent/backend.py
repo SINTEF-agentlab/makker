@@ -9,6 +9,7 @@ drive-absolute glob patterns.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -118,9 +119,12 @@ class WorkspaceShellBackend(LocalShellBackend):
             target = target.resolve()
         except OSError:
             return None
+        # Compared by identity, not spelling: on a case-insensitive disk
+        # ``~/.julia/Packages/...`` is the depot too.
         for root in self._readonly_roots:
-            if target == root or root in target.parents:
-                return _READ_ONLY_MSG.format(path=file_path)
+            for candidate in (target, *target.parents):
+                if candidate == root or (candidate.exists() and os.path.samefile(candidate, root)):
+                    return _READ_ONLY_MSG.format(path=file_path)
         return None
 
     def write(self, file_path: str, content: str) -> WriteResult:

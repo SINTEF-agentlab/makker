@@ -313,7 +313,10 @@ def _build_http_tool(spec: HttpToolSpec, client: Any | None) -> BaseTool:
         import httpx
 
         owned = client is None
-        http = client or httpx.AsyncClient()
+        # A host routine can run for minutes (a solve, a render); httpx's 5 s default
+        # reported such a call as unreachable, and a retry could repeat its effect.
+        # An unreachable host still fails fast on connect.
+        http = client or httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=10.0))
         try:
             response = await http.post(spec.endpoint, json=kwargs)
             response.raise_for_status()
@@ -323,6 +326,11 @@ def _build_http_tool(spec: HttpToolSpec, client: Any | None) -> BaseTool:
             # adjust, or explain) instead of aborting the whole turn.
             body = exc.response.text[:500]
             return f"The '{spec.name}' endpoint returned HTTP {exc.response.status_code}: {body}"
+        except httpx.TimeoutException:
+            return (
+                f"The '{spec.name}' endpoint did not answer in time. It may still be "
+                "running, so check its effect before calling it again."
+            )
         except httpx.HTTPError as exc:
             return f"The '{spec.name}' endpoint could not be reached: {exc}"
         finally:

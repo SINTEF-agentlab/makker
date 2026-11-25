@@ -130,10 +130,11 @@ def test_key_providers_excludes_local() -> None:
 def test_provider_by_name_accepts_name_label_and_prefix() -> None:
     assert provider_by_name("openai").name == "openai"
     assert provider_by_name("OpenAI").name == "openai"
-    assert provider_by_name("google").name == "google_genai"  # prefix match
+    assert provider_by_name("google").name == "google_genai"  # GOOGLE_API_KEY
     assert provider_by_name("Google").name == "google_genai"  # label
     assert provider_by_name("OpenRouter").name == "openrouter"
     assert provider_by_name("nope") is None
+    assert provider_by_name("open") is None  # not OpenAI: it could mean OpenRouter
 
 
 def test_key_status_reports_none_file_and_environment(

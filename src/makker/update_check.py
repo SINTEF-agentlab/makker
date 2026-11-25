@@ -256,13 +256,13 @@ def refresh_cache(*, force: bool = False) -> str | None:
     Skips the network when a fresh cache entry already exists unless ``force``.
     """
 
-    if not force:
-        cached = _read_cache()
-        if cached is not None and _cache_is_fresh(cached[0]):
-            return cached[1]
+    cached = _read_cache()
+    if not force and cached is not None and _cache_is_fresh(cached[0]):
+        return cached[1] or None
     latest = fetch_latest_version()
-    if latest is not None:
-        _write_cache(latest)
+    # A failed fetch (offline) is recorded too, keeping what was known, so the next
+    # launches wait out the interval instead of each trying the network again.
+    _write_cache(latest or (cached[1] if cached else ""))
     return latest
 
 
