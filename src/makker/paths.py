@@ -20,7 +20,6 @@ import contextlib
 import hashlib
 import os
 import re
-from datetime import date
 from pathlib import Path
 
 PACKAGE_ROOT: Path = Path(__file__).resolve().parent
@@ -147,18 +146,14 @@ def is_dated_session_id(session_id: str) -> bool:
 def session_output_dir(session_id: str, workspace: Path | None = None) -> Path:
     """Visible output directory for one session under the workspace.
 
-    Layout: ``<workspace>/makker-output/sessions/<session_id>/`` for
-    timestamped ids (the id itself sorts chronologically), or the legacy
-    ``<YYYY-MM-DD>-<short_id>/`` for UUID sessions.
+    Layout: ``<workspace>/makker-output/sessions/<session_id>/``. A timestamped
+    id sorts chronologically; a legacy UUID session gets a folder by its id too,
+    the same on every day it is resumed.
 
     This directory holds user-facing outputs (plots, transcripts, reports).
     Internal state (SQLite trace, REPL log) stays in ``workspace_state_dir``.
     """
-    if is_dated_session_id(session_id):
-        name = session_id
-    else:
-        name = f"{date.today().isoformat()}-{session_id[:8]}"
-    return workspace_output_dir(workspace) / "sessions" / name
+    return workspace_output_dir(workspace) / "sessions" / session_id
 
 
 def workspace_memory_dir(workspace: Path | None = None) -> Path:

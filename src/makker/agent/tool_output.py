@@ -43,7 +43,9 @@ def normalize_tool_output(value: Any) -> str:
     if isinstance(value, str):
         if is_interrupt_payload(value):
             return value
-        if "ToolMessage(content=" in value:
+        # Only a whole repr: text that merely contains one (a file the agent read
+        # that builds a ToolMessage, say) is output in its own right.
+        if value.lstrip().startswith(("[ToolMessage(content=", "ToolMessage(content=")):
             extracted = _extract_tool_messages_from_repr(value)
             if extracted:
                 return extracted

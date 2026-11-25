@@ -43,13 +43,15 @@ def test_default_session_id_is_dated_and_sortable() -> None:
     assert sorted([later, earlier]) == [earlier, later]
 
 
-def test_session_output_dir_uses_dated_id_directly(tmp_path: Path) -> None:
+def test_session_output_dir_is_named_by_the_session_id(tmp_path: Path) -> None:
     from makker.paths import session_output_dir
 
     dated = session_output_dir("2026-06-12-2315-3f2a", workspace=tmp_path)
     assert dated.name == "2026-06-12-2315-3f2a"
+    # A legacy UUID session too, so resuming it on a later day finds the same folder
+    # (it used to be named by the day the folder was asked for).
     legacy = session_output_dir("0a1b2c3d-aaaa-bbbb-cccc-0123456789ab", workspace=tmp_path)
-    assert legacy.name.endswith("-0a1b2c3d")  # legacy UUIDs keep the date prefix
+    assert legacy.name == "0a1b2c3d-aaaa-bbbb-cccc-0123456789ab"
 
 
 def test_derive_session_title_and_slug() -> None:
