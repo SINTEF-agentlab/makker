@@ -1,5 +1,4 @@
-"""How each model runs: its reasoning effort, its output limit, and a local model's
-context size.
+"""How each model runs: its reasoning effort, its output length, and its context size.
 
 Saved per model in the user config, so a model runs the same way in every
 workspace. The model build reads ``load_settings`` (``agent.builder``,
@@ -20,6 +19,9 @@ _OUTPUT_CHOICES = (8_192, 16_384, 32_768, 65_536, 131_072)
 DEFAULT_OUTPUT = {"anthropic": 24_000}
 # The effort asked for when a model lists levels but no default.
 _DEFAULT_EFFORT = "medium"
+# The smallest context size that can be chosen: the agent's own prompt and tools
+# take 9K to 15K tokens.
+MIN_CONTEXT = 16_384
 
 
 @dataclass(frozen=True)
@@ -122,26 +124,31 @@ def options(model_id: str, *, measure: bool = False) -> dict[str, Any]:
             "default": DEFAULT_OUTPUT.get(provider, maximum),
         }
     if provider == "ollama" and not is_ollama_cloud(model_id):
-        result["context"] = _context_options(model_id, measure=measure)
+        result["context"] = _local_context_options(model_id, measure=measure)
+    else:
+        result["context"] = _cloud_context_options(model_id)
     return result
 
 
-def _context_options(model_id: str, *, measure: bool) -> dict[str, Any] | None:
-    """A local model's context sizes: powers of two from the smallest the agent
-    works with up to the model's maximum, each with its memory and whether it
-    stays on the GPU, plus what "auto" picks."""
+def _sizes(maximum: int) -> list[int]:
+    """Powers of two from 32K up to ``maximum``, and ``maximum`` itself (a power of
+    two within a tenth of it is left out, as the same choice)."""
+    sizes, size = [], 32_768
+    while size * 1.1 < maximum:
+        sizes.append(size)
+        size *= 2
+    return [*sizes, maximum]
+
+
+def _local_context_options(model_id: str, *, measure: bool) -> dict[str, Any] | None:
+    """A local model's context sizes, each with the memory it takes and whether it
+    stays on the GPU, plus what "auto" loads it with."""
     from makker import ollama_client
 
     name = ollama_client.model_name(model_id)
     maximum = ollama_client.context_window(name)
     if not maximum:
         return None
-    sizes = []
-    size = ollama_client.MIN_NUM_CTX
-    while size < maximum:
-        sizes.append(size)
-        size *= 2
-    sizes.append(maximum)
     found = ollama_client.calibration(name, maximum=maximum, measure=measure)
     choices = [
         {
@@ -149,26 +156,49 @@ def _context_options(model_id: str, *, measure: bool) -> dict[str, Any] | None:
             "memory": found.memory(tokens) if found else None,
             "on_gpu": tokens <= found.fits if found and found.points else None,
         }
-        for tokens in sizes
+        for tokens in _sizes(maximum)
     ]
     return {
+        "local": True,
         "choices": choices,
         "auto": ollama_client.num_ctx(name, measure=False),
+        "min": MIN_CONTEXT,
+        "max": maximum,
         "measured": bool(found and len(found.points) > 1),
+    }
+
+
+def _cloud_context_options(model_id: str) -> dict[str, Any] | None:
+    """A hosted model's context sizes. Choosing one caps the window Makker
+    compacts against (it is not sent to the provider), for a cheaper session or
+    to see compaction sooner."""
+    from makker.models import context_window
+
+    maximum = context_window(model_id)
+    if not maximum:
+        return None
+    choices = [{"tokens": t, "memory": None, "on_gpu": None} for t in _sizes(maximum)]
+    return {
+        "local": False,
+        "choices": choices,
+        "auto": maximum,
+        "min": MIN_CONTEXT,
+        "max": maximum,
+        "measured": False,
     }
 
 
 def settings_from(values: dict[str, Any]) -> ModelSettings:
     """``ModelSettings`` from saved or requested values, ignoring anything malformed."""
 
-    def count(key: str) -> int | None:
+    def count(key: str, least: int = 1) -> int | None:
         value = values.get(key)
         whole = isinstance(value, int) and not isinstance(value, bool)
-        return value if whole and value > 0 else None
+        return value if whole and value >= least else None
 
     chosen = values.get("effort")
     return ModelSettings(
         effort=chosen if isinstance(chosen, str) and chosen else None,
         output=count("output"),
-        context=count("context"),
+        context=count("context", MIN_CONTEXT),
     )

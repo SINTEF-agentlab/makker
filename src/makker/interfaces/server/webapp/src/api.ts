@@ -28,10 +28,14 @@ export interface ModelSettings {
   /** Absent when the model offers no effort levels. */
   effort: { levels: string[]; default: string | null; current: string | null } | null;
   output: { choices: number[]; default: number } | null;
-  /** Local models only: each size with the memory it takes here, once measured. */
+  /** Each size, with the memory it takes here for a local model (once measured).
+   *  For a hosted model a size only caps the window Makker compacts against. */
   context: {
+    local: boolean;
     choices: { tokens: number; memory: number | null; on_gpu: boolean | null }[];
     auto: number | null;
+    min: number;
+    max: number;
     measured: boolean;
   } | null;
 }

@@ -29,16 +29,22 @@ Each model can be set to run differently, with only the settings it supports:
   offers (the provider data lists them for cloud models; Ollama reports them for
   local ones). Unset, a model runs at its own default, and OpenAI models at
   medium.
-- **Context size**, for local models: each size is listed with the memory it
-  takes on this machine and whether it still fits on the GPU. Unset, it is
-  sized automatically (see [local models](#local-models-ollama)).
-- **Output limit:** the longest reply the model may write, up to its maximum.
+- **Context size:** for a local model, the context it is loaded with; each size
+  is listed with the memory it takes on this machine and whether it still fits
+  on the GPU. Unset, it is sized automatically (see
+  [local models](#local-models-ollama)). For a hosted model, a smaller size caps
+  the window Makker compacts against (nothing is sent to the provider), for a
+  cheaper session or to see compaction sooner. Any size from 16K up to the
+  model's maximum can be typed in.
+- **Output length:** the most the model may write in one reply, its reasoning
+  included, up to its maximum.
 
 Settings are saved per model in the user config and apply in every workspace.
 A change applies to the running session from its next turn. In the web UI the
-effort shows after the model's name; click it, or **Model settings…** in the
-model menu, to change these. In the terminal, `/effort` lists the levels and
-`/effort <level>` sets one.
+effort shows after the model's name, and the model menu ends with a row for
+each setting the current model supports; each opens its choices beside the
+menu. In the terminal, `/effort` lists the levels and `/effort <level>` sets
+one.
 
 Providers beyond the bundled five work once their LangChain package is
 installed, and Makker names the exact package when it is missing.
