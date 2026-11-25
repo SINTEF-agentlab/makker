@@ -47,6 +47,13 @@ describe("compaction", () => {
     expect(byKind("sys-note")[0].text).toBe(compaction.text);
   });
 
+  it("shows an offload note the same way", () => {
+    state().beginWorking();
+    state().handle({ type: "offload", text: "Moved 5 older tool results to files.", count: 5, freed_tokens: 30000 });
+    expect(state().busy).toBe(true);
+    expect(byKind("sys-note").map((it) => it.text)).toEqual(["Moved 5 older tool results to files."]);
+  });
+
   it("replays as the same note", () => {
     state().replay([{ type: "user", text: "q" }, compaction]);
     expect(byKind("sys-note").map((it) => it.text)).toEqual([compaction.text]);

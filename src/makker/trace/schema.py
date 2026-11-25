@@ -30,6 +30,8 @@ TOOL_RESULT = "tool_result"
 HITL_REQUEST = "hitl_request"
 HITL_RESPONSE = "hitl_response"
 CONTEXT_COMPACTION = "context_compaction"
+# Older tool results moved out of the conversation into files to free context.
+CONTEXT_OFFLOAD = "context_offload"
 
 ARTIFACT = "artifact"
 ATTEMPT = "attempt"
@@ -62,6 +64,7 @@ ALL_KINDS: frozenset[str] = frozenset(
         HITL_REQUEST,
         HITL_RESPONSE,
         CONTEXT_COMPACTION,
+        CONTEXT_OFFLOAD,
         ARTIFACT,
         ATTEMPT,
         UPLOAD,
@@ -96,6 +99,12 @@ def model_payload(
         "compact_at": compact_at,
         "settings": settings,
     }
+
+
+def offload_payload(*, count: int, freed_tokens: int) -> dict[str, Any]:
+    """Payload for a ``CONTEXT_OFFLOAD`` event: how many tool results moved to
+    files, and about how many tokens that freed."""
+    return {"count": count, "freed_tokens": freed_tokens}
 
 
 def compaction_payload(

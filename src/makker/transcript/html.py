@@ -13,7 +13,7 @@ from typing import Any
 from makker.tool_labels import tool_label
 from makker.trace import Event, schema
 from makker.transcript.embed import image_data_uri
-from makker.transcript.events import ArtifactPayload, model_line
+from makker.transcript.events import ArtifactPayload, model_line, offload_line
 from makker.transcript.highlight import (
     PLAIN_OUTPUT_TOOLS,
     SIMULATOR_TOOLS,
@@ -392,6 +392,7 @@ _SESSION_MARKER_KINDS = frozenset(
         schema.SESSION_RESUME,
         schema.SESSION_TITLE,
         schema.CONTEXT_COMPACTION,
+        schema.CONTEXT_OFFLOAD,
         schema.MODEL,
     }
 )
@@ -781,6 +782,13 @@ def _render_body(
 
         if kind == schema.SESSION_TITLE:
             session_title = str(payload.get("title") or "").strip() or session_title
+            continue
+
+        if kind == schema.CONTEXT_OFFLOAD:
+            parts.append(
+                f'<div class="session-marker">Context: {_esc(offload_line(payload))} · '
+                f'<time datetime="{_esc_attr(ts)}">{_esc(ts)}</time></div>'
+            )
             continue
 
         if kind == schema.MODEL:

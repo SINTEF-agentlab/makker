@@ -75,9 +75,10 @@ export type ServerMessage =
    *  held the width, so this is the echo to stage, not the client's request). */
   | { type: "refit_done"; record: string; width: number; height: number }
   | { type: "notice"; text: string }
-  /** The conversation was compacted to free context, automatically or by `/compact`.
-   *  `text` is the note to show; the rest are the trace event's fields. Unlike
-   *  `notice` it can arrive mid-turn and does not end the busy state. */
+  /** The conversation was made smaller to free context: a `compaction` (older turns
+   *  summarized, automatically or by `/compact`) or an `offload` (older tool results
+   *  moved to files). `text` is the note to show; the rest are the trace event's
+   *  fields. Unlike `notice` it can arrive mid-turn and does not end the busy state. */
   | {
       type: "compaction";
       text: string;
@@ -86,6 +87,7 @@ export type ServerMessage =
       offloaded: boolean;
       manual: boolean;
     }
+  | { type: "offload"; text: string; count: number; freed_tokens: number }
   | { type: "ui"; action: string; payload: Record<string, unknown> }
   | { type: "credential_required"; provider: string; label: string; env_var: string }
   | { type: "error"; message: string }
@@ -137,7 +139,7 @@ export type ReplayMessage =
   | { type: "user"; text: string }
   | { type: "assistant"; text: string }
   | { type: "reasoning"; text: string }
-  | Extract<ServerMessage, { type: "tool" | "viz" | "artifact" | "compaction" }>;
+  | Extract<ServerMessage, { type: "tool" | "viz" | "artifact" | "compaction" | "offload" }>;
 
 /** Parse a raw WebSocket text frame, or return null if it is not a typed message. */
 export function parseServerMessage(data: string): ServerMessage | null {

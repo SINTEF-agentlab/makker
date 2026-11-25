@@ -46,7 +46,7 @@ from makker.agent.approval import (
     pending_allowed_decisions,
 )
 from makker.agent.turns import (
-    TurnCompaction,
+    TurnContextNote,
     TurnInterrupt,
     TurnReasoningDelta,
     TurnRunResult,
@@ -1388,7 +1388,7 @@ class TUIApp(App[None]):
             await self._render_tool_event(msg)
             return
 
-        if isinstance(msg, TurnCompaction):
+        if isinstance(msg, TurnContextNote):
             await self._flush_stream()
             await self._note(msg.text)
 

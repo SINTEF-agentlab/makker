@@ -101,8 +101,6 @@ def render_context_panel(
             "index, and the conversation; every model call sends all of it."
         )
 
-    from makker.agent.context_editing import clear_tool_uses_trigger_tokens
-
     held = context_tokens(usage)
     estimated = bool(usage.get("estimated"))
     window = budget.window if budget else None
@@ -136,7 +134,7 @@ def render_context_panel(
         memory_index_tokens=memory_index_tokens,
         memory_notes=memory_notes,
         compact_trigger_tokens=budget.compact_at if budget else None,
-        clear_trigger_tokens=clear_tool_uses_trigger_tokens(window) if window else None,
+        offload_trigger_tokens=budget.offload_at if budget else None,
     )
 
     input_tokens = int(usage.get("input_tokens") or 0)
@@ -172,7 +170,7 @@ def _category_lines(
     memory_index_tokens: int | None,
     memory_notes: int,
     compact_trigger_tokens: int | None,
-    clear_trigger_tokens: int | None = None,
+    offload_trigger_tokens: int | None = None,
 ) -> list[str]:
     """Estimated usage by category, Σ = the window when it is known."""
     lines = ["Estimated usage by category:"]
@@ -204,10 +202,10 @@ def _category_lines(
         free = max(0, trigger - held)
         buffer = window - trigger
         lines.append(f"- free space: {format_tokens(free)}{_pct(free, window)}")
-        # Clearing fires before summarization, so note it first when it applies.
-        if clear_trigger_tokens and clear_trigger_tokens < trigger:
+        # Offloading comes before summarization, so note it first.
+        if offload_trigger_tokens and offload_trigger_tokens < trigger:
             lines.append(
-                f"- old tool results start clearing at {format_tokens(clear_trigger_tokens)}"
+                f"- older tool results move to files at {format_tokens(offload_trigger_tokens)}"
                 " (before any summary)"
             )
         lines.append(

@@ -37,6 +37,7 @@ than restating the strings, and the table below is the payload contract.
 | `message_assistant` | recorder middleware | `content` |
 | `model_usage` | recorder middleware | `input_tokens`, `output_tokens`, `total_tokens`, provider detail fields |
 | `model` | agent builder (session start, resume, model switch) | `model`, `window` and `window_source` (`provider`, `ollama` or `assumed`), `compact_at` (the context size at which automatic compaction runs), `settings` (the reasoning and output settings the model was built with) |
+| `context_offload` | offload middleware | `count` (older tool results moved to files to free context), `freed_tokens` (about how many tokens that freed) |
 | `context_compaction` | summarization middleware / `/compact` | `summarized`, `kept` (message counts, null when unknown), `offloaded`, `manual`, `cutoff` (the compaction's position in the checkpointed messages; it only grows, so each compaction is recorded once) |
 | `tool_call` | recorder middleware | `id`, `name`, `args` |
 | `tool_result` | recorder middleware | `tool_call_id`, `name`, `content`, `status` |

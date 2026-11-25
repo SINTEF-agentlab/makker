@@ -21,7 +21,13 @@ from langgraph.types import Command
 from makker.agent.tool_output import is_interrupt_payload, normalize_tool_output
 from makker.trace import TraceLog
 from makker.trace.messages import content_to_str
-from makker.trace.schema import CONTEXT_COMPACTION, HITL_REQUEST, HITL_RESPONSE, MESSAGE_USER
+from makker.trace.schema import (
+    CONTEXT_COMPACTION,
+    CONTEXT_OFFLOAD,
+    HITL_REQUEST,
+    HITL_RESPONSE,
+    MESSAGE_USER,
+)
 
 # The turn runs on langgraph's v3 event stream on purpose, which warns that it is
 # experimental at every turn: nothing a user can act on. Filtered here, after the
@@ -88,13 +94,15 @@ class TurnToolEvent:
 
 
 @dataclass(frozen=True)
-class TurnCompaction:
-    """The conversation was compacted during the turn.
+class TurnContextNote:
+    """The conversation was made smaller during the turn.
 
-    ``payload`` is the ``context_compaction`` trace event's; ``text`` is the note
-    a front end shows for it.
+    ``kind`` is ``compaction`` (older turns summarized) or ``offload`` (older tool
+    results moved to files); ``payload`` is the trace event's, and ``text`` the
+    note a front end shows for it.
     """
 
+    kind: str
     text: str
     payload: dict[str, Any]
 
@@ -181,7 +189,7 @@ class TurnRunner:
         *,
         on_message: MessageCallback | None,
     ) -> TurnRunResult:
-        compactions = _CompactionWatch(self._trace, on_message)
+        notes = _ContextWatch(self._trace, on_message)
         run = await self._agent.astream_events(
             stream_input,
             config=self._config,
@@ -191,12 +199,12 @@ class TurnRunner:
         # Drain the projection streams concurrently. Each owns its own
         # arrival-order iterator; ordering across projections is not strict,
         # but the TUI keys tool blocks by tool_call_id so that's fine.
-        forward = compactions.relay if on_message is not None else None
+        forward = notes.relay if on_message is not None else None
         await asyncio.gather(
             _drain_messages(run, forward),
             _drain_tool_calls(run, forward),
         )
-        await compactions.surface()
+        await notes.surface()
 
         interrupts = await _collect_interrupts(run, self._trace)
         messages = await _final_messages(run)
@@ -442,14 +450,13 @@ def _should_skip_tool_error(value: Any) -> bool:
     return is_interrupt_payload(_stringify_tool_output(value))
 
 
-class _CompactionWatch:
-    """Tell the front end when the conversation was compacted during a turn.
+class _ContextWatch:
+    """Tell the front end when the conversation was made smaller during a turn.
 
-    Compaction happens inside a model call, and the trace recorder writes the
-    event once that call is done. The watch reads new ``context_compaction``
-    events from the trace when the next tool starts (by then the recorder has
-    run) and once more when the turn ends, and passes each on as a
-    ``TurnCompaction`` ahead of the event that revealed it.
+    Offloading and compaction happen around a model call, and their trace events
+    are written by then. The watch reads new ones from the trace when the next tool
+    starts and once more when the turn ends, and passes each on as a
+    ``TurnContextNote`` ahead of the event that revealed it.
     """
 
     def __init__(self, trace: TraceLog | None, on_message: MessageCallback | None) -> None:
@@ -460,18 +467,27 @@ class _CompactionWatch:
     async def surface(self) -> None:
         if self._trace is None or self._on_message is None:
             return
-        from makker.agent.summarization import describe_compaction
-
-        for event in self._trace.events_after(self._mark, kinds=(CONTEXT_COMPACTION,)):
+        for event in self._trace.events_after(
+            self._mark, kinds=(CONTEXT_COMPACTION, CONTEXT_OFFLOAD)
+        ):
             self._mark = event.id
-            text = describe_compaction(event.payload)
-            await _emit(self._on_message, TurnCompaction(text=text, payload=event.payload))
+            await _emit(self._on_message, context_note(event.kind, event.payload))
 
     async def relay(self, message: Any) -> None:
         if isinstance(message, TurnToolEvent) and message.event == "started":
             await self.surface()
         if self._on_message is not None:
             await _emit(self._on_message, message)
+
+
+def context_note(kind: str, payload: dict[str, Any]) -> TurnContextNote:
+    """The front-end note for a ``context_compaction`` or ``context_offload`` event."""
+    from makker.agent.offload import describe_offload
+    from makker.agent.summarization import describe_compaction
+
+    if kind == CONTEXT_OFFLOAD:
+        return TurnContextNote(kind="offload", text=describe_offload(payload), payload=payload)
+    return TurnContextNote(kind="compaction", text=describe_compaction(payload), payload=payload)
 
 
 async def _emit(callback: MessageCallback, message: Any) -> None:

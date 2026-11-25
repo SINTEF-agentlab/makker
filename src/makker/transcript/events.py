@@ -86,3 +86,13 @@ def model_line(payload: dict[str, Any]) -> str:
         if payload.get("window_source") == "assumed":
             line += " (assumed)"
     return line
+
+
+def offload_line(payload: dict[str, Any]) -> str:
+    """One line for a ``context_offload`` trace event."""
+    count = payload.get("count") or 0
+    line = f"{count} older tool result{'s' if count != 1 else ''} moved to files"
+    freed = payload.get("freed_tokens")
+    if isinstance(freed, int) and freed > 0:
+        line += f" (about {freed:,} tokens)"
+    return line
