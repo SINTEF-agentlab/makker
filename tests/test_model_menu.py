@@ -146,6 +146,75 @@ async def test_model_menu_escape_cancels() -> None:
     assert results == [None]
 
 
+async def test_model_menu_typed_id_that_a_section_lists_is_one_row(monkeypatch) -> None:
+    # The free-text row checked only the provider catalog, so a typed Ollama id
+    # was a second row with the same id, and Textual raised DuplicateID.
+    from makker import ollama_client
+
+    async def _none() -> list[str]:
+        return []
+
+    monkeypatch.setattr(ollama_client, "installed_models", _none)
+    app = _Host()
+    async with app.run_test() as pilot:
+        app.push_screen(ModelMenu(current=None))
+        await pilot.pause()
+        app.screen.query_one("#model-filter", Input).value = "ollama:glm-5.1:cloud"
+        await pilot.pause()
+        assert _option_ids(app.screen).count("ollama:glm-5.1:cloud") == 1
+
+
+async def test_model_menu_lists_a_used_cloud_model_once(monkeypatch) -> None:
+    # Ollama lists a cloud model it has run among the installed ones.
+    from makker import ollama_client
+
+    async def _installed() -> list[str]:
+        return ["glm-5.1:cloud"]
+
+    monkeypatch.setattr(ollama_client, "installed_models", _installed)
+    app = _Host()
+    async with app.run_test() as pilot:
+        app.push_screen(ModelMenu(current=None))
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert _option_ids(app.screen).count("ollama:glm-5.1:cloud") == 1
+
+
+async def test_model_menu_keeps_the_highlight_when_discovery_returns(monkeypatch) -> None:
+    # The list is rebuilt when Ollama answers; the highlight used to jump back
+    # to the first row, so Enter picked a model the user had moved away from.
+    import asyncio
+
+    from makker import ollama_client
+
+    answer = asyncio.Event()
+
+    async def _installed() -> list[str]:
+        await answer.wait()
+        return ["llama3.1:8b"]
+
+    monkeypatch.setattr(ollama_client, "installed_models", _installed)
+    results: list = []
+    app = _Host()
+    async with app.run_test() as pilot:
+        app.push_screen(ModelMenu(current=None), results.append)
+        await pilot.pause()
+        await pilot.press("down", "down")
+        options = app.screen.query_one("#model-options", OptionList)
+        chosen = options.highlighted_option.id
+
+        answer.set()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert "ollama:llama3.1:8b" in _option_ids(app.screen)
+        assert options.highlighted_option.id == chosen
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert results == [(chosen, "workspace")]
+
+
 async def test_api_key_modal_returns_value() -> None:
     results: list = []
     app = _Host()

@@ -82,6 +82,32 @@ def test_registry_runs_uv_tool_upgrade(monkeypatch, capsys) -> None:
     assert calls[1][:5] == [sys.executable, "-m", "makker", "upgrade", "--env-only"]
 
 
+def test_the_env_step_keeps_the_sysimage_and_state_home_flags(monkeypatch, tmp_path) -> None:
+    # The new install runs the environment step, so it is told what this one was.
+    monkeypatch.setattr(upgrade_cmd, "install_info", lambda: InstallInfo("registry"))
+    monkeypatch.setattr(upgrade_cmd, "refresh_cache", lambda force=False: "9.9.9")
+    monkeypatch.setattr(upgrade_cmd.shutil, "which", lambda _name: "/usr/bin/uv")
+    monkeypatch.setattr(upgrade_cmd.os, "name", "posix")
+    calls: list[list[str]] = []
+
+    def _fake_run(argv, check=False):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(upgrade_cmd.subprocess, "run", _fake_run)
+
+    state = tmp_path / "state"
+    assert upgrade_cmd.run(_args(sysimage="off", state_home=state)) == 0
+    assert calls[1][5:] == [
+        "--workspace",
+        str(tmp_path),
+        "--state-home",
+        str(state.resolve()),
+        "--sysimage",
+        "off",
+    ]
+
+
 def test_upgrade_names_the_uv_tool_this_install_lives_in(monkeypatch, tmp_path) -> None:
     # An application built on Makker carries it inside its own uv tool, and it is
     # that tool `uv tool upgrade` has to be given.

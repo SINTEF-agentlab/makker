@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -1534,3 +1535,110 @@ async def test_resumed_session_resurfaces_pending_approval(session: Session) -> 
         await pilot.pause()
         assert [i.interrupt_id for i in app._pending_interrupts] == ["interrupt-1"]
         assert app.query(ApprovalBlock)
+
+
+async def test_parallel_calls_to_one_tool_get_a_card_each(session: Session) -> None:
+    """Two calls to one tool in one model message are two cards. Matching by
+    name used to fold the second into the first, so its result went missing."""
+    app = TUIApp(agent=_stub_agent(), session=session)
+    async with app.run_test() as pilot:
+        await wait_until_ready(app)
+        for call_id in ("call_a", "call_b"):
+            await app._render_message(
+                TurnToolEvent(
+                    event="started",
+                    tool_name="read_file",
+                    tool_call_id=call_id,
+                    args={"file_path": f"{call_id}.txt"},
+                )
+            )
+        await app._render_message(
+            TurnToolEvent(
+                event="finished", tool_name="read_file", tool_call_id="call_b", content="b"
+            )
+        )
+        await pilot.pause()
+
+        blocks = list(app.query(ToolBlock))
+        assert [block.tool_call_id for block in blocks] == ["call_a", "call_b"]
+        assert [block.status for block in blocks] == ["running", "success"]
+
+
+async def test_starting_a_turn_leaves_other_workers_running(session: Session) -> None:
+    """A turn cancels an earlier turn, not the warm-up watch, a model switch or
+    the context fetch: `exclusive` cancels a worker's whole group."""
+    from textual.worker import WorkerState
+
+    app = TUIApp(agent=_stub_agent(), session=session)
+    async with app.run_test() as pilot:
+        await wait_until_ready(app)
+        background = app.run_worker(asyncio.Event().wait(), name="warmup-watch")
+        await submit_prompt(pilot, "hello")
+
+        assert app._turn_worker is not None
+        assert background.state is not WorkerState.CANCELLED
+        background.cancel()
+
+
+async def test_file_links_open_only_inside_the_workspace(
+    session: Session, tmp_path: Path, monkeypatch
+) -> None:
+    """The model writes the links. One into the workspace (the test's tmp_path)
+    opens; one elsewhere is only revealed, so a click never launches it."""
+    from types import SimpleNamespace
+
+    from makker.interfaces.tui import app as app_module
+
+    opened: list[Path] = []
+    revealed: list[Path] = []
+    monkeypatch.setattr(app_module, "open_path", opened.append)
+    monkeypatch.setattr(app_module, "reveal_path", revealed.append)
+    inside = tmp_path / "plot.png"
+    outside = tmp_path.parent / f"{tmp_path.name}-elsewhere" / "run.command"
+
+    app = TUIApp(agent=_stub_agent(), session=session)
+    for path in (inside, outside):
+        app.on_markdown_link_clicked(
+            SimpleNamespace(href=path.as_uri(), prevent_default=lambda: None)
+        )
+
+    assert opened == [inside.resolve()]
+    assert revealed == [outside.resolve()]
+
+
+async def test_replacing_the_key_in_use_rebuilds_the_agent(session: Session, monkeypatch) -> None:
+    """The model client reads its key when it is built, so a key replaced with
+    `/key` for the model in use rebuilds the agent; a key for another provider
+    leaves it alone."""
+    from textual.widgets import Input
+
+    from makker.interfaces.tui.model_menu import ApiKeyModal
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-old")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-old")
+    calls: list[str] = []
+
+    def factory(model_id: str, dirs):
+        calls.append(model_id)
+        return _stub_agent(), None
+
+    app = TUIApp(
+        agent=_stub_agent(),
+        session=session,
+        model_label="openai:gpt-5.4-mini",
+        agent_factory=factory,
+    )
+    async with app.run_test() as pilot:
+        await wait_until_ready(app)
+        for provider, key in (("openai", "sk-new"), ("anthropic", "sk-ant-new")):
+            await app._handle_command(f"/key {provider}")
+            await pilot.pause()
+            assert isinstance(app.screen, ApiKeyModal)
+            app.screen.query_one("#api-key-input", Input).value = key
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+        assert calls == ["openai:gpt-5.4-mini"]
+        notes = [block.content_text for block in app.query(MessageBlock)]
+        assert any("`openai:gpt-5.4-mini` uses it from the next turn" in note for note in notes)

@@ -9,6 +9,7 @@ applies the resulting switch.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import AsyncIterator, Callable
 from typing import ClassVar
 
@@ -17,7 +18,7 @@ from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, ProgressBar, Static
-from textual.widgets.option_list import Option
+from textual.widgets.option_list import Option, OptionDoesNotExist
 
 from makker.models import (
     OLLAMA_CLOUD,
@@ -145,7 +146,7 @@ class ModelMenu(ModalScreen[ModelChoice | None]):
 
         self._catalog = await asyncio.to_thread(discover_available_models)
         if self.is_mounted:
-            self._populate(self.query_one("#model-filter", Input).value)
+            self._populate(self.query_one("#model-filter", Input).value, keep_highlight=True)
 
     async def _discover_ollama(self) -> None:
         """Merge locally-installed Ollama models into the catalog, best-effort."""
@@ -159,7 +160,7 @@ class ModelMenu(ModalScreen[ModelChoice | None]):
             return
         self._ollama = [ModelInfo(f"ollama:{name}", name) for name in names]
         if self.is_mounted:
-            self._populate(self.query_one("#model-filter", Input).value)
+            self._populate(self.query_one("#model-filter", Input).value, keep_highlight=True)
 
     def _sections(self) -> list[tuple[str, list[ModelInfo]]]:
         """``(header, models)`` sections in display order: Recent, cloud providers,
@@ -190,37 +191,51 @@ class ModelMenu(ModalScreen[ModelChoice | None]):
                 models.append(ModelInfo(f"ollama:{tag}", tag, "not pulled · Enter to pull"))
         return models
 
-    def _populate(self, filter_text: str) -> None:
+    def _populate(self, filter_text: str, *, keep_highlight: bool = False) -> None:
+        """List the models matching ``filter_text``, highlighting the first.
+
+        ``keep_highlight`` (a refresh when discovery returns) keeps the row the
+        user had moved to, so Enter still picks it.
+        """
         options = self.query_one("#model-options", OptionList)
+        previous = options.highlighted_option.id if options.highlighted_option else None
         options.clear_options()
         raw = filter_text.strip()
         needle = raw.lower()
+        sections = self._sections()
 
-        # Free-text row: any provider:model not already in the catalog.
-        if ":" in raw and not any(
-            model.id == raw for models in self._catalog.values() for model in models
-        ):
-            options.add_option(Option(Text.assemble(("Use ", "bold"), (raw, "bold cyan")), id=raw))
-
+        # Free-text row: any provider:model not already listed (ids must be unique).
+        listed = {model.id for header, models in sections if header != "Recent" for model in models}
         first_enabled: int | None = None
-        index = 0
-        for header, models in self._sections():
-            visible = [model for model in models if _matches(model, needle)]
-            if not visible:
-                continue
-            is_recent = header == "Recent"
-            options.add_option(Option(Text(header, style="bold"), disabled=True))
-            index += 1
-            for model in visible:
-                row = _render_model(model, current=self._current, full_id=is_recent)
-                option_id = f"{_RECENT_PREFIX}{model.id}" if is_recent else model.id
-                options.add_option(Option(row, id=option_id))
-                if first_enabled is None:
-                    first_enabled = index
-                index += 1
+        if ":" in raw and raw not in listed:
+            options.add_option(Option(Text.assemble(("Use ", "bold"), (raw, "bold cyan")), id=raw))
+            first_enabled = 0
 
-        if first_enabled is not None:
-            options.highlighted = first_enabled
+        added: set[str] = set()
+        for header, models in sections:
+            is_recent = header == "Recent"
+            rows = []
+            for model in models:
+                option_id = f"{_RECENT_PREFIX}{model.id}" if is_recent else model.id
+                # A used Ollama cloud model is also installed locally: list it once.
+                if option_id in added or not _matches(model, needle):
+                    continue
+                added.add(option_id)
+                row = _render_model(model, current=self._current, full_id=is_recent)
+                rows.append(Option(row, id=option_id))
+            if not rows:
+                continue
+            options.add_option(Option(Text(header, style="bold"), disabled=True))
+            if first_enabled is None:
+                first_enabled = options.option_count
+            options.add_options(rows)
+
+        highlight = first_enabled
+        if keep_highlight and previous is not None:
+            with contextlib.suppress(OptionDoesNotExist):
+                highlight = options.get_option_index(previous)
+        if highlight is not None:
+            options.highlighted = highlight
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "model-filter":

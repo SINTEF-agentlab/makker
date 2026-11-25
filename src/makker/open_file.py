@@ -39,6 +39,30 @@ def open_path(path: Path) -> None:
         pass
 
 
+def reveal_path(path: Path) -> None:
+    """Show *path* in the file manager without opening it (best-effort).
+
+    macOS and Windows select it in its folder; elsewhere its folder opens. Nothing
+    is launched, even when *path* is a program. ``MAKKER_NO_OPEN`` applies here too.
+    """
+    if os.environ.get("MAKKER_NO_OPEN"):
+        return
+    system = platform.system()
+    try:
+        if system == "Windows":
+            _spawn(["explorer", f"/select,{path}"])
+        elif system == "Darwin":
+            _spawn(["open", "-R", str(path)])
+        else:
+            from makker.display import has_display
+
+            if not has_display():
+                return
+            _spawn(["xdg-open", str(path.parent)])
+    except Exception:
+        pass
+
+
 def _spawn(argv: list[str]) -> None:
     """Launch a detached viewer, discarding its stdout/stderr.
 

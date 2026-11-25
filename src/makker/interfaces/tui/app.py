@@ -85,7 +85,7 @@ from makker.interfaces.tui.widgets import (
     WelcomeBlock,
     display_session_id,
 )
-from makker.open_file import open_path
+from makker.open_file import open_path, reveal_path
 from makker.paths import workspace_root
 from makker.recent_models import record_recent_model
 from makker.session import Session
@@ -528,7 +528,9 @@ class TUIApp(App[None]):
         self._busy = True
         self._cancel_requested = False
         self._cancel_rendered = False
-        self._turn_worker = self.run_worker(self._run_compaction(), exclusive=True, name="turn")
+        self._turn_worker = self.run_worker(
+            self._run_compaction(), exclusive=True, group="turn", name="turn"
+        )
 
     async def _run_compaction(self) -> None:
         self._set_status("compacting…")
@@ -702,11 +704,21 @@ class TUIApp(App[None]):
         await self._resume_pending(option.decision)
 
     def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
-        """Open file:// links in the OS default application."""
+        """Open file:// links in the OS default application.
+
+        Only inside the workspace or the session's output. The model writes these
+        links and can point one anywhere, so anything else is revealed in its
+        folder instead: a click never launches a program from elsewhere.
+        """
         href = event.href
         if href.startswith("file://"):
             path = Path(urllib.request.url2pathname(urllib.parse.urlparse(href).path))
-            open_path(path)
+            target = path.resolve()
+            roots = (workspace_root(), self._session.output_dir)
+            if any(target.is_relative_to(root.resolve()) for root in roots):
+                open_path(target)
+            else:
+                reveal_path(target)
             event.prevent_default()
 
     def on_resize(self, _event: events.Resize) -> None:
@@ -819,7 +831,11 @@ class TUIApp(App[None]):
         self._jump_to_latest()
         self._set_status("thinking…")
 
-        self._turn_worker = self.run_worker(self._run_turn(text), exclusive=True, name="turn")
+        # Its own group: `exclusive` cancels every worker in the group, and the
+        # warm-up watch, model switch and the like run in the default one.
+        self._turn_worker = self.run_worker(
+            self._run_turn(text), exclusive=True, group="turn", name="turn"
+        )
 
     def on_prompt_text_area_history_previous(self, event: PromptTextArea.HistoryPrevious) -> None:
         if self._prompt.disabled:
@@ -962,9 +978,25 @@ class TUIApp(App[None]):
             from makker.credentials import store_credential
 
             store_credential(env_var, key)
-            self.run_worker(self._note(f"Saved {env_var} to {user_env_path()}."), name="key-note")
+            self.run_worker(self._key_saved(env_var), name="key-note")
 
         self.push_screen(ApiKeyModal(env_var=env_var, provider_label=info.label), _on_key)
+
+    async def _key_saved(self, env_var: str) -> None:
+        """Say where a key was saved, and rebuild the agent if its model uses it.
+
+        The model client reads its key when it is built, so without the rebuild
+        the running agent keeps the old one.
+        """
+        from makker.credentials import user_env_path
+        from makker.models import key_env_var
+
+        note = f"Saved {env_var} to {user_env_path()}."
+        model = self._model_label
+        uses_it = model and self._agent_factory is not None and key_env_var(model) == env_var
+        if uses_it and await self._rebuild_agent(model):
+            note += f" `{model}` uses it from the next turn."
+        await self._note(note)
 
     async def _note(self, text: str) -> None:
         await self._log.mount(MessageBlock("System", "system", text))
@@ -1142,7 +1174,15 @@ class TUIApp(App[None]):
         self.push_screen(ApiKeyModal(env_var=env_var, provider_label=label), _on_key)
 
     async def _apply_model(self, model_id: str, scope: str) -> None:
-        """Rebuild the agent on the new model and persist the choice.
+        """Rebuild the agent on the new model and persist the choice."""
+        if not await self._rebuild_agent(model_id):
+            return
+        record_recent_model(model_id)
+        where = self._persist_model(model_id, scope)
+        await self._note(f"model changed to `{model_id}` (saved to {where}).")
+
+    async def _rebuild_agent(self, model_id: str) -> bool:
+        """Build the agent on ``model_id``; ``False`` (with a note) if that fails.
 
         The rebuilt agent shares the session's checkpointer and thread id, so
         the conversation continues; ``/add-dir`` folders are re-applied.
@@ -1152,7 +1192,7 @@ class TUIApp(App[None]):
             agent, backend = self._agent_factory(model_id, dirs)
         except Exception as exc:
             await self._note(f"could not switch to `{model_id}`: {exc}")
-            return
+            return False
 
         self._agent = agent
         self._backend = backend
@@ -1163,9 +1203,7 @@ class TUIApp(App[None]):
         self._refresh_context_status()
         self.run_worker(self._fetch_context_window(), name="ctx-window")
         self._refresh_subtitle()
-        record_recent_model(model_id)
-        where = self._persist_model(model_id, scope)
-        await self._note(f"model changed to `{model_id}` (saved to {where}).")
+        return True
 
     def _persist_model(self, model_id: str, scope: str) -> str:
         """Save the model to the workspace or user-global config.
@@ -1504,7 +1542,7 @@ class TUIApp(App[None]):
         await self._preview_pending_decision(decision)
         self._set_status("resuming…")
         self._turn_worker = self.run_worker(
-            self._resume_turn(resume_payload), exclusive=True, name="turn"
+            self._resume_turn(resume_payload), exclusive=True, group="turn", name="turn"
         )
 
     async def action_clear_visible_log(self) -> None:
@@ -1650,8 +1688,14 @@ class TUIApp(App[None]):
             for block in reversed(self._tool_blocks):
                 if block.tool_call_id == tool_call_id:
                     return block
+        # By name only when an id is missing: parallel calls to one tool each
+        # have their own id, and must keep their own card.
         for block in reversed(self._tool_blocks):
-            if block.tool_name == tool_name and not block.has_output:
+            if (
+                block.tool_name == tool_name
+                and not block.has_output
+                and (tool_call_id is None or block.tool_call_id is None)
+            ):
                 return block
         return None
 
