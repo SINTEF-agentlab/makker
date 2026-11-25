@@ -85,7 +85,10 @@ describe("model control", () => {
     expect(screen.queryByRole("menu", { name: "Effort" })).toBeNull();
     fireEvent.click(effortRow);
     fireEvent.click(within(screen.getByRole("menu", { name: "Effort" })).getByRole("menuitemradio", { name: "Extra high" }));
-    expect(screen.queryByRole("menu")).toBeNull();
+    // Only the list closes; the menu stays, its row showing the new level.
+    expect(screen.queryByRole("menu", { name: "Effort" })).toBeNull();
+    expect(screen.getByRole("menu", { name: "Model" })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: /Effort\s*Extra high/ })).toHaveFocus();
     await waitFor(() => expect(screen.getByRole("button", { name: "GPT-6 Luna Extra high" })).toBeInTheDocument());
     expect(save).toHaveBeenCalledWith(luna.id, { effort: "xhigh", output: null, context: null });
     // The running session rebuilds on the same model to pick it up.
