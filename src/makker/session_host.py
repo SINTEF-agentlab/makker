@@ -490,7 +490,7 @@ class SessionHost:
         from makker.agent.builder import build_agent
         from makker.agent.capabilities import collect_dependency_paths, discover_extensions
         from makker.credentials import missing_credential
-        from makker.julia.requirements import require_julia
+        from makker.julia.requirements import check_julia, require_julia
         from makker.julia.threads import (
             HYPRE_THREADS_ENV_VAR,
             blas_thread_env,
@@ -509,6 +509,8 @@ class SessionHost:
             warm_failure_is_current,
         )
 
+        # Asked afresh for each session: a long-running server can outlive a Julia update.
+        check_julia.cache_clear()
         require_julia()
         ws = workspace or workspace_root()
         project = julia_project or resolve_julia_project(ws)

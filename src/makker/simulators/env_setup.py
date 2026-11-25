@@ -17,7 +17,6 @@ import errno
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 import time
@@ -29,6 +28,7 @@ from pathlib import Path
 import tomli_w
 
 from makker import legacy
+from makker.julia.run import JuliaRunError, failure, output_tail, run_julia
 from makker.paths import workspace_root
 from makker.simulators.base import SimulatorAdapter
 from makker.workspace import (
@@ -178,23 +178,9 @@ def resolve_env_package_sources(julia_project: Path) -> dict[str, tuple[Path, bo
     yields ``{}``.
     """
 
-    if shutil.which("julia") is None:
-        return {}
     try:
-        result = subprocess.run(
-            [
-                "julia",
-                f"--project={julia_project}",
-                "--startup-file=no",
-                "-e",
-                ENUMERATE_PACKAGES_CODE,
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+        result = run_julia("-e", ENUMERATE_PACKAGES_CODE, project=julia_project, timeout=120)
+    except JuliaRunError:
         return {}
     if result.returncode != 0:
         return {}
@@ -450,14 +436,13 @@ def julia_probe(project: Path, *, timeout: float = 600.0) -> tuple[bool, str]:
     The kernel's server is stdlib-only, so the real failure mode is a broken or
     half-resolved manifest. One probe shared by env verification and doctor.
     """
-    argv = ["julia", f"--project={project}", "--startup-file=no", "-e", "print(1 + 1)"]
     try:
-        result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+        result = run_julia("-e", "print(1 + 1)", project=project, timeout=timeout)
+    except JuliaRunError as exc:
         return False, str(exc)
     if result.returncode == 0:
         return True, ""
-    return False, "\n".join((result.stderr or result.stdout or "").strip().splitlines()[-12:])
+    return False, output_tail(result)
 
 
 def verify_julia_runs(project: Path) -> None:
@@ -522,50 +507,22 @@ def update_env(project: Path) -> None:
 
 
 def _run_pkg(project: Path, cmds: list[str], *, capture: bool = False, echo: bool = True) -> None:
-    if shutil.which("julia") is None:
-        raise EnvSetupError("`julia` is not on PATH")
-
-    argv = [
-        "julia",
-        f"--project={project}",
-        "--startup-file=no",
-        "-e",
-        "; ".join(cmds),
-    ]
-    # On headless Linux, wrap in xvfb so the GL-dependent precompile has an
-    # OpenGL context: the @compile_workload bakes save a real GLMakie figure
-    # (the shared Makker package, and each Makker<Sim> package's
-    # _warm_plot). This is the same wrap the runtime uses. A real display, or
-    # any non-Linux OS, skips it.
-    from makker.display import should_wrap_xvfb
-
-    if should_wrap_xvfb():
-        argv = ["xvfb-run", "-a", "-s", "-screen 0 1280x1024x24", *argv]
-
-    # Precompiling this env is one of the two places a machine can run out of
-    # memory with nothing to show for it (the image build is the other), so it
-    # runs under the same memory-judged ceiling.
-    from makker.julia.precompile import julia_environment
-    from makker.juliakernel.kernel import describe_exit
-
-    env = julia_environment()
-
-    if capture:
-        # Best-effort callers (the launch-time self-heal) want a quiet run and a
-        # short error, not a page of Julia backtrace on the terminal.
-        result = subprocess.run(argv, check=False, capture_output=True, text=True, env=env)
-        if result.returncode != 0:
-            tail = "\n".join((result.stdout + result.stderr).strip().splitlines()[-12:])
-            raise EnvSetupError(f"Julia failed ({describe_exit(result.returncode)}):\n{tail}")
-        return
-
-    if echo:
-        print(f"$ {' '.join(argv)}")
-    result = subprocess.run(argv, check=False, env=env)
+    code = "; ".join(cmds)
+    if echo and not capture:
+        print(f"$ julia --project={project} --startup-file=no -e {code}")
+    # Under a virtual display on headless Linux, because the @compile_workload
+    # bakes save a real GLMakie figure (the shared Makker package, and each
+    # Makker<Sim> package's _warm_plot). Captured only for best-effort callers
+    # (the launch-time self-heal), which want a short error, not a page of
+    # backtrace; otherwise streamed, so a real bake reads as work, not a hang.
+    try:
+        result = run_julia("-e", code, project=project, capture=capture, display=True)
+    except JuliaRunError as exc:
+        raise EnvSetupError(str(exc)) from exc
     if result.returncode != 0:
         # Spelled out because the status that matters here carries no message of
         # its own: a Julia killed for memory while precompiling prints nothing.
-        raise EnvSetupError(f"Julia failed ({describe_exit(result.returncode)}); see output above")
+        raise EnvSetupError(failure(result))
 
 
 # ---------------------------------------------------------------------------

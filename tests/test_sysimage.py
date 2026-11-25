@@ -15,6 +15,7 @@ import pytest
 
 from makker import display as sysimage_display
 from makker import sysimage
+from makker.julia.requirements import JuliaCheck
 from makker.sysimage import (
     CURRENT,
     DIVERGENT,
@@ -36,7 +37,7 @@ JULIA = "1.12.4"
 @pytest.fixture(autouse=True)
 def _fixed_julia(monkeypatch):
     """Pin the Julia version so the guard never depends on the host's install."""
-    monkeypatch.setattr(sysimage, "julia_version", lambda: JULIA)
+    monkeypatch.setattr(sysimage, "check_julia", lambda: JuliaCheck(True, version_str=JULIA))
 
 
 def write_manifest(env: Path, *, versions: dict[str, str], paths: dict[str, str]) -> None:
@@ -287,7 +288,7 @@ def test_a_different_julia_diverges(tmp_path: Path, monkeypatch) -> None:
     ws, env = build_workspace(tmp_path)
     install_image(ws)
     write_stamp(ws, env, cpu_target="native", build_seconds=1.0, julia=JULIA)
-    monkeypatch.setattr(sysimage, "julia_version", lambda: "1.13.0")
+    monkeypatch.setattr(sysimage, "check_julia", lambda: JuliaCheck(True, version_str="1.13.0"))
 
     decision = decide(ws, env, enabled=True)
     assert decision.status == DIVERGENT

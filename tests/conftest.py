@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from dotenv import load_dotenv
 
+from makker.julia.requirements import check_julia as _check_julia
 from makker.lab.fakes import FakeJulia, make_fake_adapter
 from makker.paths import set_state_home, set_workspace_root
 from makker.session import Session
@@ -53,6 +54,14 @@ def _reset_workspace_overrides(tmp_path: Path, monkeypatch):
     yield
     paths.set_workspace_root(None)
     paths.set_state_home(None)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_julia_check():
+    """``check_julia`` is cached per process; a test that fakes Julia must not see
+    another test's answer."""
+
+    _check_julia.cache_clear()
 
 
 @pytest.fixture(autouse=True)

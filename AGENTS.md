@@ -100,8 +100,9 @@ and check on staged `.py` files. To verify the whole tree like CI:
 - `src/makker/simulators/`: adapter dataclass, registry, env bootstrap +
   launch-time preparation (`env_setup.prepare_workspace_env`), shared skills,
   and one folder per simulator (see below).
-- `src/makker/julia/`: the `JuliaSession` Protocol (`session.py`) and the
-  Julia toolchain checks (`requirements.py`).
+- `src/makker/julia/`: the `JuliaSession` Protocol (`session.py`), the
+  Julia toolchain checks (`requirements.py`), and `run.py`, through which every
+  one-shot `julia` runs (version probe, `Pkg` steps, image build).
 - `src/makker/juliakernel/`: the backend, a self-contained, supervised
   Julia runtime (`kernel.py` + stdlib-only `server.jl`) with live output and
   SIGINT interrupt. Splittable into a standalone package.

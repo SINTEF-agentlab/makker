@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,6 @@ def _julia_on_path(monkeypatch: pytest.MonkeyPatch) -> None:
     CI lane has none).
     """
     import shutil
-    import subprocess
 
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/julia" if name == "julia" else None)
 
@@ -88,7 +88,7 @@ def test_instantiate_alias_runs_precompile_path(
     import makker.simulators.env_setup as env_setup
 
     monkeypatch.setattr(env_setup.shutil, "which", lambda _: "/usr/bin/julia")
-    monkeypatch.setattr(env_setup.subprocess, "run", _fake_run)
+    monkeypatch.setattr(subprocess, "run", _fake_run)
 
     code = main(
         [
@@ -122,7 +122,7 @@ def test_init_precompiles_by_default(
     import makker.simulators.env_setup as env_setup
 
     monkeypatch.setattr(env_setup.shutil, "which", lambda _: "/usr/bin/julia")
-    monkeypatch.setattr(env_setup.subprocess, "run", lambda *a, **k: _Result())
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Result())
 
     code = main(["init", "--sim", "jutuldarcy", "--workspace", str(ws)])
     out = capsys.readouterr().out
@@ -144,7 +144,7 @@ def test_init_no_precompile_skips_the_bake(
         returncode = 0
         stdout = "julia version 1.12.0\n"
 
-    monkeypatch.setattr(env_setup.subprocess, "run", lambda *a, **k: _Version())
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Version())
 
     code = main(["init", "--sim", "jutuldarcy", "--no-precompile", "--workspace", str(ws)])
     out = capsys.readouterr().out
