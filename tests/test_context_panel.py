@@ -52,6 +52,9 @@ def test_format_tokens_scales() -> None:
     assert format_tokens(1_048_576) == "1M"
     assert format_tokens(1_050_000) == "1.05M"
     assert format_tokens(2_000_000) == "2M"
+    # Only powers of two: 128,000 is 125 x 1024, but goes by 128k.
+    assert format_tokens(128_000) == "128k"
+    assert format_tokens(111_616) == "112k"
 
 
 def test_a_request_is_measured_part_by_part() -> None:
