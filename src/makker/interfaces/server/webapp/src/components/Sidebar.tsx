@@ -1,4 +1,4 @@
-// The collapsible left sidebar: brand, "New chat", and the resumable session
+// The collapsible left sidebar: "New chat", and the resumable session
 // history (most recently used first). Clicking a session resumes it.
 
 import { useController, useSel } from "../context";
@@ -20,11 +20,6 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
 
   return (
     <aside className={`sidebar${collapsed ? " collapsed" : ""}`}>
-      <div className="sidebar-head">
-        <span className="brand">
-          <span className="brand-mark" /> Makker
-        </span>
-      </div>
       <button className="sidebar-new" title="Start a new chat" onClick={() => controller.newChat()}>
         <PlusIcon /> New chat
       </button>

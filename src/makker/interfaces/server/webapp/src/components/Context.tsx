@@ -1,12 +1,11 @@
-// The context ring under the message box, and the context view it opens: how full
-// the context is and what fills it. The figures come from the server
+// The context ring under the message box, and the context view that rises from it:
+// how full the context is and what fills it. The figures come from the server
 // (`context_panel.py`), which the terminal's /context renders too.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useController, useSel } from "../context";
 import { formatTokens } from "../format";
-import { CloseIcon } from "../icons";
 import type { ContextMeter as Meter, ContextReport } from "../protocol";
 
 /** Share of the window, 0..1, or null before the first model call. */
@@ -38,90 +37,90 @@ function describe(meter: Meter): string {
 const RING_R = 6;
 const RING_C = 2 * Math.PI * RING_R;
 
+/** The ring, and the context view rising from it when opened. */
 export function ContextMeter() {
   const meter = useSel((s) => s.context);
+  const open = useSel((s) => s.contextView.open);
   const controller = useController();
-  if (!meter?.window) return null;
   const share = fraction(meter) ?? 0;
-  const label = `Context: ${describe(meter)}`;
+  const label = meter ? `Context: ${describe(meter)}` : "Context";
   return (
-    <button
-      type="button"
-      className={`ctx-ring ${level(meter)}`}
-      title={label}
-      aria-label={label}
-      onClick={() => controller.openContext()}
-    >
-      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-        <circle className="ctx-ring-track" cx="8" cy="8" r={RING_R} />
-        <circle
-          className="ctx-ring-fill"
-          cx="8"
-          cy="8"
-          r={RING_R}
-          strokeDasharray={`${share * RING_C} ${RING_C}`}
-          transform="rotate(-90 8 8)"
-        />
-      </svg>
-    </button>
+    <div className="ctx-control">
+      {meter?.window ? (
+        <button
+          type="button"
+          className={`ctx-ring ${level(meter)}`}
+          title={open ? undefined : label}
+          aria-label={label}
+          aria-expanded={open}
+          onClick={() => (open ? controller.closeContext() : controller.openContext())}
+        >
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <circle className="ctx-ring-track" cx="8" cy="8" r={RING_R} />
+            <circle
+              className="ctx-ring-fill"
+              cx="8"
+              cy="8"
+              r={RING_R}
+              strokeDasharray={`${share * RING_C} ${RING_C}`}
+              transform="rotate(-90 8 8)"
+            />
+          </svg>
+        </button>
+      ) : null}
+      {open ? <ContextView /> : null}
+    </div>
   );
 }
 
-export function ContextView() {
-  const open = useSel((s) => s.contextView.open);
+function ContextView() {
   const report = useSel((s) => s.contextView.report);
   const meter = useSel((s) => s.context);
   const busy = useSel((s) => s.busy);
   const controller = useController();
+  const ref = useRef<HTMLDivElement>(null);
 
   // Load the report on open, and again whenever the meter moves while it is open.
   useEffect(() => {
-    if (open) void controller.refreshContext();
-  }, [open, meter, controller]);
+    void controller.refreshContext();
+  }, [meter, controller]);
 
+  // Close on Escape, or on a click anywhere outside the ring and the view.
   useEffect(() => {
-    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") controller.closeContext();
+      if (e.key !== "Escape") return;
+      controller.closeContext();
+      ref.current?.parentElement?.querySelector<HTMLElement>(".ctx-ring")?.focus();
+    };
+    const onClick = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement)?.closest(".ctx-control")) controller.closeContext();
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, controller]);
+    document.addEventListener("click", onClick);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("click", onClick);
+    };
+  }, [controller]);
 
-  if (!open) return null;
   return (
-    <div className="modal-backdrop" onClick={() => controller.closeContext()}>
-      <div
-        className="modal ctx-view"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Context"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="modal-head">
-          <h2>Context</h2>
-          <button className="icon-btn" aria-label="Close" onClick={() => controller.closeContext()}>
-            <CloseIcon />
-          </button>
-        </div>
-        {report ? <ReportBody report={report} /> : null}
-        <div className="modal-foot">
-          <button
-            className="btn"
-            disabled={busy}
-            title={busy ? "Available when the turn has finished" : undefined}
-            onClick={() => {
-              controller.closeContext();
-              controller.compact();
-            }}
-          >
-            Compact now
-          </button>
-          <button className="btn primary" onClick={() => controller.closeContext()}>
-            Done
-          </button>
-        </div>
+    <div className="ctx-view" role="dialog" aria-label="Context" ref={ref}>
+      <div className="ctx-head">
+        <span>Context</span>
+        <button
+          type="button"
+          className="ctx-compact"
+          disabled={busy}
+          title={busy ? "Available when the turn has finished" : undefined}
+          onClick={() => {
+            controller.closeContext();
+            controller.compact();
+          }}
+        >
+          Compact
+        </button>
       </div>
+      {report ? <ReportBody report={report} /> : null}
     </div>
   );
 }

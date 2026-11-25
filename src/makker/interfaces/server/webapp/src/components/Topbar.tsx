@@ -1,4 +1,4 @@
-// The top bar: sidebar toggle, the folder's simulator chip, the status line while a
+// The top bar: sidebar toggle, the name, the folder's simulator chip, the status line while a
 // session starts, the warming hint, and a "Views" button to reopen the canvas after
 // it was closed.
 
@@ -29,6 +29,9 @@ export function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
       >
         <MenuIcon />
       </button>
+      <span className="brand">
+        <span className="brand-mark" aria-hidden="true" /> Makker
+      </span>
       {simName ? (
         <span
           className="sim-chip"

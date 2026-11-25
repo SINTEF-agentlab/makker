@@ -31,9 +31,10 @@ export function Composer() {
   );
   const slashOpen = slashItems.length > 0;
 
+  // Only a hint that says something: an empty box needs no label.
   const placeholder = pending && replyDecision(pending.allowed)
     ? "Tell the agent what to do instead…"
-    : "Message Makker…";
+    : undefined;
 
   // Auto-grow the textarea up to a cap.
   useLayoutEffect(() => {
@@ -173,6 +174,7 @@ export function Composer() {
         <textarea
           ref={textarea}
           rows={1}
+          aria-label="Message"
           placeholder={placeholder}
           value={value}
           onChange={(e) => {

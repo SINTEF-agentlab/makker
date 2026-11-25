@@ -47,14 +47,17 @@
 .brand {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
+  margin-right: -0.4rem;
+  font-size: 0.88rem;
   font-weight: 650;
   letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 .brand-mark {
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
   background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 50%, #22d3ee));
 }
 /* This folder's simulator, shown as a static chip (one folder = one simulator). */
@@ -143,17 +146,6 @@
   flex-basis: 0;
   width: 0;
   border-right: 0;
-}
-.sidebar-head {
-  display: flex;
-  align-items: center;
-  min-height: 53px;
-  flex: none;
-  padding: 0.7rem 0.95rem;
-  border-bottom: 1px solid var(--border);
-}
-.sidebar-head .brand {
-  white-space: nowrap;
 }
 .sidebar-new {
   display: flex;
@@ -659,8 +651,23 @@ body.canvas-resizing iframe {
    track, and the compaction buffer is hatched. The table below the bar names every
    part with its figure, so no part is told by colour alone. */
 
+/* The view rises from the ring, like the model menu, over the conversation. */
+.ctx-control {
+  position: relative;
+}
 .ctx-view {
-  width: 600px;
+  position: absolute;
+  bottom: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 20;
+  width: min(27rem, 92vw);
+  max-height: min(70vh, 34rem);
+  overflow-y: auto;
+  padding: 0.7rem 1rem 0.8rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
   --part-system: #2a78d6;
   --part-tools: #eb6834;
   --part-skills: #1baf7a;
@@ -685,8 +692,33 @@ body.canvas-resizing iframe {
   }
 }
 
+.ctx-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.ctx-compact {
+  padding: 0.15rem 0.4rem;
+  margin-right: -0.4rem;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.ctx-compact:hover:not(:disabled),
+.ctx-compact:focus-visible {
+  background: var(--surface-2);
+}
+.ctx-compact:disabled {
+  color: var(--muted);
+  cursor: default;
+}
 .ctx-headline {
-  margin: 0.5rem 0 0.1rem;
+  margin: 0.35rem 0 0.1rem;
   font-size: 1.05rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;

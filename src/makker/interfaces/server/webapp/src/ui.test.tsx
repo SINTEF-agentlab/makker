@@ -5,7 +5,6 @@ import { api, type HistoryEntry } from "./api";
 import { registerPanel } from "./canvas/registry";
 import { Canvas } from "./components/Canvas";
 import { Composer } from "./components/Composer";
-import { ContextView } from "./components/Context";
 import { MoreModels } from "./components/Models";
 import { Sidebar } from "./components/Sidebar";
 import { Thread } from "./components/Thread";
@@ -63,7 +62,7 @@ describe("model control", () => {
     const { store } = renderWithStore(<Composer />);
     act(() => store.setState({ models: [luna], model: luna.id }));
 
-    const composer = screen.getByPlaceholderText("Message Makker…");
+    const composer = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(composer, { target: { value: "/model" } });
     fireEvent.keyDown(composer, { key: "Enter" });
     expect(await screen.findByRole("menu", { name: "Model" })).toBeInTheDocument();
@@ -97,7 +96,7 @@ describe("composer", () => {
     const { store } = renderWithStore(<Composer />);
     act(() => store.setState({ busy: true }));
 
-    const composer = screen.getByPlaceholderText("Message Makker…") as HTMLTextAreaElement;
+    const composer = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
     fireEvent.change(composer, { target: { value: "and then plot the pressure" } });
     fireEvent.keyDown(composer, { key: "Enter" });
 
@@ -126,15 +125,11 @@ describe("context ring and view", () => {
       largest: [{ label: "Read · src/model.jl", tokens: 9_000 }],
       moved: { results: 4, compactions: 0 },
     });
-    const { store } = renderWithStore(
-      <>
-        <Composer />
-        <ContextView />
-      </>,
-    );
+    const { store } = renderWithStore(<Composer />);
     act(() => store.setState({ sessionId: "s1", context: meter }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Context: 52k of 200k tokens (26%)" }));
+    const ring = screen.getByRole("button", { name: "Context: 52k of 200k tokens (26%)" });
+    fireEvent.click(ring);
     await waitFor(() => expect(screen.getByText("System prompt")).toBeInTheDocument());
     expect(screen.getByText("Free space")).toBeInTheDocument();
     expect(screen.getByText("Moved out: 4 tool results to files.")).toBeInTheDocument();
@@ -145,8 +140,13 @@ describe("context ring and view", () => {
     fireEvent.click(screen.getByRole("button", { name: "Tool results" }));
     expect(screen.getByText("Read · src/model.jl")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    // The ring, or a click anywhere else, closes it.
+    fireEvent.click(ring);
     expect(store.getState().contextView.open).toBe(false);
+    fireEvent.click(ring);
+    expect(screen.getByRole("dialog", { name: "Context" })).toBeInTheDocument();
+    fireEvent.click(document.body);
+    expect(screen.queryByRole("dialog", { name: "Context" })).toBeNull();
     report.mockRestore();
   });
 
