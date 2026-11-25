@@ -87,14 +87,22 @@ def list_live_models() -> dict[str, Any]:
 
 @router.get("/models/window")
 def model_window(model: str | None = None) -> dict[str, Any]:
-    """The context window for a model (for the % indicator), or null if unknown.
+    """A model's context window (for the % indicator), where it came from
+    (``provider``, ``ollama`` or ``assumed``), and its compaction point.
 
-    Separate from ``/models`` because it instantiates the model to read its
-    profile, so the UI asks for just the active model, lazily.
+    Separate from ``/models`` because a model missing from the provider data is
+    looked up live, so the UI asks for just the active model, lazily.
     """
-    from makker.models import DEFAULT_MODEL, context_window
+    from makker.context_budget import context_budget
+    from makker.models import DEFAULT_MODEL
 
-    return {"model": model or DEFAULT_MODEL, "window": context_window(model or DEFAULT_MODEL)}
+    budget = context_budget(model or DEFAULT_MODEL)
+    return {
+        "model": model or DEFAULT_MODEL,
+        "window": budget.window,
+        "window_source": budget.source,
+        "compact_at": budget.compact_at,
+    }
 
 
 @router.get("/credentials")

@@ -10,18 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from makker.agent.builder import build_agent
-from makker.agent.summarization import auto_compact_trigger_tokens, compact_thread
+from makker.agent.summarization import compact_thread
 from makker.agent.turns import TurnRunner
 from makker.lab.fakes import FakeJulia, make_fake_adapter, make_scripted_model, scripted_final
 from makker.session import Session
-
-
-def test_auto_compact_trigger_tokens() -> None:
-    # Mirrors deepagents' stock summarizer default (0.85 of the window).
-    assert auto_compact_trigger_tokens(65_536) == int(65_536 * 0.85)
-    assert auto_compact_trigger_tokens(200_000) == 170_000
-    # No discoverable window → deepagents' fixed fallback.
-    assert auto_compact_trigger_tokens(None) == 170_000
 
 
 async def test_compact_thread_round_trip(tmp_path: Path) -> None:

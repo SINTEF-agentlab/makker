@@ -10,6 +10,7 @@ from textual.widgets import Footer
 
 from _tui import submit_prompt, wait_until_ready
 from makker.agent.turns import TurnTextDelta, TurnToolEvent
+from makker.context_budget import ContextBudget
 from makker.interfaces.tui import TUIApp
 from makker.interfaces.tui.approval_menu import ApprovalMenu
 from makker.interfaces.tui.prompt import PromptTextArea
@@ -1439,7 +1440,7 @@ async def test_compact_updates_context_figure_immediately(session: Session, monk
 
     async with app.run_test() as pilot:
         await wait_until_ready(app)
-        app._context_window_tokens = 200_000
+        app._context_budget = ContextBudget(window=200_000, source="provider")
         app._last_usage = {"input_tokens": 30_000, "output_tokens": 1_000}
         app._first_usage = {"input_tokens": 8_500}
         app._model_calls = 17

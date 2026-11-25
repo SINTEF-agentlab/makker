@@ -133,11 +133,10 @@ def get_context(session_id: str, manager: ManagerDep) -> dict[str, Any]:
     host = manager.get(session_id)
     if host is None:
         raise HTTPException(status_code=404, detail="no such session")
-    from makker.agent.context_editing import clear_tool_uses_trigger_tokens
     from makker.agent.memory import list_memory_notes
-    from makker.agent.summarization import auto_compact_trigger_tokens
+    from makker.context_budget import context_budget
     from makker.context_panel import context_component_estimates, render_context_panel
-    from makker.models import DEFAULT_MODEL, context_window
+    from makker.models import DEFAULT_MODEL
     from makker.trace import TraceLog
 
     # Read usage from a fresh connection on the trace file: this endpoint runs in
@@ -146,7 +145,7 @@ def get_context(session_id: str, manager: ManagerDep) -> dict[str, Any]:
     with TraceLog(host.session.state_dir / "trace.sqlite") as log:
         usages = [e.payload for e in log.events_of(schema.MODEL_USAGE)]
     model = host.model or DEFAULT_MODEL
-    window = context_window(model)
+    budget = host.session.context_budget or context_budget(model)
 
     memory_dir = host.memory_dir
     system_tokens, memory_tokens = context_component_estimates(host.session, memory_dir)
@@ -154,14 +153,12 @@ def get_context(session_id: str, manager: ManagerDep) -> dict[str, Any]:
     body = render_context_panel(
         model_label=model,
         usage=usages[-1] if usages else None,
-        window=window,
+        budget=budget,
         first_usage=usages[0] if usages else None,
         model_calls=len(usages),
         system_prompt_tokens=system_tokens,
         memory_index_tokens=memory_tokens,
         memory_notes=len(list_memory_notes(memory_dir)),
-        compact_trigger_tokens=auto_compact_trigger_tokens(window),
-        clear_trigger_tokens=clear_tool_uses_trigger_tokens(window),
     )
     return {"markdown": body}
 

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from makker import legacy
+from makker.context_budget import ContextBudget
 from makker.julia.session import JuliaSession
 from makker.paths import session_output_dir, workspace_state_dir
 from makker.simulators.base import SimulatorAdapter
@@ -272,6 +273,9 @@ class Session:
     # A capability's tools read it to reach the application (``None`` when the
     # session was not launched from one, which means those tools cannot work).
     host_api: str | None = None
+    # The running agent's context budget (window, its source, compaction point),
+    # set each time an agent is built for this session.
+    context_budget: ContextBudget | None = None
     # Whether this session continues an earlier conversation. The thread state
     # is restored from the checkpointer; the Julia REPL is not.
     resumed: bool = False

@@ -81,8 +81,10 @@ appear only when the model actually reasons: trivial prompts legitimately
 produce none.
 
 The same profile data supplies the context window for `/context` and the
-auto-compaction trigger; Gemini models missing from the data ask the
-Gemini API for their limit instead.
+auto-compaction trigger, read without building the model; Gemini models
+missing from the data ask the Gemini API for their limit instead. A model no
+source knows is assumed to have 200K tokens (see
+[Context](context.md)).
 
 ## Local models (Ollama)
 
@@ -96,7 +98,8 @@ for you:
 - Context sizing: the agent's system prompt is large, so local models are
   loaded with a context window sized to what the model reports, capped by
   a memory budget (64K tokens by default, lowered with
-  `MAKKER_OLLAMA_NUM_CTX` on tight hardware).
+  `MAKKER_OLLAMA_NUM_CTX` on tight hardware). Hosted `:cloud` models run at
+  their full window.
 - Malformed tool calls: a weaker model occasionally serializes a tool
   call with unparseable arguments (e.g. two parallel calls merged into
   one). Such a reply would otherwise end the turn silently; instead the

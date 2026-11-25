@@ -21,9 +21,6 @@ from typing import Any
 # window — below the summarization trigger, so clearing is the first, cheaper
 # response and the summary call only fires when clearing cannot keep up.
 _CLEAR_TRIGGER_FRACTION = 0.6
-# Without a discoverable window, a fixed threshold below the summarization
-# fallback (100k) keeps the same ordering.
-_FALLBACK_TRIGGER_TOKENS = 60_000
 # Below this window, keep fewer recent tool results: on a small (local) window
 # the kept working set must not itself fill the window.
 _SMALL_WINDOW = 100_000
@@ -33,12 +30,12 @@ _SMALL_WINDOW = 100_000
 _NEVER_CLEAR: tuple[str, ...] = ("record_attempt",)
 
 
-def clear_tool_uses_trigger_tokens(window: int | None) -> int:
+def clear_tool_uses_trigger_tokens(window: int) -> int:
     """The context size at which old tool results start being cleared."""
-    return int(window * _CLEAR_TRIGGER_FRACTION) if window else _FALLBACK_TRIGGER_TOKENS
+    return int(window * _CLEAR_TRIGGER_FRACTION)
 
 
-def keep_recent_tool_results(window: int | None) -> int:
+def keep_recent_tool_results(window: int) -> int:
     """How many recent tool results to keep verbatim, sized to the window.
 
     Clearing keeps the agent's working set, but that set must not itself fill a
@@ -46,23 +43,19 @@ def keep_recent_tool_results(window: int | None) -> int:
     threshold, so still inline) can otherwise exceed a local model's window.
     Keep fewer on a small window; large single results are evicted separately.
     """
-    return 3 if (window and window < _SMALL_WINDOW) else 6
+    return 3 if window < _SMALL_WINDOW else 6
 
 
-def build_context_editing_middleware(model_id: str | None = None) -> Any:
+def build_context_editing_middleware(window: int) -> Any:
     """Middleware that clears older tool results when the context grows large.
 
-    The trigger is sized to the model's window so it fires before summarization;
-    the most recent results are kept so the active working set is untouched, with
-    fewer kept on a small window so that set can't fill it.
+    The trigger is sized to the session's window (see ``context_budget``) so it
+    fires before summarization; the most recent results are kept so the active
+    working set is untouched, with fewer kept on a small window so that set can't
+    fill it.
     """
     from langchain.agents.middleware import ClearToolUsesEdit, ContextEditingMiddleware
 
-    window = None
-    if model_id is not None:
-        from makker.models import context_window
-
-        window = context_window(model_id)
     return ContextEditingMiddleware(
         edits=[
             ClearToolUsesEdit(

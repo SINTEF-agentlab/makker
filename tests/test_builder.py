@@ -38,24 +38,16 @@ def _provider_capabilities(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(models, "_google_context_window", lambda name: None)
 
 
-def test_set_profile_window_feeds_loaded_window(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The loaded window goes into the model profile, where the stock summarizer
-    reads its trigger from."""
-    from makker import models
+def test_set_profile_window_feeds_the_window() -> None:
+    """The session's window goes into the model profile, where the stock
+    summarizer reads its trigger from."""
 
     class _Model:
         profile = None
 
-    monkeypatch.setattr(models, "context_window", lambda model_id: 65_536)
     model = _Model()
-    _set_profile_window(model, "ollama:local-test-model:tag")
+    _set_profile_window(model, 65_536)
     assert model.profile["max_input_tokens"] == 65_536
-
-    # No discoverable window → leave the model's native profile untouched.
-    monkeypatch.setattr(models, "context_window", lambda model_id: None)
-    untouched = _Model()
-    _set_profile_window(untouched, "ollama:mystery")
-    assert untouched.profile is None
 
 
 def test_resolve_model_prefers_explicit() -> None:
@@ -277,7 +269,6 @@ def test_resolve_model_for_agent_builds_openrouter(monkeypatch: pytest.MonkeyPat
     assert model.request_timeout == 300_000  # milliseconds in the OpenRouter SDK
     assert model.client.sdk_configuration.timeout_ms == 300_000
     assert model.openrouter_provider == {"ignore": ["azure"]}
-    assert model.profile["max_input_tokens"] > 0
     assert _harness_profile_for_model(model, None).general_purpose_subagent.enabled is False
 
     def probe(value: str) -> str:

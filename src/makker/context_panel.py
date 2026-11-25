@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from makker.context_budget import ContextBudget
+
 _BAR_CELLS = 24
 _WARN_FRACTION = 0.7
 _HIGH_FRACTION = 0.9
@@ -77,14 +79,12 @@ def render_context_panel(
     *,
     model_label: str | None,
     usage: dict[str, Any] | None,
-    window: int | None,
+    budget: ContextBudget | None,
     first_usage: dict[str, Any] | None = None,
     model_calls: int = 0,
     system_prompt_tokens: int | None = None,
     memory_index_tokens: int | None = None,
     memory_notes: int = 0,
-    compact_trigger_tokens: int | None = None,
-    clear_trigger_tokens: int | None = None,
 ) -> str:
     """The ``/context`` card body (markdown).
 
@@ -101,8 +101,11 @@ def render_context_panel(
             "index, and the conversation; every model call sends all of it."
         )
 
+    from makker.agent.context_editing import clear_tool_uses_trigger_tokens
+
     held = context_tokens(usage)
     estimated = bool(usage.get("estimated"))
+    window = budget.window if budget else None
     fraction = context_fraction(usage, window)
     if fraction is None:
         headline = f"**{format_tokens(held)} tokens** in context (window size unknown)"
@@ -113,6 +116,13 @@ def render_context_panel(
         )
 
     lines = [headline, ""]
+    if budget and budget.source == "assumed":
+        lines += [
+            f"_No source reports this model's window, so {format_tokens(budget.window)} "
+            "is assumed. If it is smaller, the provider rejects a long request and the "
+            "conversation is compacted then._",
+            "",
+        ]
     if estimated:
         # After /compact no model call has measured the new size yet; the
         # figures are an estimate until the next reply.
@@ -125,8 +135,8 @@ def render_context_panel(
         system_prompt_tokens=system_prompt_tokens,
         memory_index_tokens=memory_index_tokens,
         memory_notes=memory_notes,
-        compact_trigger_tokens=compact_trigger_tokens,
-        clear_trigger_tokens=clear_trigger_tokens,
+        compact_trigger_tokens=budget.compact_at if budget else None,
+        clear_trigger_tokens=clear_tool_uses_trigger_tokens(window) if window else None,
     )
 
     input_tokens = int(usage.get("input_tokens") or 0)

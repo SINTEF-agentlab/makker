@@ -21,6 +21,9 @@ MESSAGE_USER = "message_user"
 MESSAGE_ASSISTANT = "message_assistant"
 MESSAGE_REASONING = "message_reasoning"
 MODEL_USAGE = "model_usage"
+# The model an agent was built with for this session, its settings and window:
+# recorded at the start, on a resume and on every switch.
+MODEL = "model"
 
 TOOL_CALL = "tool_call"
 TOOL_RESULT = "tool_result"
@@ -53,6 +56,7 @@ ALL_KINDS: frozenset[str] = frozenset(
         MESSAGE_ASSISTANT,
         MESSAGE_REASONING,
         MODEL_USAGE,
+        MODEL,
         TOOL_CALL,
         TOOL_RESULT,
         HITL_REQUEST,
@@ -68,6 +72,30 @@ ALL_KINDS: frozenset[str] = frozenset(
         EVAL_RESULT,
     }
 )
+
+
+def model_payload(
+    *,
+    model: str,
+    window: int,
+    window_source: str,
+    compact_at: int,
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    """Payload for a ``MODEL`` event.
+
+    ``window`` is the input window in tokens and ``window_source`` where it came
+    from (``provider``, ``ollama`` or ``assumed``); ``compact_at`` is the context
+    size at which automatic compaction runs; ``settings`` are the reasoning and
+    output settings the model was built with.
+    """
+    return {
+        "model": model,
+        "window": window,
+        "window_source": window_source,
+        "compact_at": compact_at,
+        "settings": settings,
+    }
 
 
 def compaction_payload(

@@ -1516,6 +1516,20 @@ def test_context_endpoint_renders_panel(tmp_path: Path) -> None:
         assert client.get("/sessions/nope/context").status_code == 404
 
 
+def test_model_window_endpoint_reports_the_budget(tmp_path: Path, monkeypatch) -> None:
+    from makker import models
+
+    monkeypatch.setattr(models, "model_profile", lambda model_id: {})
+    with _client(echo_agent, tmp_path) as client:
+        body = client.get("/models/window", params={"model": "openai:gpt-from-the-future"}).json()
+    assert body == {
+        "model": "openai:gpt-from-the-future",
+        "window": 200_000,
+        "window_source": "assumed",
+        "compact_at": 170_000,
+    }
+
+
 def test_history_endpoint_shape(tmp_path: Path) -> None:
     with _client(echo_agent, tmp_path) as client:
         body = client.get("/sessions/history").json()
