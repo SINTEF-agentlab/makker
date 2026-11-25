@@ -1,6 +1,7 @@
 // The composer: the message box plus its keyboard-driven slash-command menu, prompt
-// history (↑/↓), and file attach, with the model and context controls below it. The
-// send button doubles as a stop button while a turn runs.
+// history (↑/↓), and file attach, with the model and context controls below it. Enter
+// sends; a return key shows once there is something to send, and a stop button while
+// a turn runs.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -8,7 +9,7 @@ import { SLASH_COMMANDS, type SlashCommand } from "../controller";
 import { useController, useSel } from "../context";
 import { ContextMeter } from "./Context";
 import { ModelControl } from "./Models";
-import { AttachIcon, SendIcon } from "../icons";
+import { AttachIcon, ReturnIcon, StopIcon } from "../icons";
 import { replyDecision } from "../store";
 
 export function Composer() {
@@ -131,11 +132,6 @@ export function Composer() {
     for (const f of Array.from(files)) void controller.upload(f); // sink appends the path
   };
 
-  const sendOrStop = () => {
-    if (busy && !value.trim().startsWith("/")) controller.stop();
-    else submit();
-  };
-
   return (
     <footer className="composer-wrap">
       {slashOpen ? (
@@ -183,14 +179,15 @@ export function Composer() {
           }}
           onKeyDown={onKeyDown}
         />
-        <button
-          className={`send${busy ? " stop" : ""}`}
-          title={busy ? "Stop" : "Send"}
-          aria-label={busy ? "Stop" : "Send"}
-          onClick={sendOrStop}
-        >
-          <SendIcon />
-        </button>
+        {busy ? (
+          <button className="send" aria-label="Stop" onClick={() => controller.stop()}>
+            <StopIcon />
+          </button>
+        ) : value.trim() ? (
+          <button className="send" aria-label="Send" onClick={submit}>
+            <ReturnIcon />
+          </button>
+        ) : null}
       </div>
       <div className="composer-foot">
         <ModelControl />

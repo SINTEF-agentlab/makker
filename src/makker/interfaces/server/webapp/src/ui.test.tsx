@@ -102,6 +102,23 @@ describe("composer", () => {
 
     expect(composer.value).toBe("and then plot the pressure");
   });
+
+  it("shows the send key only with text, and a stop button while a turn runs", () => {
+    const { store, controller } = renderWithStore(<Composer />);
+    const send = vi.spyOn(controller, "send").mockReturnValue(true);
+    const stop = vi.spyOn(controller, "stop").mockImplementation(() => {});
+    const composer = screen.getByRole("textbox", { name: "Message" });
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+
+    fireEvent.change(composer, { target: { value: "plot the pressure" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(send).toHaveBeenCalledWith("plot the pressure");
+
+    act(() => store.setState({ busy: true }));
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(stop).toHaveBeenCalled();
+  });
 });
 
 describe("context ring and view", () => {
