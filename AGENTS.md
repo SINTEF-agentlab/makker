@@ -181,6 +181,11 @@ silently at runtime. The contacts:
 - `agent/openrouter.py`: overrides `ChatOpenRouter._create_message_dicts` to
   serialize canonical tool images until upstream supports them. Tests exercise
   the real SDK with mocked HTTP for ordinary and streaming requests.
+- `agent/ollama.py`: numbers Ollama's streamed tool calls, which arrive whole
+  and without an index, so langchain-core's stream bridge
+  (`language_models/_compat_bridge.py`) keeps parallel calls apart instead of
+  joining them into one unparseable call. A canary in
+  `tests/test_ollama_tool_calls.py` fails once the bridge does this itself.
 - `agent/backend.py`: subclasses `CompositeBackend` (overriding `glob` for
   Windows drive patterns) and `LocalShellBackend` (overriding `write`/`edit`/
   `delete` to refuse depot writes, and the private `_execute` to refuse shell
