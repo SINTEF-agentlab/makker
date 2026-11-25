@@ -9,16 +9,24 @@ raising.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
+import platform
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 DEFAULT_HOST = "http://localhost:11434"
 
-# Most context (KV cache) to allocate for a local model unless overridden; a
-# memory cap, not a capability claim. The daemon's reported maximum can be far
-# larger than fits in memory.
-DEFAULT_NUM_CTX = 65536
+# The smallest context a local model is loaded with, even when part of the model
+# then runs on the CPU: the agent's own prompt and tools take 9K to 15K tokens,
+# so a slower model is better than one that cannot hold a task.
+MIN_NUM_CTX = 32_768
+
+# A load can take minutes for a large model read from a cold disk.
+_LOAD_TIMEOUT_S = 300.0
+# Loads to spend narrowing the search after the first two (each takes seconds);
+# six narrow a 256K-token range to within an eighth.
+_MAX_PROBES = 6
 
 
 def host() -> str:
@@ -127,27 +135,150 @@ def context_window(name: str) -> int | None:
     return None
 
 
-def ctx_budget() -> int:
-    """The context budget cap, overridable with ``$MAKKER_OLLAMA_NUM_CTX``."""
-    try:
-        return int(os.environ["MAKKER_OLLAMA_NUM_CTX"])
-    except (KeyError, ValueError):
-        return DEFAULT_NUM_CTX
+def num_ctx(name: str) -> int | None:
+    """Context window (tokens) to load the local model ``name`` with.
 
+    The ``num_ctx`` its Modelfile sets, when it sets one. Otherwise the largest
+    context, up to the model's maximum, that Ollama keeps entirely on this
+    machine's GPU: measured by loading the model, once per model version and
+    machine, and remembered in the state home. ``None`` when the daemon cannot
+    report the model.
 
-def num_ctx(name: str) -> int:
-    """Context window (tokens) to load ``name`` with: its reported max, capped
-    at the budget; the budget itself when the daemon can't report a maximum.
-
-    This is the *loaded* window — the single figure the rest of the app sizes
-    against. The model is built with it, the auto-compaction trigger is a
-    fraction of it, and ``/context`` measures against it. Keeping all three on
-    this one value is what stops compaction from being scheduled past a window
-    the model was never loaded with.
+    This is the *loaded* window, the single figure the rest of the app sizes
+    against: the model is built with it, and the context budget (compaction,
+    ``/context``) reads it, so compaction is never scheduled past a window the
+    model was not loaded with.
     """
-    reported = context_window(name)
-    budget = ctx_budget()
-    return min(reported, budget) if reported else budget
+    maximum = context_window(name)
+    if maximum is None:
+        return None
+    configured = _modelfile_num_ctx(name)
+    if configured:
+        return min(configured, maximum)
+    digest = _digest(name)
+    key = f"{platform.node()} {host()} {digest}"
+    remembered = _measured().get(key)
+    if isinstance(remembered, int):
+        return remembered
+    try:
+        measured = _largest_on_gpu(name, maximum)
+    except Exception:
+        # The daemon stopped answering mid-way: use the floor for now and
+        # measure again next time.
+        return min(maximum, MIN_NUM_CTX)
+    if digest:
+        _remember(key, measured)
+    return measured
+
+
+def _modelfile_num_ctx(name: str) -> int | None:
+    """The ``num_ctx`` the model's Modelfile sets (e.g. a ``-64k`` variant), or None."""
+    with contextlib.suppress(Exception):
+        from ollama import Client
+
+        parameters = getattr(Client(timeout=2.0).show(name), "parameters", None) or ""
+        for line in parameters.splitlines():
+            fields = line.split()
+            if len(fields) == 2 and fields[0] == "num_ctx":
+                return int(fields[1])
+    return None
+
+
+def _digest(name: str) -> str | None:
+    """The installed model's digest, which changes when the model does."""
+    with contextlib.suppress(Exception):
+        from ollama import Client
+
+        for model in Client(timeout=2.0).list().models:
+            if _matches(model.model or "", name):
+                return model.digest
+    return None
+
+
+@dataclass(frozen=True)
+class _Load:
+    """What Ollama allocated for one load of a model, in bytes."""
+
+    num_ctx: int
+    size: int
+    vram: int  # the part on the GPU
+
+    @property
+    def fits(self) -> bool:
+        return 0 < self.size <= self.vram
+
+
+def _load(name: str, num_ctx: int) -> _Load | None:
+    """Load ``name`` with a ``num_ctx`` context and read back what it took.
+
+    ``None`` when Ollama refuses the load (too large for this machine's memory);
+    a connection failure or timeout raises.
+    """
+    from ollama import Client, ResponseError
+
+    client = Client(timeout=_LOAD_TIMEOUT_S)
+    try:
+        # An empty prompt only loads the model.
+        client.generate(name, prompt="", options={"num_ctx": num_ctx})
+    except ResponseError:
+        return None
+    for model in client.ps().models:
+        if _matches(model.model or "", name):
+            return _Load(model.context_length or num_ctx, model.size or 0, model.size_vram or 0)
+    return None
+
+
+def _largest_on_gpu(name: str, maximum: int) -> int:
+    """The largest context, up to ``maximum``, that Ollama keeps entirely on the GPU.
+
+    Ollama places each load itself and reports where it went, so it decides,
+    not an estimate (memory per token differs between models and between small
+    and large contexts, and a load that spills reports sizes unlike one that
+    fits). One load at the maximum settles it when the GPU has room. Otherwise
+    the answer lies between a load that fits and one that spills, and halving
+    the gap narrows it to within an eighth. Below ``MIN_NUM_CTX`` it does not
+    look.
+    """
+    top = _load(name, maximum)
+    if top is not None and top.fits:
+        return top.num_ctx
+    low = _load(name, MIN_NUM_CTX) if maximum > MIN_NUM_CTX else None
+    if low is None or not low.fits:
+        # Too large for the GPU at any useful size: part of it runs on the CPU.
+        return min(maximum, MIN_NUM_CTX)
+    fits, spills = low.num_ctx, maximum
+    for _ in range(_MAX_PROBES):
+        if spills - fits <= fits // 8:
+            break
+        guess = (fits + spills) // 2 // 1024 * 1024
+        probe = _load(name, guess)
+        if probe is not None and probe.fits:
+            fits = probe.num_ctx
+        else:
+            spills = guess
+    return fits
+
+
+def _measured_path():
+    from makker.paths import state_home
+
+    return state_home() / "ollama-context.json"
+
+
+def _measured() -> dict:
+    """Measured contexts, keyed by machine, Ollama host and model digest."""
+    with contextlib.suppress(OSError, ValueError):
+        data = json.loads(_measured_path().read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    return {}
+
+
+def _remember(key: str, value: int) -> None:
+    path = _measured_path()
+    with contextlib.suppress(OSError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({**_measured(), key: value}, indent=1), encoding="utf-8")
 
 
 def _matches(installed: str, name: str) -> bool:

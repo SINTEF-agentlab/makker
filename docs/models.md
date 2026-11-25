@@ -88,18 +88,26 @@ source knows is assumed to have 200K tokens (see
 
 ## Local models (Ollama)
 
-Local models run through Ollama with no key. Two things the harness handles
-for you:
+Local models run through Ollama with no key. What the harness handles for
+you:
 
 - Capability gating: the selector checks that a model supports tool
   calling before offering it, and can pull a model that is not installed
   yet. An outdated Ollama can mis-parse a new model's template and lose
   tool support, so keep Ollama itself current.
-- Context sizing: the agent's system prompt is large, so local models are
-  loaded with a context window sized to what the model reports, capped by
-  a memory budget (64K tokens by default, lowered with
-  `MAKKER_OLLAMA_NUM_CTX` on tight hardware). Hosted `:cloud` models run at
-  their full window.
+- Context sizing: a local model is loaded with the largest context, up to
+  its maximum, that Ollama keeps entirely on the GPU. Memory per token
+  differs widely between models, so this is measured, not estimated: the
+  first time a model is used on a machine, Makker loads it at its maximum
+  and, only if that spills to the CPU, a few more times to narrow it down
+  (seconds per load). The answer is remembered per model version and
+  machine in `ollama-context.json` in the state home; delete it to measure
+  again. A model that spills even at 32K tokens is loaded at 32K, partly on
+  the CPU, since the agent's own prompt needs that much. A model whose
+  Modelfile sets `num_ctx` (such as a `-64k` variant) is loaded at that
+  size instead, so to choose a size yourself, create a variant with
+  `PARAMETER num_ctx <tokens>`. Hosted `:cloud` models run at their full
+  window.
 - Malformed tool calls: a weaker model occasionally serializes a tool
   call with unparseable arguments (e.g. two parallel calls merged into
   one). Such a reply would otherwise end the turn silently; instead the

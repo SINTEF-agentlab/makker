@@ -140,26 +140,118 @@ def test_context_window_none_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     assert ollama_client.context_window("x") is None
 
 
-def test_ctx_budget_default_and_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MAKKER_OLLAMA_NUM_CTX", raising=False)
-    assert ollama_client.ctx_budget() == 65536
-    monkeypatch.setenv("MAKKER_OLLAMA_NUM_CTX", "16384")
-    assert ollama_client.ctx_budget() == 16384
-    monkeypatch.setenv("MAKKER_OLLAMA_NUM_CTX", "not-an-int")
-    assert ollama_client.ctx_budget() == 65536  # bad value falls back to the default
+def _local_model(monkeypatch: pytest.MonkeyPatch, *, maximum=262_144, configured=None, digest="d1"):
+    """A pulled model the daemon reports, with ``_load`` left for the test to set."""
+    monkeypatch.setattr(ollama_client, "context_window", lambda name: maximum)
+    monkeypatch.setattr(ollama_client, "_modelfile_num_ctx", lambda name: configured)
+    monkeypatch.setattr(ollama_client, "_digest", lambda name: digest)
 
 
-def test_num_ctx_clamps_model_context_to_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MAKKER_OLLAMA_NUM_CTX", raising=False)  # budget = 65536
-    # A big-context model is capped at the budget...
-    monkeypatch.setattr(ollama_client, "context_window", lambda name: 262144)
-    assert ollama_client.num_ctx("qwen3.6:27b") == 65536
-    # ...a small model keeps its own (smaller) max, not an inflated value...
-    monkeypatch.setattr(ollama_client, "context_window", lambda name: 8192)
-    assert ollama_client.num_ctx("tiny") == 8192
-    # ...and when the daemon can't report, fall back to the budget.
-    monkeypatch.setattr(ollama_client, "context_window", lambda name: None)
-    assert ollama_client.num_ctx("mystery") == 65536
+def _gpu_holding(largest: int, loads: list[int]):
+    """A fake ``_load`` on a GPU that holds the model up to ``largest`` tokens of context."""
+
+    def load(name: str, num_ctx: int) -> ollama_client._Load:
+        loads.append(num_ctx)
+        size = 16 * 2**30 + num_ctx * 9_000
+        return ollama_client._Load(num_ctx, size, size if num_ctx <= largest else size // 2)
+
+    return load
+
+
+def test_num_ctx_uses_the_models_own_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    _local_model(monkeypatch, configured=65_536)
+    monkeypatch.setattr(ollama_client, "_load", lambda *a: pytest.fail("loaded a model"))
+    assert ollama_client.num_ctx("qwen3.8:27b-64k") == 65_536
+    # A setting beyond what the model supports is loaded at the model's maximum.
+    _local_model(monkeypatch, maximum=40_960, configured=65_536)
+    assert ollama_client.num_ctx("qwen3:0.6b") == 40_960
+
+
+def test_num_ctx_is_the_maximum_when_it_fits_and_is_remembered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _local_model(monkeypatch)
+    loads: list[int] = []
+    monkeypatch.setattr(ollama_client, "_load", _gpu_holding(10**9, loads))
+    assert ollama_client.num_ctx("qwen3.8:27b") == 262_144
+    assert ollama_client.num_ctx("qwen3.8:27b") == 262_144
+    assert loads == [262_144]  # one load, then the remembered answer
+    # A new version of the model (another digest) is measured again.
+    _local_model(monkeypatch, digest="d2")
+    ollama_client.num_ctx("qwen3.8:27b")
+    assert loads == [262_144, 262_144]
+
+
+def test_num_ctx_finds_the_largest_context_that_stays_on_the_gpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _local_model(monkeypatch)
+    loads: list[int] = []
+    monkeypatch.setattr(ollama_client, "_load", _gpu_holding(111_000, loads))
+    chosen = ollama_client.num_ctx("qwen3.8:27b")
+    # Verified on the GPU, and within an eighth of the largest that is.
+    assert chosen <= 111_000 < chosen * 9 / 8
+    assert loads[:2] == [262_144, ollama_client.MIN_NUM_CTX]
+    assert len(loads) <= 2 + ollama_client._MAX_PROBES
+
+
+def test_num_ctx_floor_when_the_model_spills_even_when_small(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _local_model(monkeypatch)
+    loads: list[int] = []
+    monkeypatch.setattr(ollama_client, "_load", _gpu_holding(8_192, loads))
+    assert ollama_client.num_ctx("big-model") == ollama_client.MIN_NUM_CTX
+    assert loads == [262_144, ollama_client.MIN_NUM_CTX]
+
+
+def test_num_ctx_treats_a_refused_load_as_too_large(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ollama refuses a load larger than the machine's memory; the search goes lower."""
+    _local_model(monkeypatch, maximum=1_048_576)
+    loads: list[int] = []
+    fits = _gpu_holding(200_000, loads)
+    monkeypatch.setattr(
+        ollama_client, "_load", lambda name, n: None if n > 500_000 else fits(name, n)
+    )
+    assert ollama_client.num_ctx("long-model") <= 200_000
+
+
+def test_num_ctx_without_a_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
+    _local_model(monkeypatch, maximum=None)
+    assert ollama_client.num_ctx("x") is None
+    # A daemon that stops answering mid-way gives the floor, not remembered.
+    _local_model(monkeypatch)
+
+    def gone(name: str, num_ctx: int):
+        raise ConnectionError("down")
+
+    monkeypatch.setattr(ollama_client, "_load", gone)
+    assert ollama_client.num_ctx("x") == ollama_client.MIN_NUM_CTX
+    assert ollama_client._measured() == {}
+
+
+def test_load_and_modelfile_read_the_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    class _SyncClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        def show(self, name):
+            return SimpleNamespace(parameters='stop "<|im_end|>"\nnum_ctx                65536')
+
+        def generate(self, name, prompt, options):
+            self.num_ctx = options["num_ctx"]
+
+        def ps(self):
+            loaded = SimpleNamespace(
+                model="qwen3:0.6b", context_length=self.num_ctx, size=5, size_vram=5
+            )
+            return SimpleNamespace(models=[loaded])
+
+    monkeypatch.setattr("ollama.Client", _SyncClient)
+    assert ollama_client._modelfile_num_ctx("qwen3.8:27b-64k") == 65_536
+    assert ollama_client._load("qwen3:0.6b", 40_960) == ollama_client._Load(40_960, 5, 5)
 
 
 async def test_installed_models_empty_when_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:

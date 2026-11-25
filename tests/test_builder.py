@@ -86,8 +86,8 @@ def test_resolve_model_for_agent_handles_ollama_and_cloud(monkeypatch: pytest.Mo
     from makker.agent.builder import _resolve_model_for_agent
 
     register_provider_profiles()
-    monkeypatch.delenv("MAKKER_OLLAMA_NUM_CTX", raising=False)
     monkeypatch.setattr(ollama_client, "context_window", lambda name: 262144)
+    monkeypatch.setattr(ollama_client, "num_ctx", lambda name: 65536)
     monkeypatch.setattr(ollama_client, "thinks", lambda name: True)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
@@ -100,11 +100,11 @@ def test_resolve_model_for_agent_handles_ollama_and_cloud(monkeypatch: pytest.Mo
         assert isinstance(built, BaseChatModel), spec
         assert _harness_profile_for_model(built, None).general_purpose_subagent.enabled is False
     # A version-tagged Ollama id (>1 colon) becomes a built instance whose context
-    # is sized from the model and capped at the budget, and; crucially; our
+    # is the size measured for this machine, and; crucially; our
     # harness profile now resolves for it (it does NOT for such a spec as a string).
     model = _resolve_model_for_agent("ollama:local-test-model:tag")
     assert isinstance(model, BaseChatModel)
-    assert getattr(model, "num_ctx", None) == 65536  # min(262144, budget)
+    assert getattr(model, "num_ctx", None) == 65536
     # Thinking-capable local models get think mode requested explicitly, so
     # the thinking is separated instead of silently swallowing the turn.
     assert getattr(model, "reasoning", None) is True

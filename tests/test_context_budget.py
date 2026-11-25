@@ -33,12 +33,12 @@ def test_ollama_cloud_runs_at_its_full_window(monkeypatch) -> None:
     """A hosted model has no local memory limit: no 64k cap, no context size sent."""
     from makker.agent.builder import _ollama_settings
 
-    monkeypatch.delenv("MAKKER_OLLAMA_NUM_CTX", raising=False)
     monkeypatch.setattr(ollama_client, "context_window", lambda name: 262_144)
+    monkeypatch.setattr(ollama_client, "num_ctx", lambda name: 65_536)
     monkeypatch.setattr(ollama_client, "thinks", lambda name: False)
     assert context_budget("ollama:kimi-k2.6:cloud") == ContextBudget(262_144, "ollama")
     assert "num_ctx" not in _ollama_settings("ollama:kimi-k2.6:cloud")
-    # A local model is still loaded at a size that fits memory (phase 3 sizes it properly).
+    # A local model is loaded at the size measured for this machine, and the budget agrees.
     assert context_budget("ollama:qwen3.8:27b").window == 65_536
     assert _ollama_settings("ollama:qwen3.8:27b")["num_ctx"] == 65_536
 

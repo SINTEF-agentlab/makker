@@ -163,9 +163,9 @@ def _ollama_window(model_id: str) -> int | None:
     if is_ollama_cloud(model_id):
         # Hosted, so no local memory limit applies: Ollama runs it at its maximum.
         return ollama_client.context_window(name)
-    # The *loaded* window (capped at the memory budget), not the daemon's
-    # theoretical maximum: the model is built with this, so the context figure
-    # and the auto-compaction trigger must agree with it.
+    # The *loaded* window (what fits this machine's GPU, or the model's own
+    # setting), not the daemon's theoretical maximum: the model is built with
+    # this, so the context figure and the auto-compaction trigger must agree with it.
     return ollama_client.num_ctx(name)
 
 
