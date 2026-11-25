@@ -994,8 +994,8 @@ def create_app(
         payload = next(
             (
                 event.payload
-                for event in reversed(host.session.trace.iter_events())
-                if event.kind == schema.ARTIFACT and _plot_id_of(event.payload) == base
+                for event in reversed(host.session.trace.events_of(schema.ARTIFACT))
+                if _plot_id_of(event.payload) == base
             ),
             None,
         )
@@ -1242,7 +1242,7 @@ def create_app(
         # a threadpool, and the session's own SQLite connection is bound to the thread
         # it was created on (the event loop), so reusing it here raises.
         with TraceLog(host.session.state_dir / "trace.sqlite") as log:
-            usages = [e.payload for e in log.iter_events() if e.kind == schema.MODEL_USAGE]
+            usages = [e.payload for e in log.events_of(schema.MODEL_USAGE)]
         model = host.model or DEFAULT_MODEL
         window = context_window(model)
 
@@ -1827,6 +1827,8 @@ class _SessionStream:
                     await self._send(protocol.error_to_wire(problem))
                     return
                 self._host.reconfigure(model=arg)
+                # The page shows the switch only once it has taken effect.
+                await self._send(protocol.model_to_wire(self._host.model))
             elif command == "set_approval":
                 self._host.set_approval_mode(arg)
                 # A pending approval the new policy already allows resumes now
@@ -1965,12 +1967,8 @@ class _SessionStream:
                 )
 
         payload: dict[str, Any] | None = None
-        for event in reversed(self._host.session.trace.iter_events()):
-            if (
-                event.kind == schema.ARTIFACT
-                and event.payload.get("path") == record
-                and event.payload.get("source_code")
-            ):
+        for event in reversed(self._host.session.trace.events_of(schema.ARTIFACT)):
+            if event.payload.get("path") == record and event.payload.get("source_code"):
                 payload = event.payload
                 break
         if payload is None:
@@ -2043,8 +2041,8 @@ class _SessionStream:
         payload = next(
             (
                 event.payload
-                for event in reversed(self._host.session.trace.iter_events())
-                if event.kind == schema.ARTIFACT and event.payload.get("path") == record
+                for event in reversed(self._host.session.trace.events_of(schema.ARTIFACT))
+                if event.payload.get("path") == record
             ),
             None,
         )
@@ -2140,7 +2138,9 @@ class _SessionStream:
         )
         if busy and self._turn_prompt:
             messages.append(protocol.replay_message("user", self._turn_prompt))
-        return protocol.snapshot_to_wire(messages, self._turn_log if busy else [], busy=busy)
+        return protocol.snapshot_to_wire(
+            messages, self._turn_log if busy else [], busy=busy, model=self._host.model
+        )
 
     async def _send(self, message: dict[str, Any]) -> None:
         """Send to the attached socket, if any, keeping the running turn's content."""

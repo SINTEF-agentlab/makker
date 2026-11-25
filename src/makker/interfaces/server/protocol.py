@@ -36,6 +36,7 @@ __all__ = [
     "credential_required_to_wire",
     "error_to_wire",
     "interrupt_to_wire",
+    "model_to_wire",
     "notice_to_wire",
     "popout_ready_to_wire",
     "replay_message",
@@ -51,7 +52,7 @@ __all__ = [
 
 # Bumped when a message kind or field changes shape incompatibly. Front ends
 # read it from ``GET /models`` and can refuse or adapt instead of mis-parsing.
-# 2: every connection opens with a ``snapshot``.
+# 2: every connection opens with a ``snapshot``; a model switch is confirmed (``model``).
 PROTOCOL_VERSION = 2
 
 
@@ -310,7 +311,11 @@ def replay_tool_event(
 
 
 def snapshot_to_wire(
-    messages: list[dict[str, Any]], turn: list[dict[str, Any]], *, busy: bool
+    messages: list[dict[str, Any]],
+    turn: list[dict[str, Any]],
+    *,
+    busy: bool,
+    model: str | None,
 ) -> dict[str, Any]:
     """The session as a newly connected front end finds it; the first message.
 
@@ -318,9 +323,16 @@ def snapshot_to_wire(
     /sessions/{id}/messages`` does. ``busy`` says a turn is running: ``turn``
     then holds the live messages it has sent so far, for the front end to apply
     as if it had been connected all along, before the turn's next message.
+    ``model`` is the one the session runs (``None``: the server's default).
     """
 
-    return {"type": "snapshot", "messages": messages, "turn": turn, "busy": busy}
+    return {"type": "snapshot", "messages": messages, "turn": turn, "busy": busy, "model": model}
+
+
+def model_to_wire(model: str | None) -> dict[str, Any]:
+    """A model switch took effect: the session now runs ``model``."""
+
+    return {"type": "model", "model": model}
 
 
 def notice_to_wire(text: str) -> dict[str, Any]:

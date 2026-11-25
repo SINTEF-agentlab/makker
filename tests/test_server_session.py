@@ -1440,15 +1440,26 @@ def test_command_reconfigures_session(tmp_path: Path) -> None:
         sid = client.post("/sessions", json={"sim": "jutuldarcy"}).json()["session_id"]
         host = manager.get(sid)
         calls: list[dict] = []
-        host.reconfigure = lambda **kw: calls.append(kw)  # type: ignore[method-assign]
+
+        def switch(**kw: Any) -> None:
+            calls.append(kw)
+            host._model = kw["model"]
+
+        host.reconfigure = switch  # type: ignore[method-assign]
         with open_stream(client, sid) as ws:
             ws.send_json({"type": "command", "command": "set_model", "arg": "anthropic:c"})
             ws.send_json({"type": "command", "command": "set_approval", "arg": "auto"})
             ws.send_json({"type": "command", "command": "bogus"})
+            switched = ws.receive_json()  # the page shows a switch only once it took
             err = ws.receive_json()
+        # A later connection is told the model the session runs.
+        with client.websocket_connect(f"/sessions/{sid}/stream") as ws:
+            snapshot = ws.receive_json()
     assert calls == [{"model": "anthropic:c"}]
+    assert switched == {"type": "model", "model": "anthropic:c"}
     assert host.approval_mode == "auto"
     assert err["type"] == "error" and "bogus" in err["message"]
+    assert snapshot["model"] == "anthropic:c"
 
 
 def test_command_compact_and_add_dir(tmp_path: Path) -> None:
@@ -1525,7 +1536,7 @@ def test_every_connection_opens_with_the_session_as_it_stands(tmp_path: Path) ->
         with client.websocket_connect(stream) as ws:
             again = ws.receive_json()
 
-    assert first == {"type": "snapshot", "messages": [], "turn": [], "busy": False}
+    assert first == {"type": "snapshot", "messages": [], "turn": [], "busy": False, "model": None}
     assert again["type"] == "snapshot" and again["busy"] is False
     assert {"type": "user", "text": "hi"} in again["messages"]
 

@@ -264,10 +264,10 @@ export const ToolCard = memo(function ToolCard({ item }: { item: ToolItem }) {
                 <span className="elapsed">{formatElapsed(elapsed)}</span>
               )}
             </>
-          ) : item.status === "error" ? (
-            "error"
-          ) : (
+          ) : item.status === "done" ? (
             "done"
+          ) : (
+            item.status
           )}
         </span>
       </summary>

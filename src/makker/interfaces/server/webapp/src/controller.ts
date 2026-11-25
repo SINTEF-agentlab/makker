@@ -406,8 +406,19 @@ export class Controller {
 
   private effects(msg: ServerMessage): void {
     if (msg.type === "snapshot") {
+      // The session's own model, which a reattach keeps whatever this page last chose.
+      if (msg.model && msg.model !== this.s.model) {
+        this.s.setModel(msg.model);
+        this.store.setState({ meta: this.meta() });
+        void this.refreshContextWindow();
+      }
       if (this.arrivalNote) this.s.addSysNote(this.arrivalNote);
       this.arrivalNote = null;
+    } else if (msg.type === "model" && msg.model) {
+      this.s.setModel(msg.model);
+      this.store.setState({ meta: this.meta() });
+      this.s.addSysNote(`Switched the model to ${msg.model}.`);
+      void this.refreshContextWindow();
     } else if (msg.type === "turn_end") {
       this.refreshHistory();
       if (!msg.cancelled) this.notifyDone("The agent finished your turn.");
@@ -652,13 +663,9 @@ export class Controller {
       this.s.openApiKeys(required);
       return;
     }
-    // Apply to the UI only if the command actually went out, so a send that fails
-    // (socket down) doesn't leave the UI showing a model the server never switched to.
-    if (!this.sendCommand("set_model", id)) return;
-    this.s.setModel(id);
-    this.store.setState({ meta: this.meta() });
-    this.s.addSysNote(`Switched the model to ${id}.`);
-    this.refreshContextWindow();
+    // Shown once the server confirms it (a `model` message); a refusal arrives as
+    // an error and leaves the model as it was.
+    this.sendCommand("set_model", id);
   }
 
   // --- API keys -------------------------------------------------------------
