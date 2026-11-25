@@ -179,6 +179,11 @@ def run(args: argparse.Namespace) -> int:
         model=model.split(","),
         epochs=epochs,
         max_samples=args.max_samples,
+        # One task (and so one model of a matrix) at a time. Sessions run one by
+        # one anyway (the solver's lock), and a sample queued behind another
+        # task's spends its own time limit waiting: in a three-model run, two
+        # honesty samples timed out before their agent had started.
+        max_tasks=1,
         limit=args.limit,
         log_dir=str(log_dir),
     )
