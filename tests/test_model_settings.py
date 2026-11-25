@@ -77,8 +77,9 @@ def test_a_local_model_offers_context_sizes_with_their_memory(
     # Past what stays on the GPU, part of the model runs on the CPU.
     assert [c["on_gpu"] for c in context["choices"]] == [True, True, True, False]
     assert context["auto"] == 131_072 and context["measured"]
-    # A hosted model has no context to choose.
-    assert options("ollama:glm-5.1:cloud")["context"] is None
+    # A hosted model's sizes carry no memory: they only cap the window.
+    hosted = options("ollama:glm-5.1:cloud")["context"]
+    assert hosted["local"] is False and hosted["auto"] == 262_144
 
 
 def test_a_chosen_context_is_what_the_local_model_loads_with(
@@ -145,3 +146,25 @@ def test_a_local_model_thinks_at_the_chosen_level(monkeypatch: pytest.MonkeyPatc
     assert _ollama_settings("ollama:qwen3.8:27b")["reasoning"] == "xhigh"
     save_settings("ollama:qwen3.8:27b", ModelSettings(effort="none"))
     assert _ollama_settings("ollama:qwen3.8:27b")["reasoning"] is False
+
+
+def test_a_chosen_context_caps_a_cloud_models_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    from makker import models
+    from makker.context_budget import context_budget
+
+    monkeypatch.setattr(models, "context_window", lambda model_id: 1_050_000)
+    assert context_budget("openai:gpt-test").window == 1_050_000
+    save_settings("openai:gpt-test", ModelSettings(context=65_536))
+    budget = context_budget("openai:gpt-test")
+    # Compaction runs against the chosen size, well before the model's own window.
+    assert budget.window == 65_536 and budget.compact_at < 65_536
+    context = options("openai:gpt-test")["context"]
+    assert context["local"] is False and context["max"] == 1_050_000
+    assert [c["tokens"] for c in context["choices"]][-2:] == [524_288, 1_050_000]
+
+
+def test_a_context_below_what_the_agent_needs_is_not_saved() -> None:
+    from makker.model_settings import MIN_CONTEXT, settings_from
+
+    assert settings_from({"context": MIN_CONTEXT - 1}).context is None
+    assert settings_from({"context": 100_000}).context == 100_000

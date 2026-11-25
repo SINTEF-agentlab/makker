@@ -116,6 +116,8 @@ export class Controller {
   // What to do once a missing API key is saved: re-run the action the key blocked
   // (start the session, or apply the model switch). Cleared when the modal closes.
   private keyRetry: (() => void) | null = null;
+  /** Memory measurements under way, by model (`measureModel`). */
+  private measuring = new Map<string, Promise<void>>();
   // Popup windows waiting for their `popout_ready` answer, per plot record (a
   // popup must be opened synchronously in the click to beat popup blockers, so
   // it exists before the server has replayed the figure).
@@ -649,12 +651,7 @@ export class Controller {
     this.s.setModelMenu("closed");
   }
 
-  /** The current model's settings page, in the model menu's place. */
-  openModelSettings(): void {
-    this.s.setModelMenu("settings");
-  }
-
-  /** Read what `model` can be set to, for the footer and the settings page. */
+  /** Read what `model` can be set to, for the footer and the model menu. */
   async loadModelSettings(model: string | null): Promise<void> {
     const data = model ? await api.modelSettings(model) : null;
     if (model === this.s.model) {
@@ -678,16 +675,23 @@ export class Controller {
     this.sendCommand("set_model", current.model);
   }
 
-  /** Measure the current local model's memory at each context size. */
-  async measureModel(): Promise<void> {
+  /** Measure the current local model's memory at each context size; one
+   *  measurement per model at a time, however often its sizes are shown. */
+  measureModel(): Promise<void> {
     const model = this.s.model;
-    if (!model) return;
-    try {
-      const data = await api.measureModel(model);
-      if (model === this.s.model) this.store.setState({ modelSettings: { model, data } });
-    } catch (e) {
-      this.s.addSysNote(failureMessage(e, "Could not measure the model's memory."), "warn");
+    if (!model) return Promise.resolve();
+    let running = this.measuring.get(model);
+    if (!running) {
+      running = api
+        .measureModel(model)
+        .then((data) => {
+          if (model === this.s.model) this.store.setState({ modelSettings: { model, data } });
+        })
+        .catch((e) => this.s.addSysNote(failureMessage(e, "Could not measure the model's memory."), "warn"))
+        .finally(() => this.measuring.delete(model));
+      this.measuring.set(model, running);
     }
+    return running;
   }
 
   /** The menu's short list; it depends on the current model, recents and pins. */

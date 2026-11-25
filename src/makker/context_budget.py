@@ -87,9 +87,16 @@ def context_budget(model_id: str | None, model: Any = None) -> ContextBudget:
     window: int | None = None
     source: WindowSource = "provider"
     if model_id:
+        from makker.model_settings import load_settings
+
         window = context_window(model_id)
         if provider_of(model_id) == "ollama":
             source = "ollama"
+        # A context size the user chose caps the window: a local model is loaded
+        # with it, and any model is compacted against it.
+        chosen = load_settings(model_id).context
+        if chosen:
+            window = min(window, chosen) if window else chosen
     elif model is not None:
         profile = getattr(model, "profile", None)
         value = profile.get("max_input_tokens") if isinstance(profile, dict) else None

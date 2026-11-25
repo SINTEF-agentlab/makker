@@ -48,7 +48,7 @@ pinned_models = ["<provider:model>"]
 [model_settings."<provider:model>"]
 effort = "high"
 output = 32768
-context = 131072  # local models only
+context = 131072
 ```
 
 Set the model from the TUI model selector with `Ctrl+A` (save for all

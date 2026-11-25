@@ -176,7 +176,7 @@ export interface SessionState {
   model: string | null;
   models: ModelInfo[];
   // the model menu under the message box, or the full list it opens
-  modelMenu: "closed" | "menu" | "more" | "settings";
+  modelMenu: "closed" | "menu" | "more";
   /** The current model's settings, for the footer and the settings page. */
   modelSettings: { model: string; data: ModelSettings } | null;
   pinned: string[];

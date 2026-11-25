@@ -684,16 +684,23 @@ details.block .body {
   bottom: calc(100% + 0.4rem);
   right: 0;
   z-index: 20;
+  display: flex;
+  flex-direction: column;
   width: max-content;
-  min-width: 12rem;
+  min-width: 13rem;
   max-width: min(18rem, 90vw);
-  max-height: min(60vh, 30rem);
-  overflow-y: auto;
+  max-height: min(70vh, 34rem);
   padding: 0.3rem 0;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: var(--shadow);
+}
+/* The models scroll; the settings and links below them always show. */
+.model-menu-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 .model-menu-title {
   padding: 0.45rem 0.8rem 0.15rem;
@@ -739,80 +746,48 @@ details.block .body {
   font-size: 0.78rem;
 }
 .model-menu-foot {
+  flex: none;
   margin-top: 0.3rem;
   border-top: 1px solid var(--border);
   padding-top: 0.3rem;
 }
-/* The effort after the model's name: its own button, opening the settings. */
-.effort-btn {
-  margin-left: -0.3rem;
-  opacity: 0.75;
+/* The effort after the model's name, quieter than the name. */
+.model-effort {
+  margin-left: 0.25rem;
+  opacity: 0.7;
 }
-/* The current model's settings, in the menu's place. */
-.model-settings {
-  width: min(17rem, 90vw);
-  padding-bottom: 0.45rem;
+/* A setting's row, and the list it opens beside the menu (to its left, since the
+   menu sits at the right of the message box). */
+.model-setting-row {
+  position: relative;
 }
-.model-back {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  width: 100%;
-  padding: 0.35rem 0.8rem 0.35rem 0.55rem;
-  border: 0;
-  background: none;
-  color: var(--text);
-  font: inherit;
-  font-size: 0.85rem;
-  font-weight: 600;
-  text-align: left;
-  cursor: pointer;
-}
-.model-back:hover,
-.model-back:focus-visible {
-  background: var(--surface-2);
-  outline: none;
-}
-.effort-levels {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  padding: 0.2rem 0.8rem 0.35rem;
-}
-.effort-levels button {
-  padding: 0.15rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: none;
+.model-setting-row .model-row svg {
+  flex: none;
   color: var(--muted);
-  font: inherit;
-  font-size: 0.78rem;
-  cursor: pointer;
 }
-.effort-levels button:hover:not(:disabled) {
-  color: var(--text);
+.model-sub {
+  bottom: -0.35rem;
+  right: calc(100% + 0.4rem);
+  min-width: 11rem;
 }
-.effort-levels button[aria-checked="true"] {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--text);
+.model-menu-tail {
+  margin-top: 0.3rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.3rem;
 }
-.model-row:disabled,
-.effort-levels button:disabled {
+.model-row:disabled {
   cursor: default;
   opacity: 0.6;
 }
-.model-setting {
-  display: block;
+.model-custom {
+  padding: 0.25rem 0.8rem 0.3rem;
 }
-.model-setting select {
-  display: block;
-  width: calc(100% - 1.6rem);
-  margin: 0.2rem 0.8rem 0;
-  padding: 0.25rem 0.4rem;
+.model-custom input {
+  width: 100%;
+  padding: 0.25rem 0.45rem;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--surface);
+  background: var(--surface-2);
   color: var(--text);
   font: inherit;
   font-size: 0.82rem;

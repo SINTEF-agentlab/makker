@@ -1,14 +1,14 @@
-// The model control under the message box: the current model and its effort, a short
-// menu of the models most likely wanted (built by the server, the same list the
-// terminal shows), the current model's settings, the full catalog behind "More
-// models…", and the API keys.
+// The model control under the message box: the current model and its effort, and a
+// menu with the models most likely wanted (built by the server, the same list the
+// terminal shows), the current model's settings as rows that open a list beside
+// the menu, the full catalog behind "More models…", and the API keys.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ModelInfo, ModelMenu, ModelSettings } from "../api";
 import { useController, useSel } from "../context";
 import { formatTokens } from "../format";
-import { CheckIcon, ChevronLeft, CloseIcon, StarIcon } from "../icons";
+import { CheckIcon, ChevronRight, CloseIcon, StarIcon } from "../icons";
 
 const EFFORT_LABELS: Record<string, string> = {
   none: "None",
@@ -44,7 +44,7 @@ function useLabel(id: string | null): string {
 
 export function ModelControl() {
   const model = useSel((s) => s.model);
-  const state = useSel((s) => s.modelMenu);
+  const open = useSel((s) => s.modelMenu === "menu");
   const settings = useSel((s) => s.modelSettings);
   const controller = useController();
   const label = useLabel(model);
@@ -54,73 +54,44 @@ export function ModelControl() {
   }, [model, controller]);
 
   const effort = settings?.model === model ? settings.data.effort?.current : null;
-  const toggle = (page: "menu" | "settings") =>
-    state === page
-      ? controller.closeModelMenu()
-      : page === "menu"
-        ? controller.openModelMenu()
-        : controller.openModelSettings();
   return (
     <div className="model-control">
       <button
         type="button"
         className="model-btn"
         aria-haspopup="menu"
-        aria-expanded={state === "menu"}
+        aria-expanded={open}
         title={model ?? undefined}
-        onClick={() => toggle("menu")}
+        onClick={() => (open ? controller.closeModelMenu() : controller.openModelMenu())}
       >
         {label}
+        {effort ? " " : null}
+        {effort ? <span className="model-effort">{effortLabel(effort)}</span> : null}
       </button>
-      {effort ? (
-        <button
-          type="button"
-          className="model-btn effort-btn"
-          aria-haspopup="dialog"
-          aria-expanded={state === "settings"}
-          aria-label={`Effort: ${effortLabel(effort)}`}
-          onClick={() => toggle("settings")}
-        >
-          {effortLabel(effort)}
-        </button>
-      ) : null}
-      {state === "menu" ? <ModelMenuPopover /> : null}
-      {state === "settings" ? <ModelSettingsPage /> : null}
+      {open ? <ModelMenuPopover /> : null}
     </div>
   );
 }
 
-/** Close the open menu or page on a click anywhere outside the control. */
-function useCloseOnOutsideClick() {
-  const controller = useController();
-  useEffect(() => {
-    const onClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      // A row that swapped the menu for another page is gone by the time the click
-      // gets here; it was inside.
-      if (!target?.isConnected || target.closest(".model-control")) return;
-      controller.closeModelMenu();
-    };
-    document.addEventListener("click", onClick);
-    return () => document.removeEventListener("click", onClick);
-  }, [controller]);
-}
+type Setting = "effort" | "context" | "output";
 
-/** Escape closes, and gives focus back to the model button. */
-function closeOnEscape(e: React.KeyboardEvent, from: HTMLElement | null, close: () => void): boolean {
-  if (e.key !== "Escape") return false;
-  e.preventDefault();
-  const button = from?.parentElement?.querySelector<HTMLElement>(".model-btn");
-  close();
-  button?.focus();
-  return true;
+/** The items a key press moves between: those of the open submenu when focus is
+ *  in it, else the menu's own (leaving any submenu's out). */
+function menuItems(menu: HTMLElement | null): HTMLElement[] {
+  const sub = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>(".model-sub");
+  const scope = sub ?? menu;
+  const items = Array.from(scope?.querySelectorAll<HTMLElement>("[role^=menuitem]") ?? []);
+  return sub ? items : items.filter((el) => !el.closest(".model-sub"));
 }
 
 function ModelMenuPopover() {
   const controller = useController();
   const current = useSel((s) => s.model);
+  const stored = useSel((s) => s.modelSettings);
   const [menu, setMenu] = useState<ModelMenu | null>(null);
+  const [open, setOpen] = useState<Setting | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const data = stored?.model === current ? stored.data : null;
 
   useEffect(() => {
     let live = true;
@@ -133,190 +104,273 @@ function ModelMenuPopover() {
   // Focus the current model once the list is in, so the arrow keys start there.
   useEffect(() => {
     if (!menu) return;
-    const items = ref.current?.querySelectorAll<HTMLElement>("[role^=menuitem]");
-    const checked = ref.current?.querySelector<HTMLElement>("[aria-checked=true]");
-    (checked ?? items?.[0])?.focus();
+    const checked = ref.current?.querySelector<HTMLElement>(".model-menu-list [aria-checked=true]");
+    (checked ?? menuItems(ref.current)[0])?.focus();
   }, [menu]);
 
-  useCloseOnOutsideClick();
+  // Close on a click anywhere outside the control.
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement | null)?.closest(".model-control")) controller.closeModelMenu();
+    };
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
+  }, [controller]);
+
+  const openSetting = (setting: Setting, focus: boolean) => {
+    setOpen(setting);
+    if (!focus) return;
+    requestAnimationFrame(() => {
+      const sub = ref.current?.querySelector<HTMLElement>(".model-sub");
+      (sub?.querySelector<HTMLElement>("[aria-checked=true]") ?? menuItems(sub ?? null)[0])?.focus();
+    });
+  };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (closeOnEscape(e, ref.current, () => controller.closeModelMenu())) return;
+    const active = document.activeElement as HTMLElement | null;
+    const inSub = !!active?.closest(".model-sub");
+    if (e.key === "Escape" || (e.key === "ArrowLeft" && inSub)) {
+      e.preventDefault();
+      if (inSub) {
+        // Back to the row the submenu belongs to.
+        ref.current?.querySelector<HTMLElement>(`[data-setting=${open}]`)?.focus();
+        setOpen(null);
+        return;
+      }
+      const button = ref.current?.parentElement?.querySelector<HTMLElement>(".model-btn");
+      controller.closeModelMenu();
+      button?.focus();
+      return;
+    }
+    const setting = active?.dataset.setting as Setting | undefined;
+    if ((e.key === "ArrowRight" || e.key === "Enter") && setting && !inSub) {
+      e.preventDefault();
+      openSetting(setting, true);
+      return;
+    }
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     e.preventDefault();
-    const items = Array.from(ref.current?.querySelectorAll<HTMLElement>("[role^=menuitem]") ?? []);
-    const at = items.indexOf(document.activeElement as HTMLElement);
+    const items = menuItems(ref.current);
+    const at = items.indexOf(active as HTMLElement);
     const next = e.key === "ArrowDown" ? at + 1 : at - 1;
     items[(next + items.length) % items.length]?.focus();
   };
 
+  const row = (setting: Setting, label: string, value: string) => (
+    <div className="model-setting-row" onMouseEnter={() => setOpen(setting)}>
+      <button
+        type="button"
+        role="menuitem"
+        aria-haspopup="menu"
+        aria-expanded={open === setting}
+        data-setting={setting}
+        className="model-row"
+        onClick={() => (open === setting ? setOpen(null) : openSetting(setting, false))}
+      >
+        <span className="model-check" />
+        <span className="model-name">{label}</span>
+        <span className="model-detail">{value}</span>
+        <ChevronRight />
+      </button>
+      {open === setting && data ? <SettingMenu setting={setting} data={data} /> : null}
+    </div>
+  );
+
+  const contextValue = (context: NonNullable<ModelSettings["context"]>, chosen: number | null) =>
+    chosen ? formatTokens(chosen) : context.local ? "Auto" : "Full";
+
   return (
     <div className="model-menu" role="menu" aria-label="Model" ref={ref} onKeyDown={onKeyDown}>
-      {menu?.sections.map((section) => (
-        <div key={section.title} role="group" aria-label={section.title}>
-          <div className="model-menu-title">{section.title}</div>
-          {section.models.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              role="menuitemradio"
-              aria-checked={m.id === current}
-              className="model-row"
-              title={m.id}
-              onClick={() => controller.setModel(m.id)}
-            >
-              <span className="model-check">{m.id === current ? <CheckIcon /> : null}</span>
-              <span className="model-name">{m.label}</span>
-              {m.note ? <span className="model-detail">{m.note}</span> : null}
-            </button>
-          ))}
-        </div>
-      ))}
+      <div className="model-menu-list" onMouseEnter={() => setOpen(null)}>
+        {menu?.sections.map((section) => (
+          <div key={section.title} role="group" aria-label={section.title}>
+            <div className="model-menu-title">{section.title}</div>
+            {section.models.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                role="menuitemradio"
+                aria-checked={m.id === current}
+                className="model-row"
+                title={m.id}
+                onClick={() => controller.setModel(m.id)}
+              >
+                <span className="model-check">{m.id === current ? <CheckIcon /> : null}</span>
+                <span className="model-name">{m.label}</span>
+                {m.note ? <span className="model-detail">{m.note}</span> : null}
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
       {menu ? (
         <div className="model-menu-foot">
-          <button
-            type="button"
-            role="menuitem"
-            className="model-row"
-            onClick={() => controller.openModelSettings()}
-          >
-            <span className="model-check" />
-            <span className="model-name">Model settings…</span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="model-row"
-            onClick={() => controller.openMoreModels()}
-          >
-            <span className="model-check" />
-            <span className="model-name">More models…</span>
-          </button>
-          <button type="button" role="menuitem" className="model-row" onClick={() => controller.openKeys()}>
-            <span className="model-check" />
-            <span className="model-name">API keys…</span>
-          </button>
+          {data?.effort?.current ? row("effort", "Effort", effortLabel(data.effort.current)) : null}
+          {data?.context ? row("context", "Context size", contextValue(data.context, data.settings.context)) : null}
+          {data?.output
+            ? row("output", "Output length", data.settings.output ? formatTokens(data.settings.output) : "Default")
+            : null}
+          <div className="model-menu-tail" onMouseEnter={() => setOpen(null)}>
+            <button
+              type="button"
+              role="menuitem"
+              className="model-row"
+              onClick={() => controller.openMoreModels()}
+            >
+              <span className="model-check" />
+              <span className="model-name">More models…</span>
+            </button>
+            <button type="button" role="menuitem" className="model-row" onClick={() => controller.openKeys()}>
+              <span className="model-check" />
+              <span className="model-name">API keys…</span>
+            </button>
+          </div>
         </div>
       ) : null}
     </div>
   );
 }
 
-/** The current model's settings, in the menu's place: effort, a local model's
- *  context size with the memory each takes, and the output limit. Only what the
- *  model supports is shown, and a change applies to the running session. */
-function ModelSettingsPage() {
+/** "100k" -> 100000, "1.5M" -> 1500000, "65536" -> 65536; NaN if not a size. */
+function parseTokens(text: string): number {
+  const match = /^\s*([\d.]+)\s*([kKmM]?)\s*$/.exec(text);
+  if (!match) return NaN;
+  const scale = { k: 1e3, m: 1e6, "": 1 }[match[2].toLowerCase() as "k" | "m" | ""];
+  return Math.round(Number(match[1]) * scale);
+}
+
+/** The list beside a setting's row: the choices, the current one checked. A choice
+ *  is saved for the model and applies to the running session from its next turn. */
+function SettingMenu({ setting, data }: { setting: Setting; data: ModelSettings }) {
   const controller = useController();
-  const model = useSel((s) => s.model);
-  const current = useSel((s) => s.modelSettings);
   const busy = useSel((s) => s.busy);
-  const label = useLabel(model);
-  const ref = useRef<HTMLDivElement>(null);
   const [measuring, setMeasuring] = useState(false);
-  const measured = useRef<string | null>(null);
-  const data: ModelSettings | null = current?.model === model ? current.data : null;
+  const [typing, setTyping] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
 
-  useCloseOnOutsideClick();
-
-  // A local model's memory per context size is measured on first look (it loads
-  // the model a few times), once per model.
-  const unmeasured = !!data?.context && !data.context.measured;
+  // A local model's memory per size is measured the first time its sizes are
+  // shown: it loads the model a few times, once per model version.
+  const unmeasured = setting === "context" && !!data.context?.local && !data.context.measured;
   useEffect(() => {
-    if (!unmeasured || busy || !model || measured.current === model) return;
-    measured.current = model;
+    if (!unmeasured || busy) return;
+    let live = true;
     setMeasuring(true);
-    void controller.measureModel().finally(() => setMeasuring(false));
-  }, [unmeasured, busy, model, controller]);
+    void controller.measureModel().finally(() => live && setMeasuring(false));
+    return () => {
+      live = false;
+    };
+  }, [unmeasured, busy, controller]);
 
-  const save = (patch: Partial<ModelSettings["settings"]>) => void controller.saveModelSettings(patch);
-  const title = busy ? BUSY_TITLE : undefined;
+  const choose = (patch: Partial<ModelSettings["settings"]>) => {
+    controller.closeModelMenu();
+    void controller.saveModelSettings(patch);
+  };
 
-  return (
-    <div
-      className="model-menu model-settings"
-      role="dialog"
-      aria-label={`${label} settings`}
-      ref={ref}
-      onKeyDown={(e) => closeOnEscape(e, ref.current, () => controller.closeModelMenu())}
+  const item = (key: string, name: string, checked: boolean, onClick: () => void, detail = "") => (
+    <button
+      key={key}
+      type="button"
+      role="menuitemradio"
+      aria-checked={checked}
+      className="model-row"
+      disabled={busy}
+      title={busy ? BUSY_TITLE : undefined}
+      onClick={onClick}
     >
-      <button type="button" className="model-back" onClick={() => controller.openModelMenu()}>
-        <ChevronLeft />
-        {label}
-      </button>
-      {data?.effort ? (
-        <>
-          <div className="model-menu-title">Effort</div>
-          <div className="effort-levels" role="radiogroup" aria-label="Effort">
-            {data.effort.levels.map((level) => (
-              <button
-                key={level}
-                type="button"
-                role="radio"
-                aria-checked={level === data.effort?.current}
-                disabled={busy}
-                title={title}
-                onClick={() => save({ effort: level === data.effort?.default ? null : level })}
-              >
-                {effortLabel(level)}
-              </button>
-            ))}
-          </div>
-        </>
-      ) : null}
-      {data?.context ? (
-        <div role="radiogroup" aria-label="Context size">
-          <div className="model-menu-title">Context size</div>
-          {[{ tokens: null, memory: null, on_gpu: null }, ...data.context.choices].map((choice) => {
-            const chosen = (data.settings.context ?? null) === choice.tokens;
-            const name =
-              choice.tokens === null
-                ? `Auto${data.context?.auto ? ` · ${formatTokens(data.context.auto)}` : ""}`
-                : formatTokens(choice.tokens);
-            const detail = [
-              choice.memory ? formatMemory(choice.memory) : "",
-              choice.on_gpu === false ? "partly on CPU" : "",
-            ].filter(Boolean);
-            return (
-              <button
-                key={choice.tokens ?? "auto"}
-                type="button"
-                role="radio"
-                aria-checked={chosen}
-                className="model-row"
-                disabled={busy}
-                title={title}
-                onClick={() => save({ context: choice.tokens })}
-              >
-                <span className="model-check">{chosen ? <CheckIcon /> : null}</span>
-                <span className="model-name">{name}</span>
-                {detail.length ? <span className="model-detail">{detail.join(" · ")}</span> : null}
-              </button>
-            );
-          })}
-          {measuring ? <p className="model-note">Measuring memory…</p> : null}
+      <span className="model-check">{checked ? <CheckIcon /> : null}</span>
+      <span className="model-name">{name}</span>
+      {detail ? <span className="model-detail">{detail}</span> : null}
+    </button>
+  );
+
+  if (setting === "effort" && data.effort) {
+    const { levels, default: fallback, current } = data.effort;
+    return (
+      <div className="model-menu model-sub" role="menu" aria-label="Effort">
+        <p className="model-note">More effort is more thorough, and slower.</p>
+        {levels.map((level) =>
+          item(level, effortLabel(level), level === current, () =>
+            choose({ effort: level === fallback ? null : level }),
+          ),
+        )}
+      </div>
+    );
+  }
+
+  if (setting === "output" && data.output) {
+    const chosen = data.settings.output;
+    return (
+      <div className="model-menu model-sub" role="menu" aria-label="Output length">
+        {item("default", "Default", !chosen, () => choose({ output: null }), formatTokens(data.output.default))}
+        {data.output.choices
+          .filter((tokens) => tokens !== data.output?.default)
+          .map((tokens) =>
+          item(String(tokens), formatTokens(tokens), chosen === tokens, () => choose({ output: tokens })),
+        )}
+      </div>
+    );
+  }
+
+  const context = data.context;
+  if (setting !== "context" || !context) return null;
+  const chosen = data.settings.context;
+  const custom = chosen && !context.choices.some((c) => c.tokens === chosen) ? chosen : null;
+  const submit = () => {
+    const tokens = parseTokens(typed);
+    if (!(tokens >= context.min && tokens <= context.max)) {
+      setProblem(`Between ${formatTokens(context.min)} and ${formatTokens(context.max)}`);
+      return;
+    }
+    choose({ context: tokens });
+  };
+  return (
+    <div className="model-menu model-sub" role="menu" aria-label="Context size">
+      {item(
+        "auto",
+        context.local ? "Auto" : "Full",
+        !chosen,
+        () => choose({ context: null }),
+        context.auto ? formatTokens(context.auto) : "",
+      )}
+      {context.choices
+        .filter((c) => c.tokens !== context.auto || context.local)
+        .map((c) =>
+          item(
+            String(c.tokens),
+            formatTokens(c.tokens),
+            chosen === c.tokens,
+            () => choose({ context: c.tokens }),
+            [c.memory ? formatMemory(c.memory) : "", c.on_gpu === false ? "partly on CPU" : ""]
+              .filter(Boolean)
+              .join(" · "),
+          ),
+        )}
+      {measuring ? <p className="model-note">Measuring memory…</p> : null}
+      {typing ? (
+        <div className="model-custom">
+          <input
+            autoFocus
+            aria-label="Context size in tokens"
+            placeholder="e.g. 100k"
+            value={typed}
+            onChange={(e) => {
+              setTyped(e.target.value);
+              setProblem(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                e.stopPropagation();
+                submit();
+              }
+            }}
+          />
+          {problem ? <p className="model-note">{problem}</p> : null}
         </div>
-      ) : null}
-      {data?.output ? (
-        <label className="model-setting">
-          <span className="model-menu-title">Output limit</span>
-          <select
-            value={data.settings.output ?? ""}
-            disabled={busy}
-            title={title}
-            onChange={(e) => save({ output: e.target.value ? Number(e.target.value) : null })}
-          >
-            <option value="">Default · {formatTokens(data.output.default)}</option>
-            {data.output.choices.map((tokens) => (
-              <option key={tokens} value={tokens}>
-                {formatTokens(tokens)}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-      {data && !data.effort && !data.context && !data.output ? (
-        <p className="model-note">This model has no settings to change.</p>
-      ) : null}
+      ) : (
+        item("custom", custom ? `Custom · ${formatTokens(custom)}` : "Custom…", !!custom, () => setTyping(true))
+      )}
     </div>
   );
 }

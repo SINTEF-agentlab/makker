@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { api, type HistoryEntry } from "./api";
@@ -57,13 +57,14 @@ describe("model control", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("shows the effort and changes it from the model's settings", async () => {
+  it("shows the effort and changes it from a row at the foot of the menu", async () => {
     const settings = {
       settings: { effort: null, output: null, context: null },
       effort: { levels: ["low", "medium", "xhigh"], default: "medium", current: "medium" },
       output: { choices: [8_192, 128_000], default: 128_000 },
       context: null,
     };
+    vi.spyOn(api, "modelMenu").mockResolvedValue(menu);
     vi.spyOn(api, "modelSettings").mockResolvedValue(settings);
     const save = vi.spyOn(api, "saveModelSettings").mockResolvedValue({
       ...settings,
@@ -75,48 +76,64 @@ describe("model control", () => {
     vi.spyOn(controller.transport, "isOpen").mockReturnValue(true);
     act(() => store.setState({ models: [luna], model: luna.id }));
 
-    fireEvent.click(await screen.findByRole("button", { name: "Effort: Medium" }));
-    const page = screen.getByRole("dialog", { name: "GPT-6 Luna settings" });
-    expect(page).toHaveTextContent("Output limit");
-    fireEvent.click(screen.getByRole("radio", { name: "Extra high" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Effort: Extra high" })).toBeInTheDocument());
+    fireEvent.click(await screen.findByRole("button", { name: "GPT-6 Luna Medium" }));
+    expect(await screen.findByRole("menuitem", { name: /Output length\s*Default/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: /Effort\s*Medium/ }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Effort" })).getByRole("menuitemradio", { name: "Extra high" }));
+    expect(screen.queryByRole("menu")).toBeNull();
+    await waitFor(() => expect(screen.getByRole("button", { name: "GPT-6 Luna Extra high" })).toBeInTheDocument());
     expect(save).toHaveBeenCalledWith(luna.id, { effort: "xhigh", output: null, context: null });
     // The running session rebuilds on the same model to pick it up.
     expect(send).toHaveBeenCalledWith({ type: "command", command: "set_model", arg: luna.id });
   });
 
-  it("lists a local model's context sizes with their memory, measured on first look", async () => {
+  it("lists a local model's context sizes with their memory, and takes a typed size", async () => {
     const unmeasured = {
       settings: { effort: null, output: null, context: null },
       effort: null,
       output: null,
       context: {
+        local: true,
         choices: [{ tokens: 32_768, memory: null, on_gpu: null }],
         auto: 32_768,
+        min: 16_384,
+        max: 262_144,
         measured: false,
       },
     };
+    vi.spyOn(api, "modelMenu").mockResolvedValue(menu);
     vi.spyOn(api, "modelSettings").mockResolvedValue(unmeasured);
     const measure = vi.spyOn(api, "measureModel").mockResolvedValue({
       ...unmeasured,
       context: {
+        ...unmeasured.context,
         choices: [
           { tokens: 32_768, memory: 16.4 * 2 ** 30, on_gpu: true },
           { tokens: 262_144, memory: 31 * 2 ** 30, on_gpu: false },
         ],
-        auto: 32_768,
         measured: true,
       },
     });
-    const { store, controller } = renderWithStore(<Composer />);
+    const save = vi.spyOn(api, "saveModelSettings").mockResolvedValue(unmeasured);
+    const { store } = renderWithStore(<Composer />);
     act(() => store.setState({ models: [qwen], model: qwen.id }));
     await waitFor(() => expect(store.getState().modelSettings?.model).toBe(qwen.id));
-    act(() => controller.openModelSettings());
 
+    fireEvent.click(screen.getByRole("button", { name: "qwen3.8:27b" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Context size\s*Auto/ }));
     expect(await screen.findByText("16.4 GB")).toBeInTheDocument();
     expect(screen.getByText("31.0 GB · partly on CPU")).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /^Auto/ })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("menuitemradio", { name: /^Auto/ })).toHaveAttribute("aria-checked", "true");
     expect(measure).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Custom…" }));
+    const input = screen.getByRole("textbox", { name: "Context size in tokens" });
+    fireEvent.change(input, { target: { value: "8k" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByText("Between 16k and 256k")).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "100k" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(save).toHaveBeenCalledWith(qwen.id, { effort: null, output: null, context: 100_000 });
   });
 
   it("opens the menu from /model", async () => {
