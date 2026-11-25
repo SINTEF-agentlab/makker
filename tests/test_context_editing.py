@@ -19,21 +19,16 @@ def test_clear_tool_uses_trigger_tokens() -> None:
     assert clear_tool_uses_trigger_tokens(65_536) == int(65_536 * 0.6)
     # Below the summarization trigger (0.8) so clearing is the first response.
     assert clear_tool_uses_trigger_tokens(100_000) < int(100_000 * 0.8)
-    assert clear_tool_uses_trigger_tokens(None) == 60_000
 
 
 def test_keep_recent_tool_results_scales_with_window() -> None:
     # A small (local) window keeps fewer, so the working set can't fill it.
     assert keep_recent_tool_results(65_536) == 3
     assert keep_recent_tool_results(200_000) == 6
-    assert keep_recent_tool_results(None) == 6
 
 
-def test_build_context_editing_middleware_config(monkeypatch) -> None:
-    from makker import models
-
-    monkeypatch.setattr(models, "context_window", lambda model_id: 50_000)
-    middleware = build_context_editing_middleware(model_id="ollama:qwen3.6:27b")
+def test_build_context_editing_middleware_config() -> None:
+    middleware = build_context_editing_middleware(50_000)
     (edit,) = middleware.edits
     assert isinstance(edit, ClearToolUsesEdit)
     assert edit.trigger == int(50_000 * 0.6)

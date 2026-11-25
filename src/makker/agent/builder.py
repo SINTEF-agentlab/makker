@@ -14,6 +14,7 @@ This module wires everything ``create_deep_agent`` needs in one place:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from collections.abc import Callable, Sequence
@@ -62,11 +63,13 @@ from makker.agent.tools import (
     make_run_julia_tool,
     make_write_report_tool,
 )
-from makker.models import PROVIDERS, provider_key_vars, provider_of
+from makker.context_budget import context_budget
+from makker.models import PROVIDERS, is_ollama_cloud, provider_key_vars, provider_of
 from makker.paths import SHARED_SKILLS_DIR, workspace_memory_dir, workspace_root
 from makker.session import Session
 from makker.simulators.base import SimulatorAdapter
 from makker.trace import TraceRecorder
+from makker.trace.schema import MODEL, model_payload
 
 __all__ = [
     "PackageSource",
@@ -180,7 +183,11 @@ def _ollama_settings(model_id: str) -> dict[str, Any]:
     from makker import ollama_client
 
     name = ollama_client.model_name(model_id)
-    settings: dict[str, Any] = {"num_ctx": ollama_client.num_ctx(name)}
+    settings: dict[str, Any] = {}
+    # A hosted (``:cloud``) model runs at its maximum context unless told
+    # otherwise; only a local one needs a size that fits this machine's memory.
+    if not is_ollama_cloud(model_id):
+        settings["num_ctx"] = ollama_client.num_ctx(name)
     # Thinking-capable local models must have think mode requested
     # explicitly: left at the daemon default, the thinking segment is
     # dropped on the client side, so a turn the model spends entirely on
@@ -297,27 +304,21 @@ def _resolve_model_for_agent(model: Any) -> Any:
                 from langchain.chat_models import init_chat_model
 
                 instance = init_chat_model(model, **kwargs)
-            _set_profile_window(instance, model)
             return instance
     except Exception:
         pass  # no key yet, unknown model, or offline: run with the plain spec
     return model
 
 
-def _set_profile_window(model: Any, model_id: str) -> None:
-    """Feed the real loaded window into the model's profile.
+def _set_profile_window(model: Any, window: int) -> None:
+    """Put the session's window into the model's profile.
 
     deepagents' stock summarizer sizes its trigger from
-    ``model.profile['max_input_tokens']``. Ollama ships no profile, so the
-    trigger would otherwise fall back to a fixed default far larger than the
-    loaded num_ctx (the local-overflow bug). Feed in the window we actually use.
-    Best-effort: a model whose profile can't be set keeps its native window.
+    ``model.profile['max_input_tokens']``. Ollama ships no profile, and a model
+    newer than the provider's data has none either, so the summarizer would
+    otherwise fall back to a fixed size unrelated to the real window. Best-effort:
+    a model whose profile can't be set keeps its native one.
     """
-    from makker.models import context_window
-
-    window = context_window(model_id)
-    if not window:
-        return
     try:
         current = getattr(model, "profile", None)
         profile = dict(current) if isinstance(current, dict) else {}
@@ -325,6 +326,36 @@ def _set_profile_window(model: Any, model_id: str) -> None:
         model.profile = profile
     except Exception:
         pass
+
+
+# Model attributes worth recording with the model in the trace: the reasoning and
+# output settings each provider is built with, and a local model's context size.
+_RECORDED_SETTINGS = (
+    "reasoning",
+    "reasoning_effort",
+    "effort",
+    "thinking",
+    "include_thoughts",
+    "thinking_level",
+    "thinking_budget",
+    "num_ctx",
+    "max_tokens",
+)
+
+
+def _recorded_settings(model: Any) -> dict[str, Any]:
+    """The settings ``model`` was built with that are set and plain data."""
+    settings = {}
+    for key in _RECORDED_SETTINGS:
+        value = getattr(model, key, None)
+        if value is None:
+            continue
+        try:
+            json.dumps(value)
+        except (TypeError, ValueError):
+            continue
+        settings[key] = value
+    return settings
 
 
 def _primary_source_path(
@@ -487,6 +518,22 @@ def build_agent(
     skills = skill_sources(session.simulator) + collect_skill_dirs(active)
     model_spec = resolve_model(model)
     resolved_model = _resolve_model_for_agent(model_spec)
+    built = None if isinstance(resolved_model, str) else resolved_model
+    model_id = model_spec if isinstance(model_spec, str) else None
+    budget = context_budget(model_id, built)
+    if built is not None:
+        _set_profile_window(built, budget.window)
+    session.context_budget = budget
+    session.trace.append(
+        MODEL,
+        model_payload(
+            model=model_id or type(built).__name__,
+            window=budget.window,
+            window_source=budget.source,
+            compact_at=budget.compact_at,
+            settings=_recorded_settings(built),
+        ),
+    )
     agent = create_deep_agent(
         model=resolved_model,
         backend=backend,
@@ -518,9 +565,7 @@ def build_agent(
                 # rendered surface in every front end.
                 TodoListMiddleware(),
                 build_memory_middleware(backend, memory_dir),
-                build_context_editing_middleware(
-                    model_id=model_spec if isinstance(model_spec, str) else None,
-                ),
+                build_context_editing_middleware(budget.window),
                 # Before the recorder in the list so its after_model hook runs
                 # after the recorder's (after_model composes in reverse): the
                 # model call is traced before a recovery jump re-enters the model.

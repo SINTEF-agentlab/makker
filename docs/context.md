@@ -68,7 +68,7 @@ fire only when the cheaper ones are not enough:
   recoverable, and the summary embeds that path. This is deepagents' stock
   backend-recoverable `SummarizationMiddleware`, installed by
   `create_deep_agent`, sized from the model profile (which
-  `builder._set_profile_window` points at the real loaded window), and
+  `builder._set_profile_window` sets from the session's context budget), and
   non-mutating; `TraceRecorder` records each compaction. We lean on the stock
   middleware so upstream improvements arrive without porting.
 
@@ -77,12 +77,20 @@ is exactly what the conversation costs to send) plus both the clearing and the
 summarization thresholds, so it is clear what will happen as the window fills.
 The status bar keeps a `ctx` percentage in view (yellow at 70%, red at 90%).
 
-The window the thresholds are measured against is the model's real loaded size:
-the provider package's profile data for cloud models, and for a local model the
-`num_ctx` it was actually loaded with (its reported maximum capped at the memory
-budget), not the daemon's theoretical maximum, which the model was never loaded
-with. Sizing the trigger to the loaded window is what lets compaction fire
-before a local model overflows.
+Every consumer reads one context budget (`context_budget.py`), resolved when
+the agent is built and on every model switch: the window, where it came from,
+and the point where compaction runs. The model's profile, tool-result clearing,
+the status bar and `/context` all use it, and the trace records it with the
+model (a `model` event). The window comes from:
+
+- the provider package's bundled model data, read directly (no key, no model
+  build), with the Gemini API asked for Gemini models newer than that data;
+- Ollama: a hosted (`:cloud`) model's maximum, which it runs at; a local
+  model's `num_ctx`, the size it was actually loaded with (its reported
+  maximum capped at the memory budget), not the daemon's theoretical maximum;
+- otherwise an assumed 200K tokens, which `/context` says. If the real window
+  is smaller, the provider rejects a long request, and the summarizer then
+  compacts and retries, so the turn carries on.
 
 - `/compact` runs a summarization pass on demand against the checkpointed
   thread. Every compaction (automatic or manual) is recorded once as a

@@ -17,7 +17,7 @@ import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -130,30 +130,43 @@ def model_profile(model_id: str) -> dict:
 
 
 def context_window(model_id: str) -> int | None:
-    """Input-context size in tokens for ``model_id``, best effort.
+    """Input-context size in tokens that a source reports for ``model_id``, or ``None``.
 
-    The provider package's bundled profile data answers first (reached by
-    building the model, which needs the provider key the session already
-    has). Providers whose models the data cannot cover have a live fallback
-    in ``_WINDOW_FALLBACKS``: the Ollama daemon reports the loaded model (capped
-    at the memory budget), and the Gemini API covers models newer than the
-    bundled data. ``None`` when no source can answer — callers should degrade to
-    absolute counts.
+    The provider package's bundled profile data answers first, read directly: no
+    key, no model build. A model missing from it gets one more try through the
+    provider package itself, which may know an alias the data does not list. After
+    that, ``_WINDOW_FALLBACKS`` asks live: the Ollama daemon, and the Gemini API
+    for models newer than the bundled data. ``None`` when nothing answers;
+    ``context_budget`` then assumes a window.
     """
-    value = model_profile(model_id).get("max_input_tokens")
+    provider, _, name = model_id.partition(":")
+    value = _provider_profiles(provider).get(name, {}).get("max_input_tokens")
+    if not (isinstance(value, int) and value > 0) and not is_local(model_id):
+        value = model_profile(model_id).get("max_input_tokens")
     if isinstance(value, int) and value > 0:
         return value
-    fallback = _WINDOW_FALLBACKS.get(provider_of(model_id))
+    fallback = _WINDOW_FALLBACKS.get(provider)
     return fallback(model_id) if fallback else None
+
+
+@cache
+def _provider_profiles(provider: str) -> dict[str, Any]:
+    """A cloud provider's bundled model profiles, read once per process."""
+    info = PROVIDERS.get(provider)
+    return {} if info is None or info.local else _load_profiles(info.package)
 
 
 def _ollama_window(model_id: str) -> int | None:
     from makker import ollama_client
 
+    name = ollama_client.model_name(model_id)
+    if is_ollama_cloud(model_id):
+        # Hosted, so no local memory limit applies: Ollama runs it at its maximum.
+        return ollama_client.context_window(name)
     # The *loaded* window (capped at the memory budget), not the daemon's
     # theoretical maximum: the model is built with this, so the context figure
     # and the auto-compaction trigger must agree with it.
-    return ollama_client.num_ctx(ollama_client.model_name(model_id))
+    return ollama_client.num_ctx(name)
 
 
 def _google_context_window(name: str) -> int | None:

@@ -75,3 +75,14 @@ def _text_or_none(value: Any) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
     return value
+
+
+def model_line(payload: dict[str, Any]) -> str:
+    """One line for a ``model`` trace event: the model and its context window."""
+    line = str(payload.get("model") or "?")
+    window = payload.get("window")
+    if isinstance(window, int):
+        line += f" · {window:,}-token window"
+        if payload.get("window_source") == "assumed":
+            line += " (assumed)"
+    return line

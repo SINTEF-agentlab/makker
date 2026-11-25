@@ -1,13 +1,13 @@
-"""Manual /compact, plus the auto-compaction trigger figure for /context.
+"""Manual /compact, and the note every front end shows for a compaction.
 
 Auto-compaction is deepagents' stock ``SummarizationMiddleware`` — installed by
 ``create_deep_agent`` and sized from the model profile, which
-``builder._set_profile_window`` points at the real loaded window;
-``TraceRecorder`` surfaces each compaction as a ``context_compaction`` trace
-event. This module keeps two small things on top of it: the trigger figure
-``/context`` displays, and ``compact_thread`` — the manual ``/compact`` command,
-which drives the same deepagents engine on demand against the checkpointed
-thread (the deepagents-cli ``/offload`` pattern), non-mutating and recoverable.
+``builder._set_profile_window`` sets from the session's context budget (whose
+``compact_at`` is the figure ``/context`` shows); ``TraceRecorder`` surfaces each
+compaction as a ``context_compaction`` trace event. ``compact_thread`` is the
+manual ``/compact`` command: it drives the same deepagents engine on demand
+against the checkpointed thread (the deepagents-cli ``/offload`` pattern),
+non-mutating and recoverable.
 """
 
 from __future__ import annotations
@@ -25,13 +25,6 @@ from langchain_core.messages.utils import count_tokens_approximately
 from makker.trace import TraceLog
 from makker.trace.schema import CONTEXT_COMPACTION, compaction_payload
 
-# The share of the window at which the stock summarizer triggers, mirrored here
-# only so /context can show the figure. Matches deepagents'
-# ``compute_summarization_defaults`` default; update if that default changes.
-_TRIGGER_FRACTION = 0.85
-# Without a discoverable window /context can't size the trigger; this mirrors
-# deepagents' fixed no-profile fallback.
-_FALLBACK_TRIGGER_TOKENS = 170_000
 # Manual /compact keeps a shorter, predictable tail; the count is public so the
 # TUI can explain why a short conversation has nothing to compact.
 MANUAL_KEEP_MESSAGES = 8
@@ -57,11 +50,6 @@ _ENGINE_METHODS: tuple[str, ...] = (
 def manual_compaction_available() -> bool:
     """Whether the installed deepagents still exposes the engine /compact drives."""
     return all(hasattr(SummarizationMiddleware, name) for name in _ENGINE_METHODS)
-
-
-def auto_compact_trigger_tokens(window: int | None) -> int:
-    """The context size at which auto-compaction triggers for ``window`` (display only)."""
-    return int(window * _TRIGGER_FRACTION) if window else _FALLBACK_TRIGGER_TOKENS
 
 
 def describe_compaction(payload: dict[str, Any]) -> str:

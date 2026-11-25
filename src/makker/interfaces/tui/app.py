@@ -56,6 +56,7 @@ from makker.agent.turns import (
     usage_from_messages,
 )
 from makker.approval_preview import render_interrupt_cards
+from makker.context_budget import ContextBudget
 from makker.context_panel import (
     context_component_estimates,
     render_context_panel,
@@ -303,7 +304,7 @@ class TUIApp(App[None]):
         self._last_usage: dict[str, Any] | None = None
         self._first_usage: dict[str, Any] | None = None
         self._model_calls = 0
-        self._context_window_tokens: int | None = None
+        self._context_budget: ContextBudget | None = None
         self._resize_timer: Timer | None = None
         self._quit_armed = False
         self._quit_timer: Timer | None = None
@@ -397,16 +398,18 @@ class TUIApp(App[None]):
             self.query_one("#status", StatusBar).set_warming(False)
 
     async def _fetch_context_window(self) -> None:
-        """Resolve the active model's context window off the event loop."""
+        """Take the running agent's context budget, or resolve the model's off the loop."""
         if not self._model_label:
             return
-        from makker.models import context_window
+        from makker.context_budget import context_budget
 
         label = self._model_label
-        window = await asyncio.to_thread(context_window, label)
+        budget = getattr(self._session, "context_budget", None)
+        if budget is None:
+            budget = await asyncio.to_thread(context_budget, label)
         if label != self._model_label:
             return  # switched while resolving; the new switch refetches
-        self._context_window_tokens = window
+        self._context_budget = budget
         self._refresh_context_status()
 
     def _load_usage_from_trace(self) -> None:
@@ -451,12 +454,16 @@ class TUIApp(App[None]):
         }
         self._refresh_context_status()
 
+    @property
+    def _window(self) -> int | None:
+        return self._context_budget.window if self._context_budget else None
+
     def _refresh_context_status(self) -> None:
         if not self.is_mounted:
             return
         self.query_one("#status", StatusBar).set_context(
-            status_label(self._last_usage, self._context_window_tokens),
-            alert=usage_alert(self._last_usage, self._context_window_tokens),
+            status_label(self._last_usage, self._window),
+            alert=usage_alert(self._last_usage, self._window),
         )
 
     def _memory_dir(self) -> Path:
@@ -544,9 +551,7 @@ class TUIApp(App[None]):
             await self._finish_turn()
 
     async def _command_context(self, _arg: str) -> None:
-        from makker.agent.context_editing import clear_tool_uses_trigger_tokens
         from makker.agent.memory import list_memory_notes
-        from makker.agent.summarization import auto_compact_trigger_tokens
 
         system_tokens, memory_tokens = context_component_estimates(
             self._session, self._memory_dir()
@@ -554,14 +559,12 @@ class TUIApp(App[None]):
         body = render_context_panel(
             model_label=self._model_label,
             usage=self._last_usage,
-            window=self._context_window_tokens,
+            budget=self._context_budget,
             first_usage=self._first_usage,
             model_calls=self._model_calls,
             system_prompt_tokens=system_tokens,
             memory_index_tokens=memory_tokens,
             memory_notes=len(list_memory_notes(self._memory_dir())),
-            compact_trigger_tokens=auto_compact_trigger_tokens(self._context_window_tokens),
-            clear_trigger_tokens=clear_tool_uses_trigger_tokens(self._context_window_tokens),
         )
         await self._log.mount(MessageBlock("Context", "system", body, markdown=True))
         self._jump_to_latest()
@@ -1162,7 +1165,7 @@ class TUIApp(App[None]):
         self._model_label = model_id
         self._host.adopt_agent(agent, backend, model=model_id)
         self.query_one("#status", StatusBar).set_model(model_id)
-        self._context_window_tokens = None
+        self._context_budget = None
         self._refresh_context_status()
         self.run_worker(self._fetch_context_window(), name="ctx-window")
         self._refresh_subtitle()

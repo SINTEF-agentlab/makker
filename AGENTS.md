@@ -83,7 +83,9 @@ and check on staged `.py` files. To verify the whole tree like CI:
 - `src/makker/session.py`: `Session`, the unit of work for one
   invocation.
 - `src/makker/models.py`: provider metadata and the model catalog
-  discovery. `src/makker/display.py`: display detection and Xvfb
+  discovery. `src/makker/context_budget.py`: the context budget (a model's
+  window, where it came from, its compaction point) that the agent build,
+  tool-result clearing and the context displays all read. `src/makker/display.py`: display detection and Xvfb
   management for headless plotting.
 - `src/makker/agent/builder.py`: deepagents wiring (composite backend,
   HarnessProfile registration, `build_agent` entry point). Custom tools sit
