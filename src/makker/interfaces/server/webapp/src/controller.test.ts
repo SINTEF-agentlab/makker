@@ -187,6 +187,27 @@ describe("session lifecycle", () => {
     expect(store.getState().items.at(-1)).toMatchObject({ kind: "sys-note", level: "warn" });
   });
 
+  it("sends a reply typed during an approval as a reject with the reason", async () => {
+    vi.spyOn(api, "createSession").mockResolvedValue({ session_id: "s1" });
+    const { controller } = setup();
+    await controller.startSession();
+    const socket = FakeSocket.all[0];
+    socket.connect();
+    socket.receive(IDLE);
+    const card = { type: "interrupt", actions: [{ name: "execute" }], allowlist: [] };
+
+    socket.receive({ ...card, interrupt_id: "a", allowed_decisions: ["approve", "reject"] });
+    expect(controller.send("use a safer command")).toBe(true);
+    expect(socket.sent.at(-1)).toEqual({
+      type: "decision",
+      decision: "reject",
+      message: "use a safer command",
+    });
+
+    socket.receive({ ...card, interrupt_id: "b", allowed_decisions: ["approve"] });
+    expect(controller.send("no")).toBe(false); // the card takes no reply: keep the draft
+  });
+
   it("shows a model switch only once the server confirms it", async () => {
     vi.spyOn(api, "createSession").mockResolvedValue({ session_id: "s1" });
     vi.spyOn(api, "modelWindow").mockResolvedValue({ model: "", window: null });

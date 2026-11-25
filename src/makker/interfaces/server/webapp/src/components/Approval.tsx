@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 
 import { useController, useSel } from "../context";
 import { Markdown } from "../markdown";
+import { replyDecision } from "../store";
 import { argPreview } from "../toolPolicy";
 
 export function Approval() {
@@ -61,8 +62,8 @@ export function Approval() {
           </button>
         ) : null}
       </div>
-      {pending.allowed.includes("respond") ? (
-        <div className="approval-hint">…or type a reply below to send feedback.</div>
+      {replyDecision(pending.allowed) ? (
+        <div className="approval-hint">…or type a reply below to decline with a reason.</div>
       ) : null}
     </div>
   );
