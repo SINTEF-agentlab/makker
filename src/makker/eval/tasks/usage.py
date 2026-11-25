@@ -64,13 +64,17 @@ def usage_battmo() -> Task:
             "Using BattMo, load the chen_2020 cell parameters and compute "
             "the cell's nominal capacity. Report it in Ah."
         ),
-        metadata={"needs_env": True, "simulator": "battmo"},
+        metadata={
+            "answer": {"capacity": "the cell's nominal capacity, in Ah"},
+            "needs_env": True,
+            "simulator": "battmo",
+        },
     )
     return Task(
         dataset=[sample],
         solver=makker_solver(),
         scorer=[
-            numeric_answer(0.1, 50.0, count=1),
+            numeric_answer(0.1, 50.0, keys=("capacity",)),
             used_tools(["run_julia"]),
             no_interpreters_via_execute(),
             no_repeated_identical_calls(),
@@ -118,14 +122,20 @@ def usage_workspace() -> Task:
             "mean of y and the number of rows, and report both (mean to "
             "four decimal places)."
         ),
-        metadata={"fixtures": {"data.csv": _DATA_CSV}},
+        metadata={
+            "answer": {
+                "mean_y": "the mean of y, to four decimal places",
+                "rows": "the number of rows",
+            },
+            "fixtures": {"data.csv": _DATA_CSV},
+        },
     )
     return Task(
         dataset=[sample],
         solver=makker_solver(),
         scorer=[
-            numeric_close(round(_MEAN_Y, 4), 0.001),
-            numeric_close(40, 0.5),
+            numeric_close(round(_MEAN_Y, 4), 0.001, key="mean_y"),
+            numeric_close(40, 0.5, key="rows"),
             used_tools(["run_julia"]),
             no_interpreters_via_execute(),
         ],

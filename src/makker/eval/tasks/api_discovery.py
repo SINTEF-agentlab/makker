@@ -52,12 +52,12 @@ def _efficiency() -> list:
     return [tool_call_count(), file_op_count(), julia_probe_count()]
 
 
-def _sample(sample_id: str, prompt: str, target: str) -> Sample:
+def _sample(sample_id: str, prompt: str, target: str, answer: dict[str, str]) -> Sample:
     return Sample(
         id=sample_id,
         input=prompt,
         target=target,
-        metadata={"fixtures": corpus_fixtures()},
+        metadata={"fixtures": corpus_fixtures(), "answer": answer},
     )
 
 
@@ -75,12 +75,13 @@ def api_discovery_solver() -> Task:
         _PREAMBLE + "Using its Newton solver, run 4 iterations on a 20x20 grid "
         "with permeability 500.0, and report the residual it returns.",
         target="0.0625",
+        answer={"residual": "the residual the Newton solver returns"},
     )
     return Task(
         dataset=[sample],
         solver=makker_solver(),
         scorer=[
-            numeric_close(0.0625, 0.001),
+            numeric_close(0.0625, 0.001, key="residual"),
             used_tools(["run_julia"]),
             no_unresolvable_path_in_julia(),
             no_interpreters_via_execute(),
@@ -104,12 +105,13 @@ def api_discovery_internal() -> Task:
         "Call it with permeability 0.5, pressure drop 100.0, and dx 2.0, and "
         "report the value it returns.",
         target="-25000",
+        answer={"flux": "the value the Darcy-flux function returns"},
     )
     return Task(
         dataset=[sample],
         solver=makker_solver(),
         scorer=[
-            numeric_close(-25000.0, 1.0),
+            numeric_close(-25000.0, 1.0, key="flux"),
             used_tools(["run_julia"]),
             no_unresolvable_path_in_julia(),
             no_interpreters_via_execute(),

@@ -24,6 +24,9 @@ def test_classify_ignores_numeric_efficiency_scorers() -> None:
     verdict, _category, failed = _classify(ok, {"numeric_close": "I", "tool_call_count": "9.0"})
     assert verdict == "fail"
     assert failed == ["numeric_close"]
+    # Nothing graded pass or fail (the scorers never ran) is not a pass.
+    assert _classify(ok, {})[0] == "infra"
+    assert _classify(ok, {"tool_call_count": "3.0"})[0] == "infra"
 
 
 def _record(**overrides) -> SampleRecord:
@@ -154,3 +157,9 @@ def test_price_uses_cache_read_rate() -> None:
 
 def test_unknown_model_has_no_price() -> None:
     assert _price("ollama/qwen3", {"in": 1, "out": 1, "cr": 0, "cw": 0}) is None
+
+
+def test_a_page_mixing_eval_versions_says_its_scores_do_not_compare() -> None:
+    assert "different eval versions" not in render_markdown([_record(), _record(run="b")])
+    mixed = render_markdown([_record(), _record(run="2026-11-25T10-00-00", eval_version=2)])
+    assert "different eval versions (1, 2)" in mixed

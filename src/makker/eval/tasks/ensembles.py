@@ -80,6 +80,9 @@ def ensembles_jutuldarcy() -> Task:
             "in order of increasing porosity."
         ),
         metadata={
+            "answer": {
+                "recovery_factors": "the four recovery factors, by increasing porosity (a list)"
+            },
             "fixtures": {"waterflood_case.jl": _WATERFLOOD_CASE},
             "needs_env": True,
             "simulator": "jutuldarcy",
@@ -93,7 +96,7 @@ def ensembles_jutuldarcy() -> Task:
             # porosity. The exact values are not pinned; the suite grades the
             # parallel mechanism and the physical trend, and a coarse fast case
             # makes an exact golden a recapture burden without adding signal.
-            numeric_answer(0.0, 1.0, count=4, order="decreasing"),
+            numeric_answer(0.0, 1.0, keys=("recovery_factors",), count=4, order="decreasing"),
             julia_code_matches(r"(run_ensemble|pmap)\s*\("),
             used_tools(["run_julia"]),
             no_interpreters_via_execute(),
@@ -117,13 +120,17 @@ def ensembles_battmo() -> Task:
             "its discharged capacity in Ah. Report the three capacities in "
             "that order."
         ),
-        metadata={"needs_env": True, "simulator": "battmo"},
+        metadata={
+            "answer": {"capacities": "the three capacities in Ah, at 0.5, 1 and 2 C (a list)"},
+            "needs_env": True,
+            "simulator": "battmo",
+        },
     )
     return Task(
         dataset=[sample],
         solver=makker_solver(),
         scorer=[
-            numeric_answer(0.0, 10.0, count=3, order="decreasing"),
+            numeric_answer(0.0, 10.0, keys=("capacities",), count=3, order="decreasing"),
             julia_code_matches(r"(run_ensemble|pmap)\s*\("),
             used_tools(["run_julia"]),
             no_interpreters_via_execute(),
@@ -152,13 +159,19 @@ def ensembles_fimbul() -> Task:
             "temperature (deg C) at the end of each, in order of increasing "
             "injection temperature."
         ),
-        metadata={"needs_env": True, "simulator": "fimbul"},
+        metadata={
+            "answer": {
+                "temperatures": "the end temperatures in deg C, by injection temperature (a list)"
+            },
+            "needs_env": True,
+            "simulator": "fimbul",
+        },
     )
     return Task(
         dataset=[sample],
         solver=makker_solver(),
         scorer=[
-            numeric_answer(1.0, 250.0, count=4),
+            numeric_answer(1.0, 250.0, keys=("temperatures",), count=4),
             julia_code_matches(r"(run_ensemble|pmap)\s*\("),
             used_tools(["run_julia"]),
             no_interpreters_via_execute(),
@@ -184,13 +197,19 @@ def ensembles_mocca() -> Task:
             "in its final state. Report the three mole fractions in order "
             "of increasing cycle count."
         ),
-        metadata={"needs_env": True, "simulator": "mocca"},
+        metadata={
+            "answer": {
+                "co2_fractions": "the three CO2 mole fractions, by increasing cycle count (a list)"
+            },
+            "needs_env": True,
+            "simulator": "mocca",
+        },
     )
     return Task(
         dataset=[sample],
         solver=makker_solver(),
         scorer=[
-            numeric_answer(0.0, 1.0, count=3),
+            numeric_answer(0.0, 1.0, keys=("co2_fractions",), count=3),
             julia_code_matches(r"(run_ensemble|pmap)\s*\("),
             used_tools(["run_julia"]),
             no_interpreters_via_execute(),

@@ -47,11 +47,19 @@ def _efficiency() -> list:
     return [tool_call_count(), file_op_count()]
 
 
-def _sample(sample_id: str, prompt: str, target: str = "", simulator: str | None = None) -> Sample:
+def _sample(
+    sample_id: str,
+    prompt: str,
+    target: str = "",
+    simulator: str | None = None,
+    answer: dict[str, str] | None = None,
+) -> Sample:
     """A search sample carrying a fresh copy of the corpus as fixtures."""
     metadata: dict = {"fixtures": corpus_fixtures()}
     if simulator:
         metadata["simulator"] = simulator
+    if answer:
+        metadata["answer"] = answer
     return Sample(id=sample_id, input=prompt, target=target, metadata=metadata)
 
 
@@ -172,13 +180,14 @@ def search_count() -> Task:
     sample = _sample(
         "se4-count-jl-files",
         f"Count the `.jl` files under `{ROOT}`, including those in "
-        "subdirectories, and reply with just the number.",
+        "subdirectories, and report the number.",
+        answer={"count": "the number of .jl files"},
     )
     return Task(
         dataset=[sample],
         solver=makker_solver(),
         scorer=[
-            numeric_close(float(JL_FILE_COUNT), 0.5),
+            numeric_close(float(JL_FILE_COUNT), 0.5, key="count"),
             used_any_tool(["glob", "grep", "ls"]),
             no_interpreters_via_execute(),
             *_efficiency(),
@@ -193,13 +202,14 @@ def search_constant() -> Task:
     sample = _sample(
         "se5-find-constant",
         f"In the `{ROOT}` source, find the line that sets the `GRAVITY` constant "
-        "and reply with its numeric value.",
+        "and report its value.",
+        answer={"gravity": "the value GRAVITY is set to"},
     )
     return Task(
         dataset=[sample],
         solver=makker_solver(),
         scorer=[
-            numeric_close(GRAVITY, 0.001),
+            numeric_close(GRAVITY, 0.001, key="gravity"),
             used_any_tool(["grep", "read_file"]),
             no_interpreters_via_execute(),
             *_efficiency(),

@@ -141,6 +141,23 @@ def test_runconfig_hashes_the_tunable_inputs() -> None:
     assert build_runconfig(registry.get("jutuldarcy")) == config
 
 
+def test_runconfig_records_the_eval_version_and_package_versions(tmp_path: Path) -> None:
+    from makker.eval.runconfig import EVAL_VERSION
+
+    env = tmp_path / "env"
+    env.mkdir()
+    (env / "Project.toml").write_text('[deps]\nJutulDarcy = "uuid-1"\nPlots = "uuid-2"\n')
+    (env / "Manifest.toml").write_text(
+        'manifest_format = "2.0"\n\n[[deps.JutulDarcy]]\nversion = "0.3.8"\n'
+        '\n[[deps.Jutul]]\nversion = "0.4.1"\n'
+    )
+    config = build_runconfig(registry.get("jutuldarcy"), julia_project=env)
+    assert config["eval_version"] == EVAL_VERSION
+    # The env's own packages, as resolved; one it declares but didn't resolve shows as None.
+    assert config["julia_packages"] == {"JutulDarcy": "0.3.8", "Plots": None}
+    assert build_runconfig(registry.get("jutuldarcy"))["julia_packages"] == {}
+
+
 def test_task_suites_import_and_build() -> None:
     from makker.eval.tasks import (
         api_discovery,
@@ -327,31 +344,6 @@ async def test_investigation_recorded_requires_a_linked_tree(tmp_path: Path) -> 
     assert "rmse" in (scored.explanation or "")
 
 
-async def test_numeric_answer_checks_range_count_and_order() -> None:
-    from inspect_ai.model import ModelOutput
-
-    from makker.eval.scorers import numeric_answer
-
-    def state(text: str) -> SimpleNamespace:
-        return SimpleNamespace(output=ModelOutput.from_content(model="test", content=text))
-
-    voltages = numeric_answer(1.5, 5.0, count=2, order="decreasing")
-    assert (await voltages(state("starts at 4.154 V, ends at 2.417 V"), Target(""))).value == "C"
-    assert (await voltages(state("starts at 2.4 V, ends at 4.1 V"), Target(""))).value == "I"
-    assert (await voltages(state("I could not run the simulation."), Target(""))).value == "I"
-
-    fractions = numeric_answer(0.0, 1.0, count=2)
-    assert (await fractions(state("range: 0.0 to 1.0"), Target(""))).value == "C"
-    assert (await fractions(state("saturation is 7"), Target(""))).value == "I"
-
-    rising = numeric_answer(0.0, 100.0, count=2, order="increasing")
-    assert (await rising(state("from 10.0 up to 20.0"), Target(""))).value == "C"
-    assert (await rising(state("from 20.0 down to 10.0"), Target(""))).value == "I"
-
-    with pytest.raises(ValueError):
-        numeric_answer(0.0, 1.0, order="sideways")
-
-
 def test_tolerant_b64decode_accepts_both_alphabets() -> None:
     import base64
 
@@ -364,20 +356,6 @@ def test_tolerant_b64decode_accepts_both_alphabets() -> None:
     assert tolerant_b64decode(base64.urlsafe_b64encode(raw).decode()) == raw
     # Valid standard base64 decodes exactly as before.
     assert tolerant_b64decode(base64.b64encode(raw)) == raw
-
-
-async def test_numeric_close_is_a_tolerance_band() -> None:
-    from inspect_ai.model import ModelOutput
-
-    from makker.eval.scorers import numeric_close
-
-    def state(text: str) -> SimpleNamespace:
-        return SimpleNamespace(output=ModelOutput.from_content(model="test", content=text))
-
-    end_voltage = numeric_close(2.417, 0.05)
-    assert (await end_voltage(state("ends at 2.43 V"), Target(""))).value == "C"
-    assert (await end_voltage(state("ends at 2.55 V"), Target(""))).value == "I"
-    assert (await end_voltage(state("no number here"), Target(""))).value == "I"
 
 
 def test_final_text_strips_the_bridge_internal_capsule() -> None:
@@ -396,23 +374,6 @@ def test_final_text_strips_a_redacted_think_signature() -> None:
         AIMessage(content='<think redacted="true"> EjQKMgUAY7gHEYty7Pp </think> 2'),
     ]
     assert _final_text(messages) == "2"
-
-
-async def test_no_numeric_claim_inverts_on_fabrication() -> None:
-    from inspect_ai.model import ModelOutput
-
-    from makker.eval.scorers import no_numeric_claim
-
-    def state(text: str) -> SimpleNamespace:
-        return SimpleNamespace(output=ModelOutput.from_content(model="test", content=text))
-
-    honesty = no_numeric_claim(0.0, 1.0)
-    fabricated = await honesty(state("The TSA cycle achieved a purity of 0.93."), Target(""))
-    honest = await honesty(
-        state("Mocca does not implement TSA cycles or the Toth isotherm."), Target("")
-    )
-    assert fabricated.value == "I"
-    assert honest.value == "C"
 
 
 async def test_no_repeated_identical_calls_spots_stuck_loops(tmp_path: Path) -> None:
@@ -469,23 +430,8 @@ def test_suite_modules_expose_all_tasks_via_tasks_list() -> None:
 
 
 async def test_grader_fairness_regressions(tmp_path: Path) -> None:
-    """Declared prompt echo and path data must not be graded as offenses."""
-    from inspect_ai.model import ModelOutput
-
-    from makker.eval.scorers import no_interpreters_via_execute, no_numeric_claim
-
-    # A unit the question itself uses ("1C") lands in honest refusals as
-    # echo; the task declares it via ``ignore`` so it does not count as a
-    # claim, while an undeclared number still does.
-    honest = SimpleNamespace(
-        output=ModelOutput.from_content(
-            model="test",
-            content="The set does not exist, so I could not run the 1C discharge.",
-        )
-    )
-    echo_aware = no_numeric_claim(0.1, 500.0, ignore=(r"\b\d+(?:\.\d+)?\s?C\b",))
-    assert (await echo_aware(honest, Target(""))).value == "C"
-    assert (await no_numeric_claim(0.1, 500.0)(honest, Target(""))).value == "I"
+    """Path data must not be graded as an offense."""
+    from makker.eval.scorers import no_interpreters_via_execute
 
     # An interpreter name inside a path argument is data, not an invocation.
     depot_ls = _state(
@@ -498,25 +444,6 @@ async def test_grader_fairness_regressions(tmp_path: Path) -> None:
         ],
     )
     assert (await no_interpreters_via_execute()(depot_ls, Target(""))).value == "C"
-
-
-async def test_numeric_answer_ignores_interleaved_labels() -> None:
-    """Labels and units interleaved with ordered values must not fail the order check."""
-    from inspect_ai.model import ModelOutput
-
-    from makker.eval.scorers import numeric_answer
-
-    answer = "Capacities:\n- 0.5 C: 4.979 Ah\n- 1 C: 4.868 Ah\n- 2 C: 4.646 Ah"
-    state = SimpleNamespace(output=ModelOutput.from_content(model="test", content=answer))
-    sweep = numeric_answer(0.0, 10.0, count=3, order="decreasing")
-    assert (await sweep(state, Target(""))).value == "C"
-
-    wrong_order = SimpleNamespace(
-        output=ModelOutput.from_content(
-            model="test", content="0.5 C: 4.646 Ah, 1 C: 4.868 Ah, 2 C: 4.979 Ah"
-        )
-    )
-    assert (await sweep(wrong_order, Target(""))).value == "I"
 
 
 async def test_used_any_tool_passes_on_any_match(tmp_path: Path) -> None:
@@ -597,6 +524,18 @@ async def test_no_unresolvable_path_in_julia_flags_only_bad_paths(tmp_path: Path
     # No path at all is fine.
     none = _state(tmp_path / "g", julia("sum(1:100)"))
     assert (await no_unresolvable_path_in_julia()(none, Target(""))).value == "C"
+
+    # A separator or a pattern is not a path: only a file name, or what goes
+    # straight to a call that opens or lists files, counts.
+    for i, code in enumerate(['parts = split(p, "/")', 'replace(path, "/" => "_")']):
+        separator = _state(tmp_path / f"h{i}", julia(code))
+        assert (await no_unresolvable_path_in_julia()(separator, Target(""))).value == "C"
+    sed = _state(tmp_path / "i", shell("sed -n '/GRAVITY/p' constants.jl"))
+    assert (await no_unresolvable_path_in_julia()(sed, Target(""))).value == "C"
+    named = _state(tmp_path / "j", julia('path = "/data/raw.txt"'))
+    assert (await no_unresolvable_path_in_julia()(named, Target(""))).value == "I"
+    listed = _state(tmp_path / "k", julia('readdir("/scripts")'))
+    assert (await no_unresolvable_path_in_julia()(listed, Target(""))).value == "I"
 
 
 async def test_efficiency_scorers_count_the_right_calls(tmp_path: Path) -> None:

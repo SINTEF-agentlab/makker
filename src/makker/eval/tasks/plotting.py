@@ -16,7 +16,7 @@ from inspect_ai.dataset import Sample
 from makker.eval.scorers import (
     artifact_produced,
     no_interpreters_via_execute,
-    reads_digit,
+    numeric_close,
     tool_call_matches,
     used_tools,
 )
@@ -52,8 +52,9 @@ def plotting() -> Task:
 # raw-data maximum is NOT the answer: the bar's height is only apparent in the
 # plot, keeping the check a genuine read of the figure rather than of the
 # numbers. A fixed seed keeps the golden deterministic; the bar stays in 2..7 so
-# it reads on clear gridlines well below the strays.
-_VALUE = str(random.Random(20260615).randint(2, 7))
+# it reads on clear gridlines well below the strays, and is never 5, the bar's own
+# x position, so a model that reads the wrong axis cannot pass.
+_VALUE = str(random.Random(20260615).choice((2, 3, 4, 6, 7)))
 _STRAYS = ((2, 9), (8, 8))  # high, off to the sides; above any bar height
 
 
@@ -84,10 +85,11 @@ def plotting_vision() -> Task:
             "600 pixels. Most of the points form a single vertical bar; two "
             "stray points sit higher up, off to the sides. View the figure so "
             "the image comes back to you, then read off the y-axis the height "
-            "the bar reaches (ignore the two stray points) and reply with only "
-            "that integer."
+            "the bar reaches (ignore the two stray points) and report that "
+            "integer."
         ),
         metadata={
+            "answer": {"bar_height": "the height the bar reaches on the y-axis"},
             "fixtures": {"points.csv": _POINTS_CSV},
             "needs_env": True,
             "needs_display": True,
@@ -97,7 +99,8 @@ def plotting_vision() -> Task:
         dataset=[sample],
         solver=makker_solver(),
         scorer=[
-            reads_digit(_VALUE),
+            # Read off the agent's own plot: the y-axis height, never the bar's x.
+            numeric_close(float(_VALUE), 0.4, key="bar_height"),
             tool_call_matches("plot_julia", r'"view":\s*true'),
             artifact_produced(".png"),
             no_interpreters_via_execute(),

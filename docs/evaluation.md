@@ -68,6 +68,26 @@ answer check with at least one trace check (`eval/scorers.py`):
   for investigation tasks, where the recorded process is the deliverable.
 - `includes()` (Inspect built-in): the target value appears in the answer.
 
+### The answer line
+
+A task that grades values names them in its sample metadata, as `answer`:
+a mapping from key to what the value is. The solver then asks the agent to
+end its final reply with one line, `ANSWER: {...}`, holding those keys as
+JSON numbers or lists of numbers, and `null` for a value it could not
+obtain. The value scorers read only that line, never the prose:
+
+- `numeric_close(expected, tol, key=...)`: the key's value is within `tol`
+  of a golden.
+- `numeric_answer(low, high, keys=(...), count=..., order=...)`: exactly
+  `count` values, all in a physical range, ordered the way the physics
+  demands.
+- `no_numeric_claim(low, high, key=...)`: for an honesty task, the line is
+  there and gives no value in the range (`null` is the honest answer).
+
+A missing or unparseable line fails, so an empty reply or a run that timed
+out never passes, a negative task included. Picking numbers out of the
+prose used to pass numbers echoed from the prompt and misread others.
+
 ### Goldens: pin the physics, not the path
 
 The agent takes a different path every run: different probes, different
@@ -82,12 +102,11 @@ every physics-determining choice (which cell, which protocol, which case),
 leaving the agent freedom only in *how*. A prompt like "a small two-phase
 case" is not golden-able, because the agent legitimately picks grid sizes.
 Until the prompt is pinned, it gets structural checks instead
-(`numeric_answer`: values in a physical range, ordered the way physics
-demands).
+(`numeric_answer`).
 
 Capture is always from a trusted, agent-free run: execute the canonical
 case directly in Julia in the instantiated env, read the number, commit it
-in the task with a tolerance (`numeric_close(expected, tol)`) and a
+in the task with a tolerance (`numeric_close(expected, tol, key=...)`) and a
 provenance comment. The tolerance absorbs solver and version noise, not
 model creativity, so measure the noise before trusting one: a result that
 depends on which timestep crosses a threshold jitters between runs, a
@@ -103,10 +122,21 @@ procedure, never by re-running the agent until it agrees.
 
 Each sample stores a RunConfig (`eval/runconfig.py`): hashes of the
 assembled system prompt, every active skill file, and the instantiated Julia
-manifest, plus the Makker commit (and whether the tree was dirty) and
-dependency versions. Two runs that differ in exactly one hash answer "did
+manifest, plus the Makker commit (and whether the tree was dirty),
+dependency versions, and the version each package the Julia environment
+declares resolved to. Two runs that differ in exactly one hash answer "did
 that change help" mechanically. Treat dirty-tree runs as exploratory, never
 as baselines.
+
+The goldens follow the simulator packages as upstream releases them, so a
+score that moves with no change here is first checked against the recorded
+package versions. Pin the environment only for a run whose numbers you
+publish.
+
+The RunConfig also carries `eval_version`, bumped whenever the tasks or
+their scoring change so that scores no longer compare with earlier runs (2:
+values come from the answer line). A report built from runs of different
+versions says so at the top.
 
 This is also the improvement loop: when real use surfaces a failure, add it
 as a task first, fix the harness, and let the score movement prove the fix.
@@ -156,6 +186,8 @@ def my_suite() -> Task:
         input="The user prompt.",
         target="expected substring",
         metadata={
+            # Only for a task that grades values (see "The answer line").
+            "answer": {"total": "the sum of the column"},
             "fixtures": {"data.csv": "x,y\n1,2\n"},  # written into the workspace
             "needs_env": False,
             "simulator": "jutuldarcy",
