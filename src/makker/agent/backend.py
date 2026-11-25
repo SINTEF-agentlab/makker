@@ -10,6 +10,7 @@ drive-absolute glob patterns.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from deepagents.backends import CompositeBackend, LocalShellBackend
 from deepagents.backends.protocol import (
@@ -149,12 +150,11 @@ class WorkspaceShellBackend(LocalShellBackend):
             return DeleteResult(error=reason)
         return super().delete(file_path)
 
-    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+    # The guard sits on the private ``_execute`` that both ``execute`` and the
+    # async path call, not on ``execute`` itself: upstream only kills a cancelled
+    # command's process group when ``execute`` is not overridden, and a stopped
+    # turn must not leave its shell command running.
+    def _execute(self, command: str, **kwargs: Any) -> ExecuteResponse:
         if interpreter_invocation(command, _BLOCKED_INTERPRETERS) is not None:
             return ExecuteResponse(output=_NO_JULIA_SHELL_MSG, exit_code=2)
-        return super().execute(command, timeout=timeout)
-
-    async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        if interpreter_invocation(command, _BLOCKED_INTERPRETERS) is not None:
-            return ExecuteResponse(output=_NO_JULIA_SHELL_MSG, exit_code=2)
-        return await super().aexecute(command, timeout=timeout)
+        return super()._execute(command, **kwargs)

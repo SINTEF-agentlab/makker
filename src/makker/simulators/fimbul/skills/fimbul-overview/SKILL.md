@@ -33,7 +33,7 @@ Analytical examples can return additional reference solutions alongside the case
 
 Find production and closed-loop examples under `examples/production/`,
 ATES/BTES and other storage setups under `examples/storage/`, and reference
-heat solutions under `examples/analytical/`.
+heat solutions under `examples/validation/`.
 Preserve the factories' energy formulation and connected-well settings.
 For short closed-loop checks, shorten the schedule before coarsening geometry
 that contains well trajectories.

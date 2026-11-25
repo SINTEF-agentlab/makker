@@ -24,10 +24,13 @@ Bonito = "824d6782-a2ef-11e9-3a09-e5662e0c26f8"
 WGLMakie = "276b4fcb-3e11-5398-bf8b-a0c2d153d008"
 JutulDarcy = "82210473-ab04-4dce-b31b-11573c4f8e0a"
 
-# Minimum simulator and Jutul releases supported by this environment.
+# Minimum simulator and Jutul releases supported by this environment. Fimbul
+# 0.4 also admits JutulDarcy 0.4.1, a pair Fimbul's own notes call broken, so
+# both floors are explicit.
 [compat]
-Fimbul = "0.4"
-Jutul = "0.5.4"
+Fimbul = "0.5"
+Jutul = "0.5.9"
+JutulDarcy = "0.4.1"
 
 # Both deps are Makker's in-env Julia runtime, declared as relative `[sources]`
 # paths so they survive the copy into a workspace. Makker is the shared,

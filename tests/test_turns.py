@@ -306,3 +306,30 @@ async def test_turn_runner_records_user_message_and_hitl_round_trip(
         assert kinds == ["message_user", "hitl_request", "hitl_response"]
     finally:
         log.close()
+
+
+async def test_a_tool_paused_by_an_interrupt_is_not_reported_finished() -> None:
+    # langgraph closes a call still open when the run pauses with no output and
+    # no error; it is neither finished nor failed until the run resumes.
+    human = HumanMessage(content="hi")
+    agent = ScriptedV3Agent(
+        [
+            v3_tool_event(
+                {
+                    "event": "tool-started",
+                    "tool_call_id": "tool-task",
+                    "tool_name": "task",
+                    "input": {"description": "ask first"},
+                }
+            ),
+            v3_values_event([human]),
+        ]
+    )
+    seen: list[object] = []
+
+    await TurnRunner(agent, thread_id="thread-1").run_prompt(
+        "hi", on_message=lambda msg: seen.append(msg)
+    )
+
+    events = [(m.event, m.tool_call_id) for m in seen if isinstance(m, TurnToolEvent)]
+    assert events == [("started", "tool-task")]

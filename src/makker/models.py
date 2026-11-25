@@ -45,7 +45,7 @@ class ModelInfo:
 # The agent's default model and the env var that overrides it. They live here, in a
 # light module, so the CLI (help text, version, doctor) can read them without
 # importing the agent builder, which pulls the whole LangChain/deepagents stack.
-DEFAULT_MODEL = "openai:gpt-6.1-sol"
+DEFAULT_MODEL = "openai:gpt-6.2-sol"
 MODEL_ENV_VAR = "MAKKER_MODEL"
 
 
@@ -156,6 +156,12 @@ def _ollama_window(model_id: str) -> int | None:
     return ollama_client.num_ctx(ollama_client.model_name(model_id))
 
 
+# The Gemini API version the chat model itself uses (langchain-google-genai pins
+# it). google-genai 3 defaults to "v1", where previews and -latest aliases are
+# missing, so the lookups below would not see the models a session can run.
+_GEMINI_API = "v1beta"
+
+
 def _google_context_window(name: str) -> int | None:
     """The model's input limit from the Gemini API, for models the installed
     provider package has no profile entry for yet.
@@ -171,9 +177,11 @@ def _google_context_window(name: str) -> int | None:
         return None
     for _ in range(2):
         with contextlib.suppress(Exception):
-            from google.genai import Client
+            from google.genai import Client, types
 
-            with Client(api_key=key) as client:
+            with Client(
+                api_key=key, http_options=types.HttpOptions(api_version=_GEMINI_API)
+            ) as client:
                 limit = client.models.get(model=name).input_token_limit
             return int(limit) if limit else None
     return None
@@ -346,7 +354,9 @@ def _google_available() -> list[str]:
     from google import genai
     from google.genai import types
 
-    with genai.Client(http_options=types.HttpOptions(timeout=5_000)) as client:
+    with genai.Client(
+        http_options=types.HttpOptions(timeout=5_000, api_version=_GEMINI_API)
+    ) as client:
         return [
             model.name.removeprefix("models/")
             for model in client.models.list()

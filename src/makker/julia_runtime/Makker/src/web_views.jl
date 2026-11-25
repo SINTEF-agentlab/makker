@@ -13,7 +13,7 @@ import WGLMakie
 const Makie = WGLMakie.Makie
 const Bonito = WGLMakie.Bonito
 
-# The WGLMakie internals used here are unchanged from 0.13.13 through 0.13.16.
+# The WGLMakie internals used here are unchanged from 0.13.13 through 0.13.17.
 supported() = v"0.13.13" <= Base.pkgversion(WGLMakie) < v"0.14"
 
 # The browser session showing each figure (keyed by its scene, since a Figure is
