@@ -303,6 +303,9 @@ def test_eval_cli_all_expands_every_builtin_suite(tmp_path: Path, monkeypatch) -
     tasks = captured["tasks"]
     assert isinstance(tasks, list)
     assert len(tasks) >= len(eval_cmd._available_suites())
+    # Sessions run one at a time, so tasks must too: a sample queued behind
+    # another task's session would spend its own time limit waiting.
+    assert captured["max_tasks"] == 1
 
 
 def test_eval_cli_rejects_all_with_named_suite(capsys) -> None:

@@ -35,7 +35,8 @@ runs samples one at a time. Logs land in the Makker home under
 
 `--model` takes Inspect's `provider/model` ids and defaults to the agent's
 default model. A comma-separated list runs a matrix that can mix cloud and
-local models in one run.
+local models in one run. The models take turns, one task at a time: a sample
+queued behind another model's session would spend its own time limit waiting.
 
 ## How a sample runs
 
