@@ -800,6 +800,40 @@ async def test_model_switch_rebuilds_and_persists_to_workspace(
     assert load_workspace_config(tmp_path).model == "ollama:llama3.1"
 
 
+async def test_effort_command_saves_the_level_and_rebuilds(
+    session: Session, tmp_path: Path, monkeypatch
+) -> None:
+    from makker import model_settings
+    from makker.agent.builder import build_backend
+
+    levels = (["low", "medium", "high"], "medium")
+    monkeypatch.setattr(model_settings, "effort_levels", lambda model_id: levels)
+    calls: list[str] = []
+
+    def factory(model_id: str, dirs):
+        calls.append(model_id)
+        return _stub_agent(), build_backend(workspace=tmp_path)
+
+    app = TUIApp(
+        agent=_stub_agent(),
+        session=session,
+        backend=build_backend(workspace=tmp_path),
+        model_label="openai:gpt-test",
+        agent_factory=factory,
+    )
+    async with app.run_test() as pilot:
+        await wait_until_ready(app)
+        await app._handle_command("/effort extreme")
+        await app._handle_command("/effort high")
+        await pilot.pause()
+        notes = [b._content for b in app.query(MessageBlock) if b.border_title == "System"]
+
+    assert any("offers these levels: low, medium, high" in note for note in notes)
+    assert any("effort set to `high`" in note for note in notes)
+    assert calls == ["openai:gpt-test"]  # rebuilt once, on the same model
+    assert model_settings.load_settings("openai:gpt-test").effort == "high"
+
+
 async def test_cloud_ollama_switch_skips_pull(
     session: Session, tmp_path: Path, monkeypatch
 ) -> None:

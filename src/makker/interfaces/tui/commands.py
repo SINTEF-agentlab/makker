@@ -52,6 +52,11 @@ BASE_COMMANDS: tuple[SlashCommandSpec, ...] = (
         "[provider:model]",
     ),
     SlashCommandSpec(
+        "/effort",
+        "show the model's effort levels, or set one for the model",
+        "[level]",
+    ),
+    SlashCommandSpec(
         "/approval-mode",
         "set approval policy for this session",
         "[ask|workspace|auto]",

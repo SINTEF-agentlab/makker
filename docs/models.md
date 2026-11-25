@@ -21,6 +21,25 @@ same short list, and typing searches everything.
 A switch keeps the conversation (see [context handling](context.md)) and is
 saved for the workspace, so the next session there starts on it.
 
+## Settings
+
+Each model can be set to run differently, with only the settings it supports:
+
+- **Effort:** how hard a reasoning model thinks, from the levels the model
+  offers (the provider data lists them for cloud models; Ollama reports them for
+  local ones). Unset, a model runs at its own default, and OpenAI models at
+  medium.
+- **Context size**, for local models: each size is listed with the memory it
+  takes on this machine and whether it still fits on the GPU. Unset, it is
+  sized automatically (see [local models](#local-models-ollama)).
+- **Output limit:** the longest reply the model may write, up to its maximum.
+
+Settings are saved per model in the user config and apply in every workspace.
+A change applies to the running session from its next turn. In the web UI the
+effort shows after the model's name; click it, or **Model settings…** in the
+model menu, to change these. In the terminal, `/effort` lists the levels and
+`/effort <level>` sets one.
+
 Providers beyond the bundled five work once their LangChain package is
 installed, and Makker names the exact package when it is missing.
 API keys are prompted for on first use and stored in the user-global `.env`
@@ -56,7 +75,8 @@ thinking is off without a budget. The builder asks the model's bundled
 profile (`BaseChatModel.profile`) whether it reasons and then enables, per
 provider:
 
-- OpenAI: `reasoning={"effort": "medium", "summary": "auto"}`. The model
+- OpenAI: `reasoning={"effort": "medium", "summary": "auto"}`, or the effort
+  chosen in the [settings](#settings). The model
   reasons when a task warrants it and the summary streams into the TUI's
   reasoning card while it thinks. The `-chat` hybrids, which reject the
   effort parameter, are excluded by the same profile data (they keep
@@ -106,15 +126,15 @@ you:
   its maximum, that Ollama keeps entirely on the GPU. Memory per token
   differs widely between models, so this is measured, not estimated: the
   first time a model is used on a machine, Makker loads it at its maximum
-  and, only if that spills to the CPU, a few more times to narrow it down
-  (seconds per load). The answer is remembered per model version and
+  and at 32K (which gives the memory each size takes), and, if the maximum
+  spills to the CPU, a few more times to narrow it down (seconds per load). The answer is remembered per model version and
   machine in `ollama-context.json` in the state home; delete it to measure
   again. A model that spills even at 32K tokens is loaded at 32K, partly on
   the CPU, since the agent's own prompt needs that much. A model whose
   Modelfile sets `num_ctx` (such as a `-64k` variant) is loaded at that
-  size instead, so to choose a size yourself, create a variant with
-  `PARAMETER num_ctx <tokens>`. Hosted `:cloud` models run at their full
-  window.
+  size instead. To choose a size, use the context size in the model's
+  [settings](#settings), which shows what each size costs in memory.
+  Hosted `:cloud` models run at their full window.
 - Malformed tool calls: a weaker model occasionally serializes a tool
   call with unparseable arguments (e.g. two parallel calls merged into
   one). Such a reply would otherwise end the turn silently; instead the

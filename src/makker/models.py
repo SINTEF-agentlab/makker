@@ -170,6 +170,28 @@ def context_window(model_id: str) -> int | None:
     return fallback(model_id) if fallback else None
 
 
+def bundled_profile(model_id: str) -> dict[str, Any]:
+    """The provider package's data for ``model_id``, read without building the
+    model (so no key is needed); ``{}`` for a local or unlisted model."""
+    provider, _, name = model_id.partition(":")
+    return _provider_profiles(provider).get(name, {})
+
+
+def local_context(model_id: str, *, measure: bool = True) -> int | None:
+    """The context a local Ollama model is loaded with: the user's setting for it
+    (``model_settings``), else the model's own or what fits this machine's GPU
+    (``ollama_client.num_ctx``), never past the model's maximum."""
+    from makker import ollama_client
+    from makker.model_settings import load_settings
+
+    name = ollama_client.model_name(model_id)
+    chosen = load_settings(model_id).context
+    if chosen:
+        maximum = ollama_client.context_window(name)
+        return min(chosen, maximum) if maximum else chosen
+    return ollama_client.num_ctx(name, measure=measure)
+
+
 @cache
 def _provider_profiles(provider: str) -> dict[str, Any]:
     """A cloud provider's bundled model profiles, read once per process."""
@@ -184,10 +206,11 @@ def _ollama_window(model_id: str) -> int | None:
     if is_ollama_cloud(model_id):
         # Hosted, so no local memory limit applies: Ollama runs it at its maximum.
         return ollama_client.context_window(name)
-    # The *loaded* window (what fits this machine's GPU, or the model's own
-    # setting), not the daemon's theoretical maximum: the model is built with
-    # this, so the context figure and the auto-compaction trigger must agree with it.
-    return ollama_client.num_ctx(name)
+    # The *loaded* window (the user's choice, the model's own setting, or what
+    # fits this machine's GPU), not the daemon's theoretical maximum: the model is
+    # built with this, so the context figure and the auto-compaction trigger must
+    # agree with it.
+    return local_context(model_id)
 
 
 # The Gemini API version the chat model itself uses (langchain-google-genai pins

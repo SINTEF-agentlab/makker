@@ -155,6 +155,14 @@ export function RegenerateIcon() {
   );
 }
 
+export function ChevronLeft() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" {...stroke}>
+      <path d="M15 6l-6 6 6 6" />
+    </svg>
+  );
+}
+
 export function CheckIcon() {
   return (
     <svg viewBox="0 0 24 24" width="14" height="14" {...stroke}>

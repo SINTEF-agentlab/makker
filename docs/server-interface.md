@@ -118,6 +118,9 @@ second is refused while the first is open.
 | `GET` | `/models/live` | The same list refreshed from configured provider APIs and the Ollama daemon (best effort; API-listed tool support is unverified) |
 | `GET` | `/models/menu?current=` | The model menu's short list: `sections` (pinned, recent, the newest per provider with a key, installed local models) and `pinned` |
 | `POST` | `/models/pinned` | Pin a model to the top of the menu, or unpin it: `{"model", "pinned"}` |
+| `GET` | `/models/settings?model=` | What a model can be set to: `settings` (the saved `effort`, `output`, `context`), and `effort` (levels, default, current), `output` (choices, default) and `context` (local models: sizes with their memory and whether they stay on the GPU, plus `auto` and `measured`), each `null` when the model does not support it |
+| `POST` | `/models/settings` | Save a model's settings, `{"model", "effort", "output", "context"}` (an omitted one runs at its default), and return them as `GET` does. A running session picks them up when its agent is rebuilt: send `set_model` again with the same model |
+| `POST` | `/models/measure` | Measure a local model's memory at each context size by loading it in Ollama (seconds to a minute, once per model version): `{"model"}`, returned as `GET /models/settings` |
 | `GET` | `/models/window` | A model's context window: `window`, `window_source` (`provider`, `ollama` or `assumed`) and `compact_at` |
 | `GET` | `/credentials` | Which providers have keys, and whether a shell variable shadows a saved one |
 | `POST` | `/credentials` | Save a provider API key (used by the missing-key prompt) |

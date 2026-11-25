@@ -34,7 +34,7 @@ def test_ollama_cloud_runs_at_its_full_window(monkeypatch) -> None:
     from makker.agent.builder import _ollama_settings
 
     monkeypatch.setattr(ollama_client, "context_window", lambda name: 262_144)
-    monkeypatch.setattr(ollama_client, "num_ctx", lambda name: 65_536)
+    monkeypatch.setattr(ollama_client, "num_ctx", lambda name, **kw: 65_536)
     monkeypatch.setattr(ollama_client, "thinks", lambda name: False)
     assert context_budget("ollama:kimi-k2.6:cloud") == ContextBudget(262_144, "ollama")
     assert "num_ctx" not in _ollama_settings("ollama:kimi-k2.6:cloud")

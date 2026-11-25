@@ -38,13 +38,22 @@ from someone else only if you would run its code.
 ## User config
 
 `<state home>/config.toml` (default `~/.local/share/makker/config.toml`)
-holds user-wide defaults, currently the model:
+holds user-wide defaults: the model, the models pinned to the top of the
+model menu, and each model's [settings](models.md#settings):
 
 ```toml
 model = "<provider:model>"
+pinned_models = ["<provider:model>"]
+
+[model_settings."<provider:model>"]
+effort = "high"
+output = 32768
+context = 131072  # local models only
 ```
 
-Set it from the TUI model selector with `Ctrl+A` (save for all workspaces).
+Set the model from the TUI model selector with `Ctrl+A` (save for all
+workspaces), and the settings from the model's settings in the web UI or
+`/effort` in the TUI.
 
 ## API keys
 

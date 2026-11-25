@@ -10,6 +10,7 @@ Slash commands typed into the input box:
 - ``/transcript md``: render the transcript as markdown instead.
 - ``/add-dir <path>``: add an extra folder so the agent can read/edit it.
 - ``/model [provider:model]``: open the model selector, or switch directly.
+- ``/effort [level]``: show the model's effort levels, or set one for the model.
 - ``/context``: show how much of the model's context window is used.
 - ``/compact``: summarize older turns to free context space.
 - ``/memory [note | edit [note]]``: view workspace memory, or open it in $EDITOR.
@@ -1129,6 +1130,36 @@ class TUIApp(App[None]):
         self._refresh_context_status()
         self._refresh_subtitle()
         return True
+
+    async def _command_effort(self, arg: str) -> None:
+        """Show the current model's effort and its levels, or set one. The level is
+        saved for the model (``model_settings``) and applies from the next turn."""
+        from dataclasses import replace
+
+        from makker.model_settings import effort, effort_levels, load_settings, save_settings
+
+        model_id = self._model_label
+        levels, default = effort_levels(model_id) if model_id else ([], None)
+        if not levels:
+            await self._note(f"`{model_id or 'this model'}` has no effort levels to choose from.")
+            return
+        level = arg.strip().lower()
+        if not level:
+            await self._note(
+                f"effort is `{effort(model_id)}`. Levels: {', '.join(levels)}. "
+                "Usage: /effort <level>"
+            )
+            return
+        if level not in levels:
+            await self._note(f"`{model_id}` offers these levels: {', '.join(levels)}.")
+            return
+        if self._agent_factory is None or self._busy or self._pending_interrupts:
+            await self._note("finish or cancel the current turn before changing the effort.")
+            return
+        chosen = None if level == default else level
+        save_settings(model_id, replace(load_settings(model_id), effort=chosen))
+        if await self._rebuild_agent(model_id):
+            await self._note(f"effort set to `{level}` for `{model_id}`.")
 
     def _refresh_subtitle(self) -> None:
         parts = [self._session_label]

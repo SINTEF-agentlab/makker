@@ -66,6 +66,7 @@ from makker.agent.tools import (
     make_write_report_tool,
 )
 from makker.context_budget import ContextBudget, context_budget
+from makker.model_settings import DEFAULT_OUTPUT, chosen_effort, effort, load_settings
 from makker.models import PROVIDERS, is_ollama_cloud, provider_key_vars, provider_of
 from makker.paths import SHARED_SKILLS_DIR, workspace_memory_dir, workspace_root
 from makker.session import Session
@@ -155,11 +156,15 @@ def register_provider_profiles() -> None:
 # requested; older Claude models think only when given a budget, newer ones
 # think adaptively but keep it hidden unless a summary is asked for; Gemini
 # thinks by default but keeps the thoughts hidden.
-_OPENAI_REASONING = {"effort": "medium", "summary": "auto"}
+_OPENAI_EFFORT = "medium"
 _ANTHROPIC_THINKING_BUDGET_TOKENS = 10_000
-# Thinking spends from the same output budget as the answer, so the cap must
-# clear the thinking budget with room for a long reply.
-_ANTHROPIC_MAX_TOKENS = 24_000
+# The keyword each provider takes a chosen output limit under (``model_settings``).
+_OUTPUT_LIMIT_KEY = {
+    "openai": "max_tokens",
+    "anthropic": "max_tokens",
+    "google_genai": "max_output_tokens",
+    "openrouter": "max_tokens",
+}
 
 # How long a provider may go silent before the request is given up on. Left
 # unset, every cloud client inherits httpx's "wait forever", so a connection
@@ -184,21 +189,24 @@ _PROVIDER_TIMEOUTS: dict[str, Any] = {
 
 def _ollama_settings(model_id: str) -> dict[str, Any]:
     from makker import ollama_client
+    from makker.models import local_context
 
     name = ollama_client.model_name(model_id)
     settings: dict[str, Any] = {}
     # A hosted (``:cloud``) model runs at its maximum context unless told
     # otherwise; only a local one needs a size that fits this machine's memory.
     if not is_ollama_cloud(model_id):
-        settings["num_ctx"] = ollama_client.num_ctx(name)
+        settings["num_ctx"] = local_context(model_id)
     # Thinking-capable local models must have think mode requested
     # explicitly: left at the daemon default, the thinking segment is
     # dropped on the client side, so a turn the model spends entirely on
     # thinking surfaces as an empty reply with no tool calls, and the agent
     # falls silent. Requested, the thinking is separated, tool calls parse
     # reliably, and the reasoning becomes visible like the cloud providers'.
+    # A chosen level is sent as the level ("none" turns thinking off).
     if ollama_client.thinks(name):
-        settings["reasoning"] = True
+        chosen = chosen_effort(model_id)
+        settings["reasoning"] = (chosen != "none" and chosen) if chosen else True
     return settings
 
 
@@ -215,7 +223,10 @@ def _openai_settings(model_id: str) -> dict[str, Any] | None:
     # the Responses API for function tools, even before their profile ships.
     newer_reasoning = not profile and major is not None and int(major[1]) >= 6
     if profile.get("reasoning_output") or newer_reasoning:
-        return {"reasoning": dict(_OPENAI_REASONING), "use_responses_api": True}
+        level = effort(model_id) or _OPENAI_EFFORT
+        # A summary keeps the reasoning visible; with none there is nothing to show.
+        reasoning = {"effort": level} if level == "none" else {"effort": level, "summary": "auto"}
+        return {"reasoning": reasoning, "use_responses_api": True}
     return None
 
 
@@ -228,11 +239,17 @@ def _anthropic_settings(model_id: str) -> dict[str, Any] | None:
     # They think adaptively at the model's default effort, and the summary
     # keeps the thinking visible. The profile's temperature flag marks them
     # all; its effort levels miss Haiku 5.5.
+    # A chosen output limit replaces the cap in ``_resolve_model_for_agent``.
+    limit = load_settings(model_id).output or DEFAULT_OUTPUT["anthropic"]
     if profile.get("temperature") is False:
-        thinking = {"type": "adaptive", "display": "summarized"}
+        settings: dict[str, Any] = {"thinking": {"type": "adaptive", "display": "summarized"}}
+        if chosen := chosen_effort(model_id):
+            settings["output_config"] = {"effort": chosen}
     else:
-        thinking = {"type": "enabled", "budget_tokens": _ANTHROPIC_THINKING_BUDGET_TOKENS}
-    return {"thinking": thinking, "max_tokens": _ANTHROPIC_MAX_TOKENS}
+        # The budget must stay under the output limit it spends from.
+        budget = min(_ANTHROPIC_THINKING_BUDGET_TOKENS, limit // 2)
+        settings = {"thinking": {"type": "enabled", "budget_tokens": budget}}
+    return {**settings, "max_tokens": DEFAULT_OUTPUT["anthropic"]}
 
 
 def _google_settings(model_id: str) -> dict[str, Any] | None:
@@ -242,7 +259,10 @@ def _google_settings(model_id: str) -> dict[str, Any] | None:
     # legacy non-thinking models explicitly.
     profile = model_profile(model_id)
     if profile.get("reasoning_output") or not profile:
-        return {"include_thoughts": True}
+        settings: dict[str, Any] = {"include_thoughts": True}
+        if chosen := chosen_effort(model_id):
+            settings["reasoning_effort"] = chosen  # Gemini's thinking_level
+        return settings
     return None
 
 
@@ -299,6 +319,9 @@ def _resolve_model_for_agent(model: Any) -> Any:
         return model
     try:
         kwargs = dict(settings(model) or {})
+        output = load_settings(model).output
+        if output and provider in _OUTPUT_LIMIT_KEY:
+            kwargs[_OUTPUT_LIMIT_KEY[provider]] = output
         timeout = _PROVIDER_TIMEOUTS.get(provider)
         if timeout is not None:
             kwargs.setdefault("timeout", timeout)
@@ -349,8 +372,10 @@ _RECORDED_SETTINGS = (
     "include_thoughts",
     "thinking_level",
     "thinking_budget",
+    "output_config",
     "num_ctx",
     "max_tokens",
+    "max_output_tokens",
 )
 
 

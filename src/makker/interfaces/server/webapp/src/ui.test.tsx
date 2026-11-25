@@ -57,6 +57,68 @@ describe("model control", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  it("shows the effort and changes it from the model's settings", async () => {
+    const settings = {
+      settings: { effort: null, output: null, context: null },
+      effort: { levels: ["low", "medium", "xhigh"], default: "medium", current: "medium" },
+      output: { choices: [8_192, 128_000], default: 128_000 },
+      context: null,
+    };
+    vi.spyOn(api, "modelSettings").mockResolvedValue(settings);
+    const save = vi.spyOn(api, "saveModelSettings").mockResolvedValue({
+      ...settings,
+      settings: { ...settings.settings, effort: "xhigh" },
+      effort: { ...settings.effort, current: "xhigh" },
+    });
+    const { store, controller } = renderWithStore(<Composer />);
+    const send = vi.spyOn(controller.transport, "send").mockReturnValue(true);
+    vi.spyOn(controller.transport, "isOpen").mockReturnValue(true);
+    act(() => store.setState({ models: [luna], model: luna.id }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Effort: Medium" }));
+    const page = screen.getByRole("dialog", { name: "GPT-6 Luna settings" });
+    expect(page).toHaveTextContent("Output limit");
+    fireEvent.click(screen.getByRole("radio", { name: "Extra high" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Effort: Extra high" })).toBeInTheDocument());
+    expect(save).toHaveBeenCalledWith(luna.id, { effort: "xhigh", output: null, context: null });
+    // The running session rebuilds on the same model to pick it up.
+    expect(send).toHaveBeenCalledWith({ type: "command", command: "set_model", arg: luna.id });
+  });
+
+  it("lists a local model's context sizes with their memory, measured on first look", async () => {
+    const unmeasured = {
+      settings: { effort: null, output: null, context: null },
+      effort: null,
+      output: null,
+      context: {
+        choices: [{ tokens: 32_768, memory: null, on_gpu: null }],
+        auto: 32_768,
+        measured: false,
+      },
+    };
+    vi.spyOn(api, "modelSettings").mockResolvedValue(unmeasured);
+    const measure = vi.spyOn(api, "measureModel").mockResolvedValue({
+      ...unmeasured,
+      context: {
+        choices: [
+          { tokens: 32_768, memory: 16.4 * 2 ** 30, on_gpu: true },
+          { tokens: 262_144, memory: 31 * 2 ** 30, on_gpu: false },
+        ],
+        auto: 32_768,
+        measured: true,
+      },
+    });
+    const { store, controller } = renderWithStore(<Composer />);
+    act(() => store.setState({ models: [qwen], model: qwen.id }));
+    await waitFor(() => expect(store.getState().modelSettings?.model).toBe(qwen.id));
+    act(() => controller.openModelSettings());
+
+    expect(await screen.findByText("16.4 GB")).toBeInTheDocument();
+    expect(screen.getByText("31.0 GB · partly on CPU")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /^Auto/ })).toHaveAttribute("aria-checked", "true");
+    expect(measure).toHaveBeenCalledTimes(1);
+  });
+
   it("opens the menu from /model", async () => {
     vi.spyOn(api, "modelMenu").mockResolvedValue(menu);
     const { store } = renderWithStore(<Composer />);

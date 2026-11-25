@@ -87,7 +87,7 @@ def test_resolve_model_for_agent_handles_ollama_and_cloud(monkeypatch: pytest.Mo
 
     register_provider_profiles()
     monkeypatch.setattr(ollama_client, "context_window", lambda name: 262144)
-    monkeypatch.setattr(ollama_client, "num_ctx", lambda name: 65536)
+    monkeypatch.setattr(ollama_client, "num_ctx", lambda name, **kw: 65536)
     monkeypatch.setattr(ollama_client, "thinks", lambda name: True)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
