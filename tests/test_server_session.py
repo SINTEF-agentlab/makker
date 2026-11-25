@@ -21,8 +21,9 @@ from fastapi.testclient import TestClient
 
 from _server import open_stream
 from makker.agent.capabilities import Branding, Capability
-from makker.interfaces.server.app import artifact_wire_events, create_app
+from makker.interfaces.server.app import create_app
 from makker.interfaces.server.manager import SessionBusyError, SessionManager
+from makker.interfaces.server.replay import artifact_wire_events
 from makker.lab.fakes import (
     FakeJulia,
     echo_agent,
@@ -681,7 +682,7 @@ class _FakeWS:
 
 def _stream(ws: _FakeWS, host: Any) -> Any:
     """A session stream sending to ``ws``, as if it were attached."""
-    from makker.interfaces.server.app import _SessionStream
+    from makker.interfaces.server.stream import _SessionStream
 
     stream = _SessionStream(host)
     stream._ws = ws  # type: ignore[assignment]
@@ -1237,7 +1238,7 @@ def test_fit_target_is_the_panel_shape_scaled_only_by_the_floors() -> None:
     # The one fit rule (the Python twin of jl._fig_size_block): aspect clamped
     # near the authored shape (letterbox rather than distort), fitted inside
     # the panel at full text size, scaled up only by the squash floors.
-    from makker.interfaces.server.app import _fit_target
+    from makker.interfaces.server.live import _fit_target
 
     # A panel at least as big as the figure, shaped within the clamp: the
     # target IS the panel, no bands.
@@ -1865,7 +1866,7 @@ def test_history_ordered_by_last_use_not_creation(tmp_path: Path) -> None:
 
 
 def test_session_overview_reads_sim_first_prompt_and_last_activity(tmp_path: Path) -> None:
-    from makker.interfaces.server.app import _session_overview
+    from makker.interfaces.server.replay import _session_overview
     from makker.trace import TraceLog
 
     sd = tmp_path / "s1"
@@ -2355,9 +2356,10 @@ def test_closing_a_vanished_client_does_not_raise(
     """
 
     import websockets
-    from fastapi.routing import APIWebSocketRoute
     from starlette.websockets import WebSocket
     from uvicorn.protocols.utils import ClientDisconnected
+
+    from makker.interfaces.server.live import live_plot_ws_proxy
 
     class _IdleUpstream:
         async def __aenter__(self) -> Any:
@@ -2389,12 +2391,6 @@ def test_closing_a_vanished_client_does_not_raise(
     ]
     manager.get(sid).session.web_plot_port = 9999  # dial is monkeypatched
 
-    endpoint = next(
-        r.endpoint
-        for r in app.routes
-        if isinstance(r, APIWebSocketRoute) and r.path == "/live/{session_id}/{path:path}"
-    )
-
     # One connect, then the client vanishes; the close frame then hits a dead
     # transport, which is exactly when uvicorn raises ClientDisconnected.
     inbox = [{"type": "websocket.connect"}, {"type": "websocket.disconnect", "code": 1006}]
@@ -2423,7 +2419,7 @@ def test_closing_a_vanished_client_does_not_raise(
     ws = WebSocket(scope, receive=receive, send=send)
     # Must complete without raising WebSocketDisconnect out of the endpoint,
     # which uvicorn would log as "Exception in ASGI application".
-    asyncio.run(endpoint(ws, sid, "viz/plot"))
+    asyncio.run(live_plot_ws_proxy(ws, sid, "viz/plot", manager))
 
 
 def test_live_plot_get_waits_out_a_busy_julia(
