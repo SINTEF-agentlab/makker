@@ -57,6 +57,28 @@ describe("ApiKeys modal", () => {
     );
   });
 
+  it("takes focus, keeps Tab inside, and closes on Escape", () => {
+    const opener = document.createElement("button");
+    document.body.append(opener);
+    opener.focus();
+    const { store } = renderWithStore(<ApiKeys />);
+    act(() => {
+      store.setState({ credentials: creds(true) });
+      store.getState().openApiKeys(null);
+    });
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    const buttons = dialog.querySelectorAll("button");
+    buttons[buttons.length - 1].focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(dialog.querySelector("button"));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(store.getState().apiKeys.open).toBe(false);
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+
   it("manage mode closes on Done", () => {
     const { store } = renderWithStore(<ApiKeys />);
     act(() => {

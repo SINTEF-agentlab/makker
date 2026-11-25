@@ -43,12 +43,6 @@ export function KindIcon({ kind }: { kind: ViewKind }) {
   return <PlotIcon />;
 }
 
-export const KIND_LABEL: Record<ViewKind, string> = {
-  plot: "Interactive plot",
-  report: "Report",
-  image: "Image",
-};
-
 export function MenuIcon() {
   return (
     <svg viewBox="0 0 24 24" width="18" height="18" {...stroke}>

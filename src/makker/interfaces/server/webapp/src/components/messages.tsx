@@ -7,7 +7,7 @@ import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState } from "re
 import { terminalSegments } from "../ansi";
 import { useController, useSel } from "../context";
 import { fmtNum, formatElapsed } from "../format";
-import { KindIcon, KIND_LABEL, ChevronRight } from "../icons";
+import { KindIcon, ChevronRight } from "../icons";
 import { tokenizeJulia } from "../julia";
 import { Markdown } from "../markdown";
 import { SLASH_COMMANDS } from "../controller";
@@ -18,7 +18,7 @@ import {
   toolPolicy,
   type ToolPolicy,
 } from "../toolPolicy";
-import type { ThreadItem } from "../store";
+import { KIND_LABEL, type ThreadItem, type ViewKind } from "../store";
 
 // --- shared building blocks -------------------------------------------------
 
@@ -281,7 +281,7 @@ export const ToolCard = memo(function ToolCard({ item }: { item: ToolItem }) {
 
 // --- canvas references ------------------------------------------------------
 
-export function VizChip({ viewId, title, viewKind }: { viewId: string; title: string; viewKind: "plot" | "report" | "image" }) {
+export function VizChip({ viewId, title, viewKind }: { viewId: string; title: string; viewKind: ViewKind }) {
   const openView = useSel((s) => s.openView);
   const active = useSel((s) => s.canvasOpen && s.activeView === viewId);
   return (
@@ -291,7 +291,7 @@ export function VizChip({ viewId, title, viewKind }: { viewId: string; title: st
       </span>
       <div className="info">
         <div className="t">{title}</div>
-        <div className="s">{KIND_LABEL[viewKind] || "View"}</div>
+        <div className="s">{KIND_LABEL[viewKind] ?? "View"}</div>
       </div>
       <span className="go">
         Open <ChevronRight />

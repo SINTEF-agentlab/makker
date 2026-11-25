@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { api, type HistoryEntry } from "./api";
+import { registerPanel } from "./canvas/registry";
 import { Canvas } from "./components/Canvas";
 import { Composer } from "./components/Composer";
 import { Sidebar } from "./components/Sidebar";
@@ -131,6 +132,26 @@ describe("Thread rendering", () => {
 });
 
 describe("canvas interaction", () => {
+  it("mounts the panel an extension registered for a view's kind", () => {
+    registerPanel("test-map", ({ view }) => <div>map of {view.title}</div>);
+    const { store } = renderWithStore(
+      <>
+        <Thread />
+        <Canvas />
+      </>,
+    );
+    drive(store, { type: "viz", url: "/wells.json", kind: "test-map", slot: "m", title: "Wells" });
+    expect(screen.getByText("map of Wells")).toBeInTheDocument();
+    expect(screen.getByText("View", { selector: ".viz-chip .s" })).toBeInTheDocument();
+  });
+
+  it("a view's tab has its own remove button", () => {
+    const { store } = renderWithStore(<Canvas />);
+    drive(store, { type: "viz", url: "/plot.html", kind: "plot", slot: "fig", title: "My figure" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove My figure" }));
+    expect(store.getState().viewOrder).toEqual([]);
+  });
+
   it("a viz chip opens the canvas to that view", () => {
     const { store } = renderWithStore(
       <>
@@ -201,7 +222,7 @@ describe("approval", () => {
       allowed_decisions: ["approve", "reject"],
       allowlist: [],
     });
-    expect(screen.getByText(/Approve execute\?/)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Approve execute?");
     fireEvent.click(screen.getByRole("button", { name: "approve" }));
     expect(store.getState().pending).toBeNull();
     expect(screen.queryByText(/Approve execute\?/)).toBeNull();

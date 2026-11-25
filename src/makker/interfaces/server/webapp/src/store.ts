@@ -20,7 +20,15 @@ import type { InterruptAction, ReplayMessage, ServerMessage } from "./protocol";
 import { HISTORY_CHANGED, SIDE_OUTPUT_TYPES } from "./protocol";
 import { toolPolicy } from "./toolPolicy";
 
-export type ViewKind = "plot" | "report" | "image";
+// The built-in kinds; any other names a panel an extension registered
+// (`registerPanel` in canvas/registry.tsx).
+export type ViewKind = "plot" | "report" | "image" | (string & {});
+
+export const KIND_LABEL: Record<string, string> = {
+  plot: "Interactive plot",
+  report: "Report",
+  image: "Image",
+};
 
 /** How a live figure sits in the panel. "scale": rendered at its own design
  *  size and scaled down to fit, so a wide dashboard's layout and text are never
@@ -413,8 +421,8 @@ export function createSessionStore() {
     const onViz = (msg: Extract<ServerMessage, { type: "viz" }>, replayed = false) => {
       finalizeAssistant();
       const id = viewIdOf(msg);
-      const kind: ViewKind = msg.kind === "report" ? "report" : "plot";
-      const title = msg.title || (kind === "report" ? "Report" : "Interactive plot");
+      const kind: ViewKind = msg.kind || "plot";
+      const title = msg.title || (KIND_LABEL[kind] ?? "View");
       const live = !!msg.live;
       let nonce = 0;
       if (replayed) {
