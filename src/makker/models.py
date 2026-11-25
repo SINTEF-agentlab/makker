@@ -344,14 +344,19 @@ async def discover_ollama_models() -> list[ModelInfo]:
     if not await ollama_client.is_reachable():
         return []
     installed = await ollama_client.installed_models()
-    models = [ModelInfo(f"ollama:{name}", name, local=True) for name in installed]
+    # A hosted model the user has run is listed among the installed ones, but it
+    # runs remotely, and it is listed once.
+    models = [
+        ModelInfo(f"ollama:{name}", name, local=not is_ollama_cloud(f"ollama:{name}"))
+        for name in installed
+    ]
     bases = {name.split(":", 1)[0] for name in installed}
     models += [
         ModelInfo(f"ollama:{tag}", tag, "not pulled", local=True)
         for tag in RECOMMENDED_OLLAMA_LOCAL
         if tag.split(":", 1)[0] not in bases
     ]
-    models += [ModelInfo(f"ollama:{tag}", tag) for tag in OLLAMA_CLOUD]
+    models += [ModelInfo(f"ollama:{tag}", tag) for tag in OLLAMA_CLOUD if tag not in installed]
     return models
 
 

@@ -195,6 +195,10 @@ async def test_model_menu_typed_id_that_a_section_lists_is_one_row(monkeypatch) 
         assert _option_ids(app.screen).count("ollama:glm-5.1:cloud") == 1
 
 
+async def _reachable() -> bool:
+    return True
+
+
 async def test_model_menu_lists_a_used_cloud_model_once(monkeypatch) -> None:
     # Ollama lists a cloud model it has run among the installed ones.
     from makker import ollama_client
@@ -202,12 +206,17 @@ async def test_model_menu_lists_a_used_cloud_model_once(monkeypatch) -> None:
     async def _installed() -> list[str]:
         return ["glm-5.1:cloud"]
 
+    monkeypatch.setattr(ollama_client, "is_reachable", _reachable)
     monkeypatch.setattr(ollama_client, "installed_models", _installed)
     app = _Host()
     async with app.run_test() as pilot:
         app.push_screen(ModelMenu(current=None))
         await pilot.pause()
         await app.workers.wait_for_complete()
+        await pilot.pause()
+        # Hosted, so not on the short list's local models; a search finds it once.
+        assert "ollama:glm-5.1:cloud" not in _option_ids(app.screen)
+        await pilot.press(*"glm")
         await pilot.pause()
         assert _option_ids(app.screen).count("ollama:glm-5.1:cloud") == 1
 
@@ -225,6 +234,7 @@ async def test_model_menu_keeps_the_highlight_when_discovery_returns(monkeypatch
         await answer.wait()
         return ["llama3.1:8b"]
 
+    monkeypatch.setattr(ollama_client, "is_reachable", _reachable)
     monkeypatch.setattr(ollama_client, "installed_models", _installed)
     # A key puts that provider's newest models on the short list to move through.
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
