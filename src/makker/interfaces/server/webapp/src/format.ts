@@ -11,9 +11,15 @@ export function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
-/** Token counts as compact figures: 1500 -> "1.5k", 24000 -> "24k", 1.2M. */
+/** Token counts as compact figures: 1500 -> "1.5k", 24000 -> "24k", 1050000 -> "1.05M".
+ *  Context sizes in whole units of 1024 keep the name they go by: 65536 -> "64k". */
 export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  const millions = (m: number) => `${Number(m.toFixed(2))}M`;
+  if (n >= 8192 && n % 1024 === 0) {
+    const k = n / 1024;
+    return k >= 1024 ? millions(k / 1024) : `${k}k`;
+  }
+  if (n >= 1_000_000) return millions(n / 1_000_000);
   if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;
   return String(n);
 }

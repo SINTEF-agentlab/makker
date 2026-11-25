@@ -43,8 +43,17 @@ PART_LABELS = {
 
 
 def format_tokens(count: int) -> str:
+    """Token counts as compact figures: 1,500 is "1.5k", 1,050,000 "1.05M". Context
+    sizes in whole units of 1024 keep the name they go by: 65,536 is "64k"."""
+
+    def millions(value: float) -> str:
+        return f"{value:.2f}".rstrip("0").removesuffix(".") + "M"
+
+    if count >= 8192 and count % 1024 == 0:
+        kib = count // 1024
+        return millions(kib / 1024) if kib >= 1024 else f"{kib}k"
     if count >= 1_000_000:
-        return f"{count / 1_000_000:.1f}".removesuffix(".0") + "M"
+        return millions(count / 1_000_000)
     if count >= 10_000:
         return f"{count / 1000:.0f}k"
     if count >= 1_000:
