@@ -391,9 +391,8 @@ export class Controller {
       if (this.arrivalNote) this.s.addSysNote(this.arrivalNote);
       this.arrivalNote = null;
     } else if (msg.type === "model" && msg.model) {
+      // The model control shows the switch; no note, so a new chat keeps its examples.
       this.s.setModel(msg.model);
-      const label = this.s.models.find((m) => m.id === msg.model)?.label ?? msg.model;
-      this.s.addSysNote(`Switched to ${label}.`);
     } else if (msg.type === "turn_end") {
       this.refreshHistory();
       if (!msg.cancelled) this.notifyDone("The agent finished your turn.");
@@ -657,13 +656,6 @@ export class Controller {
     }
   }
 
-  /** Ask for a provider's key from the model menu. */
-  addKey(provider: string): void {
-    this.closeModelMenu();
-    const cred = this.s.credentials.find((c) => c.provider === provider);
-    this.s.openApiKeys(cred ? { provider, label: cred.label, env_var: cred.env_var } : null);
-  }
-
   setModel(id: string): void {
     this.closeModelMenu();
     if (!id) return;
@@ -697,6 +689,7 @@ export class Controller {
 
   /** Open the keys modal in "manage" mode (change a key at any time). */
   openKeys(): void {
+    this.closeModelMenu();
     this.s.openApiKeys(null);
   }
 

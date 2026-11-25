@@ -116,7 +116,7 @@ second is refused while the first is open.
 | `GET` | `/sessions/{id}/context` | The context view as data: the meter (as in the `context` message), what fills the context part by part, the largest tool results, and how many tool results and compactions were moved out. The TUI's `/context` renders the same report |
 | `GET` | `/models` | List the models that can be selected, newest first per provider, each with `label`, `window` and `local`; also carries `protocol`, the wire-contract version |
 | `GET` | `/models/live` | The same list refreshed from configured provider APIs and the Ollama daemon (best effort; API-listed tool support is unverified) |
-| `GET` | `/models/menu?current=` | The model menu's short list: `sections` (pinned, recent, the newest per provider with a key, installed local models), `add_key` (providers without a key) and `pinned` |
+| `GET` | `/models/menu?current=` | The model menu's short list: `sections` (pinned, recent, the newest per provider with a key, installed local models) and `pinned` |
 | `POST` | `/models/pinned` | Pin a model to the top of the menu, or unpin it: `{"model", "pinned"}` |
 | `GET` | `/models/window` | A model's context window: `window`, `window_source` (`provider`, `ollama` or `assumed`) and `compact_at` |
 | `GET` | `/credentials` | Which providers have keys, and whether a shell variable shadows a saved one |

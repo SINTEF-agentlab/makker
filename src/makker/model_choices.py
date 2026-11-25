@@ -85,11 +85,6 @@ def short_list(
     return sections
 
 
-def missing_keys(keyed: Callable[[ProviderInfo], bool] = has_key) -> list[ProviderInfo]:
-    """The cloud providers without a key, offered as "Add key" rows."""
-    return [p for p in PROVIDERS.values() if not p.local and not keyed(p)]
-
-
 def load_pinned() -> list[str]:
     from makker.user_config import load_user_config
 

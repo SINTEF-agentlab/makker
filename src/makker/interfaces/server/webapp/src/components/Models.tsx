@@ -1,13 +1,12 @@
 // The model control under the message box: the current model, a short menu of the
 // models most likely wanted (built by the server, the same list the terminal shows),
-// and the full catalog behind "More models…".
+// the full catalog behind "More models…", and the API keys.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ModelInfo, ModelMenu } from "../api";
 import { useController, useSel } from "../context";
-import { formatTokens } from "../format";
-import { CheckIcon, ChevronDown, CloseIcon, StarIcon } from "../icons";
+import { CheckIcon, CloseIcon, StarIcon } from "../icons";
 
 /** "gpt-6-luna" for "openai:gpt-6-luna": the name without its provider. */
 function bareName(id: string): string {
@@ -18,12 +17,6 @@ function useLabel(id: string | null): string {
   const models = useSel((s) => s.models);
   if (!id) return "No model";
   return models.find((m) => m.id === id)?.label ?? bareName(id);
-}
-
-/** The right-hand detail of a row: the window, and whether it runs here. */
-function details(model: ModelInfo): string {
-  const bits = [model.window ? formatTokens(model.window) : "", model.local ? "local" : "", model.note ?? ""];
-  return bits.filter(Boolean).join(" · ");
 }
 
 export function ModelControl() {
@@ -43,7 +36,6 @@ export function ModelControl() {
         onClick={() => (open ? controller.closeModelMenu() : controller.openModelMenu())}
       >
         {label}
-        <ChevronDown />
       </button>
       {open ? <ModelMenuPopover /> : null}
     </div>
@@ -114,39 +106,27 @@ function ModelMenuPopover() {
             >
               <span className="model-check">{m.id === current ? <CheckIcon /> : null}</span>
               <span className="model-name">{m.label}</span>
-              <span className="model-detail">{details(m)}</span>
+              {m.note ? <span className="model-detail">{m.note}</span> : null}
             </button>
           ))}
         </div>
       ))}
-      {menu?.add_key.length ? (
-        <div role="group" aria-label="Other providers">
-          <div className="model-menu-title">Other providers</div>
-          {menu.add_key.map((p) => (
-            <button
-              key={p.provider}
-              type="button"
-              role="menuitem"
-              className="model-row"
-              onClick={() => controller.addKey(p.provider)}
-            >
-              <span className="model-check" />
-              <span className="model-name">{p.label}</span>
-              <span className="model-detail">Add key</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
       {menu ? (
-        <button
-          type="button"
-          role="menuitem"
-          className="model-row model-more"
-          onClick={() => controller.openMoreModels()}
-        >
-          <span className="model-check" />
-          <span className="model-name">More models…</span>
-        </button>
+        <div className="model-menu-foot">
+          <button
+            type="button"
+            role="menuitem"
+            className="model-row"
+            onClick={() => controller.openMoreModels()}
+          >
+            <span className="model-check" />
+            <span className="model-name">More models…</span>
+          </button>
+          <button type="button" role="menuitem" className="model-row" onClick={() => controller.openKeys()}>
+            <span className="model-check" />
+            <span className="model-name">API keys…</span>
+          </button>
+        </div>
       ) : null}
     </div>
   );
@@ -241,7 +221,7 @@ export function MoreModels() {
                       onClick={() => controller.setModel(m.id)}
                     >
                       <span className="model-name">{m.label}</span>
-                      <span className="model-detail">{details(m)}</span>
+                      {m.note ? <span className="model-detail">{m.note}</span> : null}
                     </button>
                     <button
                       type="button"

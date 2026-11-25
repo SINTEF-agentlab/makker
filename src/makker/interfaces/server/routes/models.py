@@ -88,9 +88,9 @@ async def list_live_models() -> dict[str, Any]:
 @router.get("/models/menu")
 async def model_menu(current: str | None = None) -> dict[str, Any]:
     """The model menu's short list: pinned, recent, the newest per provider with
-    a key, installed local models, and the providers that still need a key."""
+    a key, and installed local models."""
     from makker.credentials import load_user_credentials
-    from makker.model_choices import load_pinned, missing_keys, short_list
+    from makker.model_choices import load_pinned, short_list
     from makker.models import discover_models, discover_ollama_models
     from makker.recent_models import load_recent_models
 
@@ -104,7 +104,6 @@ async def model_menu(current: str | None = None) -> dict[str, Any]:
         "sections": [
             {"title": title, "models": [m.to_wire() for m in rows]} for title, rows in sections
         ],
-        "add_key": [{"provider": p.name, "label": p.label} for p in missing_keys()],
         "pinned": load_pinned(),
     }
 

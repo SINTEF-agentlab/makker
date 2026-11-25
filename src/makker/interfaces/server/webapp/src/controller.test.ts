@@ -223,8 +223,10 @@ describe("session lifecycle", () => {
     expect(store.getState().model).toBe("openai:a"); // refused: nothing to roll back
 
     controller.setModel("openai:c");
+    const shown = store.getState().items.length;
     socket.receive({ type: "model", model: "openai:c" });
     expect(store.getState().model).toBe("openai:c");
+    expect(store.getState().items).toHaveLength(shown); // the control shows it; no note
   });
 
   it("shows the model a reattached session runs", async () => {

@@ -10,11 +10,11 @@ Precedence, highest first: the `--model` flag, the workspace config, the
 user config, `$MAKKER_MODEL`, the built-in default. A resumed session runs
 the model it last ran.
 
-In the web UI the current model is shown under the message box. Its menu
-lists your pinned and recent models, the three newest models of each provider
-you have a key for, and your installed local models. **More models…** searches
-everything, pins a model to the top of the menu, and takes any
-`provider:model` typed in. `/model` opens the same menu, and
+In the web UI the current model is shown under the message box, beside the
+context ring. Its menu lists your pinned and recent models, the three newest
+models of each provider you have a key for, and your installed local models.
+**More models…** searches everything, pins a model to the top of the menu,
+and takes any `provider:model` typed in; **API keys…** sets a provider's key. `/model` opens the same menu, and
 `/model provider:model` switches directly. In the terminal, `/model` opens the
 same short list, and typing searches everything.
 

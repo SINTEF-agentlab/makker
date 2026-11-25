@@ -154,7 +154,7 @@ def test_model_menu_endpoint_returns_the_short_list(tmp_path: Path, monkeypatch)
     assert titles[:2] == ["Pinned", "Recent"] and titles[-1] == "Local"
     recent = [m["id"] for m in body["sections"][1]["models"]]
     assert recent == ["openai:gpt-6.2-sol", "openai:gpt-6-luna"]
-    assert {"provider": "anthropic", "label": "Anthropic"} in body["add_key"]
+    assert "Anthropic" not in titles  # no key, so not on the short list
     assert body["pinned"] == ["openrouter:vendor/model"]
 
 

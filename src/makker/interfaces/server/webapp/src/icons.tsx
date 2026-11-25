@@ -145,14 +145,6 @@ export function RegenerateIcon() {
   );
 }
 
-export function ChevronDown() {
-  return (
-    <svg viewBox="0 0 24 24" width="12" height="12" {...stroke}>
-      <path d="M6 9l6 6 6-6" />
-    </svg>
-  );
-}
-
 export function CheckIcon() {
   return (
     <svg viewBox="0 0 24 24" width="14" height="14" {...stroke}>
