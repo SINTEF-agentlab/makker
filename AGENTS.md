@@ -109,9 +109,16 @@ and check on staged `.py` files. To verify the whole tree like CI:
 - `src/makker/session_host.py`: the one session bootstrap and turn-policy
   loop behind every front end.
 - `src/makker/interfaces/`: `cli`, the Textual `tui`, and the `server`
-  (FastAPI REST + per-session WebSocket). The browser UI is a React + TypeScript
-  app in `server/webapp/` (see its README), built into `server/web_dist/`
-  (committed and shipped, so an install needs no Node). `server/updates.py`
+  (FastAPI REST + per-session WebSocket). In `server/`, `app.py` has
+  `create_app`, which composes the routers, the access guards (`access.py`) and
+  the UI mount; `routes/` holds the REST routers by group (sessions, models,
+  update, artifacts); `stream.py` is the per-session turn WebSocket; `live.py`
+  the live-plot proxy and popout routes; `replay.py` reads a recorded session
+  back for the browser; `deps.py` holds the shared state routes read from
+  `app.state`, and `urls.py` the base-path URL helpers. The browser UI is a
+  React + TypeScript app in `server/webapp/` (see its README), built into
+  `server/web_dist/` (committed and shipped, so an install needs no Node).
+  `server/updates.py`
   runs an update started from the browser: `uv tool upgrade`, the env step of
   `makker upgrade`, then a restart of the server into the new version.
 - `src/makker/legacy.py`: temporary. Everything that carries a jutul-agent

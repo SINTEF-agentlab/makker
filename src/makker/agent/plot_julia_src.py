@@ -143,7 +143,7 @@ _PRINT_LIVE_ROUTES = f'    println("{LIVE_ROUTES_MARKER}=", join(Main.__MAKKER_W
 FIG_AUTHORED_MARKER = "__MAKKER_FIG_AUTHORED__"
 
 
-# The fit rule, shared verbatim with its Python twin (``app._fit_target``).
+# The fit rule, shared verbatim with its Python twin (``live._fit_target``).
 # For authored size ``a`` and panel ``p``, in order: (1) the target aspect is
 # the panel's, clamped to within ``FIT_ASPECT_FRACTION`` of the authored aspect,
 # so a figure may reshape toward its panel but never distort past that (a tall
@@ -499,7 +499,7 @@ def web_server_start(port: int, session_id: str, *, secret: str, base_path: str 
     ``proxy_url`` tells Bonito to write every URL it hands the browser (asset
     links and the widget websocket) as ``{base_path}/live/<session_id>/...``
     instead of an absolute ``127.0.0.1:<port>``, so they resolve through the app
-    server's own ``/live/...`` reverse proxy (see ``interfaces/server/app.py``)
+    server's own ``/live/...`` reverse proxy (see ``interfaces/server/live.py``)
     rather than a raw port the browser may have no route to (an SSH/VS Code/Docker
     port forward that only knows about the app's own port). This is the same
     site-relative-prefix mechanism Bonito already uses for JupyterHub/Binder.

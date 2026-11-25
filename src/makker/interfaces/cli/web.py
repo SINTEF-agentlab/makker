@@ -263,7 +263,7 @@ def run(args: argparse.Namespace) -> int:
             return 1
 
     from makker.interfaces.server.access import server_token
-    from makker.interfaces.server.app import normalize_base_path
+    from makker.interfaces.server.urls import normalize_base_path
 
     token = server_token()
     print(
