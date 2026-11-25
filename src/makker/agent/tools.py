@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from pathlib import Path
 from typing import Any
 
 from langchain_core.tools import tool
@@ -293,7 +294,9 @@ def make_write_report_tool(session: Session, *, surface: str | None = None):
                 for restyling or styling your own ``html`` blocks.
             output_path: Where to write the HTML, inside the workspace. Defaults
                 to the session output directory
-                (``makker-output/sessions/<id>/report.html``).
+                (``makker-output/sessions/<id>/report.html``), which is also
+                used when the path would replace a file other than a report
+                written earlier in this session.
         """
         from makker.open_file import open_path
         from makker.transcript.report import render_report
@@ -315,6 +318,12 @@ def make_write_report_tool(session: Session, *, surface: str | None = None):
                         f" (requested path {output_path!r} is outside the workspace; "
                         "wrote to the session output directory instead)"
                     )
+            elif _replaces_other_files(out, session.reports):
+                out = session.output_dir / "report.html"
+                note = (
+                    f" (writing to {output_path!r} would replace a file this session's "
+                    "reports did not write; wrote to the session output directory instead)"
+                )
         out.parent.mkdir(parents=True, exist_ok=True)
 
         ws = workspace_root()
@@ -357,3 +366,18 @@ def make_write_report_tool(session: Session, *, surface: str | None = None):
         return str(out) + note
 
     return write_report
+
+
+def _replaces_other_files(out: Path, reports: set[Path]) -> bool:
+    """Whether a report at ``out`` would replace a file none of ``reports`` wrote.
+
+    A report writes ``out`` and the transcript beside it; ``reports`` are the
+    ones this session wrote.
+    """
+    from makker.transcript.report import TRANSCRIPT_FILENAME
+
+    out = out.resolve()
+    if out in reports:
+        return False
+    beside_a_report = any(report.parent == out.parent for report in reports)
+    return out.exists() or (not beside_a_report and (out.parent / TRANSCRIPT_FILENAME).exists())

@@ -47,17 +47,14 @@ _SESSION_LOCK = asyncio.Lock()
 
 
 def load_eval_credentials() -> None:
-    """Load provider keys the way the app does (global + cwd ``.env``).
+    """Load provider keys the way the app does (cwd ``.env``, then the global one).
 
     Call at task-module import time: Inspect resolves the eval's model (and
     checks its key) before any solver runs.
     """
-    from dotenv import load_dotenv
-
     from makker.credentials import load_user_credentials
 
     load_user_credentials()
-    load_dotenv()
 
 
 def _bridge_model() -> Any:

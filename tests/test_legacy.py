@@ -105,9 +105,11 @@ def test_two_real_data_folders_are_left_alone_and_mentioned_once(tmp_path: Path,
 
 
 def test_the_default_data_folder_falls_back_to_the_old_one(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     paths.set_state_home(None)
-    assert paths.state_home() == tmp_path.resolve() / "makker"
+    fresh = tmp_path / "fresh"
+    monkeypatch.setenv("XDG_DATA_HOME", str(fresh))
+    assert paths.state_home() == fresh.resolve() / "makker"
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     _old_data_folder(tmp_path.resolve())
     assert paths.state_home() == tmp_path.resolve() / "jutul-agent"
 

@@ -86,6 +86,33 @@ def test_report_sidecar_transcript_refreshed_after_turn(session, tmp_path) -> No
     assert "the report is ready" in refreshed
 
 
+async def test_write_report_replaces_only_files_it_wrote(session, tmp_path) -> None:
+    from makker.agent.tools import make_write_report_tool
+
+    write_report = make_write_report_tool(session, surface="tui")
+    notes = tmp_path / "notes.md"
+    notes.write_text("my notes\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    transcript = tmp_path / "docs" / "transcript.html"
+    transcript.write_text("my transcript\n", encoding="utf-8")
+
+    # The report itself, or the transcript written beside it, would replace a file.
+    for target in ("notes.md", "docs/report.html"):
+        result = await write_report.ainvoke({"narrative": "## Summary", "output_path": target})
+        assert "would replace a file" in result
+    assert notes.read_text(encoding="utf-8") == "my notes\n"
+    assert transcript.read_text(encoding="utf-8") == "my transcript\n"
+    assert not (tmp_path / "docs" / "report.html").exists()
+
+    # A report this session wrote can be written again.
+    for narrative in ("first draft", "second draft"):
+        result = await write_report.ainvoke(
+            {"narrative": narrative, "output_path": "out/report.html"}
+        )
+        assert result.endswith("report.html")
+    assert "second draft" in (tmp_path / "out" / "report.html").read_text(encoding="utf-8")
+
+
 def test_render_report_writes_transcript_beside_report(tmp_path) -> None:
     events = [
         make_event(1, "session_start", {"session_id": "abc", "simulator": "battmo"}),

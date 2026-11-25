@@ -1046,7 +1046,7 @@ def _embed_plot(path: str, artifact_dirs: Sequence[Path]) -> str:
     return f'<img src="{inlined}" alt="Attempt plot">'
 
 
-_TRANSCRIPT_FILENAME = "transcript.html"
+TRANSCRIPT_FILENAME = "transcript.html"
 
 
 def write_sidecar_transcript(
@@ -1062,7 +1062,7 @@ def write_sidecar_transcript(
     from makker.transcript.html import render_html
 
     dirs = [report_dir, *artifact_dirs]
-    (report_dir / _TRANSCRIPT_FILENAME).write_text(
+    (report_dir / TRANSCRIPT_FILENAME).write_text(
         render_html(list(events), artifact_dirs=dirs), encoding="utf-8"
     )
 
@@ -1071,6 +1071,6 @@ def _render_footer(session_id: str) -> str:
     # ``render_report`` writes the transcript next to the report, so this link
     # resolves on its own from the same directory, with no manual `/transcript` needed.
     return (
-        f'<footer>Also see the <a href="{_TRANSCRIPT_FILENAME}">'
+        f'<footer>Also see the <a href="{TRANSCRIPT_FILENAME}">'
         "full session transcript</a>.</footer>"
     )
