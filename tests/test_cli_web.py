@@ -154,3 +154,59 @@ def test_a_newer_simulator_launches_with_a_note(tmp_path, monkeypatch, capsys) -
 
     assert _helpers.env_versions_ok(SimpleNamespace(), tmp_path, None, "jutuldarcy")
     assert "note: has JutulDarcy 0.5.0" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("change", "opens"),
+    [
+        ({}, True),
+        ({"MAKKER_NO_OPEN": "1"}, False),  # turned off (and in tests)
+        ({"SSH_CONNECTION": "10.0.0.2 51000 10.0.0.1 22"}, False),  # the browser is elsewhere
+        ({"tty": False}, False),  # started by a program that shows the UI itself
+        ({"display": False}, False),  # no desktop: a text browser would take the terminal
+    ],
+)
+def test_the_browser_opens_only_in_front_of_the_user(monkeypatch, change, opens) -> None:
+    from makker import display
+    from makker.interfaces.cli import web
+
+    monkeypatch.delenv("MAKKER_NO_OPEN", raising=False)
+    monkeypatch.delenv("SSH_CONNECTION", raising=False)
+    monkeypatch.delenv("SSH_TTY", raising=False)
+    tty = change.get("tty", True)
+    monkeypatch.setattr(web.sys, "stdin", SimpleNamespace(isatty=lambda: tty))
+    monkeypatch.setattr(web.sys, "stderr", SimpleNamespace(isatty=lambda: tty, write=print))
+    monkeypatch.setattr(display, "has_display", lambda: change.get("display", True))
+    for name, value in change.items():
+        if name.isupper():
+            monkeypatch.setenv(name, value)
+    assert web._can_open_browser() is opens
+
+
+def test_the_browser_opens_once_the_server_takes_connections(monkeypatch) -> None:
+    import threading
+    import webbrowser
+
+    from makker.interfaces.cli import web
+
+    opened = threading.Event()
+    urls: list[str] = []
+    monkeypatch.setattr(webbrowser, "open", lambda url: urls.append(url) or opened.set())
+
+    server = SimpleNamespace(started=False, should_exit=False)
+    web._open_when_serving(server, "http://127.0.0.1:8742/?token=t")
+    assert not opened.wait(0.3)  # not before it serves: the page would fail to load
+    server.started = True
+    assert opened.wait(5)
+    assert urls == ["http://127.0.0.1:8742/?token=t"]
+
+    # A server that stops before it serves opens nothing.
+    import time
+
+    gone = SimpleNamespace(started=False, should_exit=False)
+    web._open_when_serving(gone, "http://127.0.0.1:8743/?token=t")
+    gone.should_exit = True
+    time.sleep(0.3)
+    gone.started = True  # too late: the wait has ended
+    time.sleep(0.3)
+    assert urls == ["http://127.0.0.1:8742/?token=t"]

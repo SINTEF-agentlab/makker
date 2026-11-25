@@ -12,7 +12,9 @@ import contextlib
 import os
 import signal
 import sys
-from typing import TYPE_CHECKING
+import threading
+import time
+from typing import TYPE_CHECKING, Any
 
 from makker import __version__
 from makker.interfaces.cli._helpers import add_session_flags, add_workspace_flags
@@ -30,6 +32,38 @@ def _origin(value: str) -> str:
         return normalize_origin(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def _can_open_browser() -> bool:
+    """Whether a browser opened from here would land in front of the user: Makker
+    was started from a terminal (not by a program that shows the UI itself), on
+    this computer (not over SSH), with a desktop to show it on (a Linux box
+    without one would get a text browser in the terminal), and opening is not
+    turned off (``MAKKER_NO_OPEN``)."""
+    from makker.display import has_display
+
+    return (
+        not os.environ.get("MAKKER_NO_OPEN")
+        and sys.stdin.isatty()
+        and sys.stderr.isatty()
+        and not (os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"))
+        and has_display()
+    )
+
+
+def _open_when_serving(server: Any, url: str) -> None:
+    """Open ``url`` in the default browser once ``server`` takes connections, so
+    the page loads straight away instead of failing to connect."""
+    import webbrowser
+
+    def wait() -> None:
+        while not server.should_exit:
+            if server.started:
+                webbrowser.open(url)
+                return
+            time.sleep(0.1)
+
+    threading.Thread(target=wait, name="open-browser", daemon=True).start()
 
 
 def build_parser(prog: str = "makker web") -> argparse.ArgumentParser:
@@ -90,6 +124,11 @@ def build_parser(prog: str = "makker web") -> argparse.ArgumentParser:
             "auto allows all side-effecting tools. Change it per session in the UI "
             "with /approval-mode."
         ),
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Don't open the UI in a browser at start; just print its link.",
     )
     # The same per-session knobs the TUI/run take; here they set the default for
     # every session this server creates (each is one folder bound to one env).
@@ -277,10 +316,12 @@ def run(args: argparse.Namespace) -> int:
         + ")",
         file=sys.stderr,
     )
+    host = f"[{args.host}]" if ":" in args.host else args.host
+    url = f"http://{host}:{args.port}/?token={token}"
     if args.base_path:
         link = f"{normalize_base_path(args.base_path)}/?token={token} at your proxy's address"
     else:
-        link = f"http://{args.host}:{args.port}/?token={token}"
+        link = url
     print(f"Open {link}", file=sys.stderr)
     # Serving this computer only: no reverse proxy in front (that would set
     # --base-path), and bound to a loopback address.
@@ -307,6 +348,9 @@ def run(args: argparse.Namespace) -> int:
         uvicorn.Config(app, host=args.host, port=args.port, timeout_graceful_shutdown=5)
     )
     updater.bind_server(lambda: setattr(server, "should_exit", True))
+    # A restart after an update keeps the page that is already open.
+    if local and not restarted and not args.no_browser and _can_open_browser():
+        _open_when_serving(server, url)
     if hasattr(signal, "SIGHUP"):
         # A closed terminal shuts down like SIGTERM (which uvicorn handles), so
         # every session's kernel and Xvfb are stopped rather than left running.
