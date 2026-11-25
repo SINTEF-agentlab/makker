@@ -151,8 +151,9 @@ Messages from the server to the front end:
 | `error` | Something went wrong (a bad command, a failed turn, an unknown session) |
 
 Messages from the front end to the server are a prompt to start a turn, a
-decision to answer an approval request (`approve`, `reject`, or `respond` with a
-message), a cancel to stop a running turn, a command to change a session setting
+decision to answer the pending approval requests (`approve`, `reject` with an
+optional reason, `respond` with a message, or `always_allow`; one decision
+answers every pending request), a cancel to stop a running turn, a command to change a session setting
 or run a session action (`set_model`, `set_approval`, `add_dir`, `compact`), a
 plot replay (`replot`, below), a popout-window close (`popout_closed`), a change
 to the host application's selection (`host_context`, see

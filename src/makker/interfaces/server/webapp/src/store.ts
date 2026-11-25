@@ -89,9 +89,41 @@ export type ThreadItem =
   | { kind: "context"; id: string; markdown: string };
 
 export interface PendingInterrupt {
+  ids: string[];
   actions: InterruptAction[];
   allowed: string[];
   allowlist: string[];
+}
+
+/** The decision a typed reply sends: it declines the card with the text as the
+ *  reason, as the TUI does. `respond` (a synthetic success) only where reject
+ *  isn't allowed; null when the card takes no reply. */
+export function replyDecision(allowed: string[]): string | null {
+  if (allowed.includes("reject")) return "reject";
+  return allowed.includes("respond") ? "respond" : null;
+}
+
+// The server answers every pending interrupt with one decision, so the card shows
+// all their actions and offers only what each of them allows.
+function addInterrupt(
+  pending: PendingInterrupt | null,
+  msg: Extract<ServerMessage, { type: "interrupt" }>,
+): PendingInterrupt {
+  if (pending?.ids.includes(msg.interrupt_id)) return pending;
+  const card = {
+    ids: [msg.interrupt_id],
+    actions: msg.actions,
+    allowed: msg.allowed_decisions,
+    allowlist: msg.allowlist,
+  };
+  if (!pending) return card;
+  const both = (a: string[], b: string[]) => a.filter((x) => b.includes(x));
+  return {
+    ids: [...pending.ids, ...card.ids],
+    actions: [...pending.actions, ...card.actions],
+    allowed: both(pending.allowed, card.allowed),
+    allowlist: both(pending.allowlist, card.allowlist),
+  };
 }
 
 /** A provider whose key the server is waiting on (a blocking key prompt). */
@@ -452,15 +484,11 @@ export function createSessionStore() {
 
     const onInterrupt = (msg: Extract<ServerMessage, { type: "interrupt" }>) => {
       finalizeAssistant();
-      set({
+      set((s) => ({
         working: false,
         busy: false, // the turn is paused on the user; free the composer
-        pending: {
-          actions: msg.actions,
-          allowed: msg.allowed_decisions,
-          allowlist: msg.allowlist,
-        },
-      });
+        pending: addInterrupt(s.pending, msg),
+      }));
     };
 
     const onUsage = (msg: Extract<ServerMessage, { type: "usage" }>) => {

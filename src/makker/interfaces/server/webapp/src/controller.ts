@@ -9,7 +9,7 @@ import { ApiError, api, type SysimageChoice, type UpdateStatus } from "./api";
 import { stageSize } from "./canvas/stageSize";
 import { hostApiUrl, hostContext } from "./hostContext";
 import { HISTORY_CHANGED, type ServerMessage } from "./protocol";
-import type { CredentialPrompt, SessionStore } from "./store";
+import { replyDecision, type CredentialPrompt, type SessionStore } from "./store";
 import { Transport } from "./transport";
 
 export interface SlashCommand {
@@ -565,9 +565,14 @@ export class Controller {
     }
     if (this.s.busy) return false;
     if (this.s.pending) {
+      const decision = replyDecision(this.s.pending.allowed);
+      if (!decision) {
+        this.s.addSysNote("This request can't take a reply. Choose an option above.");
+        return false;
+      }
       this.s.addUser(trimmed);
       this.s.pinBottom();
-      this.sendDecision("respond", trimmed);
+      this.sendDecision(decision, trimmed);
       return true;
     }
     this.s.startTurn(trimmed);

@@ -163,6 +163,22 @@ describe("interrupts", () => {
     state().clearInterrupt();
     expect(state().pending).toBeNull();
   });
+
+  it("shows every pending interrupt on one card, offering what all of them allow", () => {
+    // The server applies one decision to all of them.
+    const card = (id: string, name: string, allowed: string[], allowlist: string[]) => ({
+      type: "interrupt" as const,
+      interrupt_id: id,
+      actions: [{ name }],
+      allowed_decisions: allowed,
+      allowlist,
+    });
+    state().handle(card("a", "write_file", ["approve", "reject"], ["file_edits"]));
+    state().handle(card("b", "execute", ["approve", "reject", "respond"], []));
+    state().handle(card("a", "write_file", ["approve", "reject"], ["file_edits"])); // re-sent
+    expect(state().pending).toMatchObject({ ids: ["a", "b"], allowed: ["approve", "reject"], allowlist: [] });
+    expect(state().pending?.actions.map((a) => a.name)).toEqual(["write_file", "execute"]);
+  });
 });
 
 describe("usage", () => {
