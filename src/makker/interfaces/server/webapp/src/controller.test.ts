@@ -127,7 +127,7 @@ class FakeSocket {
   }
 }
 
-const IDLE = { type: "snapshot", messages: [], turn: [], busy: false };
+const IDLE = { type: "snapshot", messages: [], turn: [], busy: false, model: null };
 
 describe("session lifecycle", () => {
   beforeEach(() => {
@@ -185,6 +185,40 @@ describe("session lifecycle", () => {
     expect(store.getState().sessionId).toBe("s1");
     expect(controller.transport.isOpen()).toBe(true);
     expect(store.getState().items.at(-1)).toMatchObject({ kind: "sys-note", level: "warn" });
+  });
+
+  it("shows a model switch only once the server confirms it", async () => {
+    vi.spyOn(api, "createSession").mockResolvedValue({ session_id: "s1" });
+    vi.spyOn(api, "modelWindow").mockResolvedValue({ model: "", window: null });
+    const { store, controller } = setup();
+    store.setState({ model: "openai:a" });
+    await controller.startSession();
+    const socket = FakeSocket.all[0];
+    socket.connect();
+    socket.receive({ ...IDLE, model: "openai:a" });
+
+    controller.setModel("openai:b");
+    expect(socket.sent.at(-1)).toEqual({ type: "command", command: "set_model", arg: "openai:b" });
+    expect(store.getState().model).toBe("openai:a");
+    socket.receive({ type: "error", message: "could not apply set_model: no such model" });
+    expect(store.getState().model).toBe("openai:a"); // refused: nothing to roll back
+
+    controller.setModel("openai:c");
+    socket.receive({ type: "model", model: "openai:c" });
+    expect(store.getState().model).toBe("openai:c");
+    expect(store.getState().meta).toContain("openai:c");
+  });
+
+  it("shows the model a reattached session runs", async () => {
+    vi.spyOn(api, "createSession").mockResolvedValue({ session_id: "s1" });
+    vi.spyOn(api, "modelWindow").mockResolvedValue({ model: "", window: null });
+    const { store, controller } = setup();
+    store.setState({ model: "openai:a" });
+    await controller.startSession();
+    const socket = FakeSocket.all[0];
+    socket.connect();
+    socket.receive({ ...IDLE, model: "anthropic:z" });
+    expect(store.getState().model).toBe("anthropic:z");
   });
 
   it("lets a past chat clicked while a new one starts win", async () => {

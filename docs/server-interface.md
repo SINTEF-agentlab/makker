@@ -133,7 +133,7 @@ Messages from the server to the front end:
 
 | Message | Carries |
 | --- | --- |
-| `snapshot` | The first message on every connection: `messages`, the conversation replayed as `/sessions/{id}/messages` gives it; `busy`, whether a turn is running; and `turn`, the messages that turn has sent so far, to apply as if they had arrived live |
+| `snapshot` | The first message on every connection: `messages`, the conversation replayed as `/sessions/{id}/messages` gives it; `busy`, whether a turn is running; `turn`, the messages that turn has sent so far, to apply as if they had arrived live; and `model`, the model the session runs (`null` for the server's default) |
 | `text` | A piece of the assistant's reply |
 | `reasoning` | A piece of the assistant's reasoning |
 | `tool` | A step in a tool call: requested, started, finished, or failed |
@@ -145,6 +145,7 @@ Messages from the server to the front end:
 | `turn_end` | The turn has finished |
 | `ui` | A command for the front end to apply to its interface |
 | `notice` | A system note from a command's result (e.g. `/compact`, `/add-dir`) |
+| `model` | A `set_model` command took effect: the model the session now runs |
 | `credential_required` | A model switch needs a provider key; the front end collects it, POSTs `/credentials`, and retries |
 | `error` | Something went wrong (a bad command, a failed turn, an unknown session) |
 

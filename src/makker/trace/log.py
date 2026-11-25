@@ -103,6 +103,15 @@ class TraceLog:
         ).fetchall()
         return [Event(id=r[0], timestamp=r[1], kind=r[2], payload=json.loads(r[3])) for r in rows]
 
+    def events_of(self, kind: str) -> list[Event]:
+        """Events of one ``kind`` (ordered by id; uses the kind index), so a lookup
+        among them does not read and decode the whole trace."""
+        rows = self._conn.execute(
+            "SELECT id, timestamp, kind, payload_json FROM events WHERE kind = ? ORDER BY id",
+            (kind,),
+        ).fetchall()
+        return [Event(id=r[0], timestamp=r[1], kind=r[2], payload=json.loads(r[3])) for r in rows]
+
     def max_id(self) -> int:
         """The id of the most recent event, or 0 if the trace is empty (cheap, by PK)."""
         row = self._conn.execute("SELECT id FROM events ORDER BY id DESC LIMIT 1").fetchone()

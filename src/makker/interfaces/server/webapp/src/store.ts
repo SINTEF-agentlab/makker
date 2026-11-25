@@ -57,7 +57,8 @@ export interface View {
   closed?: boolean;
 }
 
-export type ToolStatus = "running" | "done" | "error";
+// "stopped": the turn was stopped while the tool ran, so it never finished.
+export type ToolStatus = "running" | "done" | "error" | "stopped";
 
 export type ThreadItem =
   | { kind: "user"; id: string; text: string }
@@ -469,13 +470,18 @@ export function createSessionStore() {
       });
     };
 
-    const onTurnEnd = () => {
+    const onTurnEnd = (cancelled: boolean) => {
       set((s) => ({
         busy: false,
         working: false,
         liveAssistantId: null,
-        // collapse the live reasoning block once the turn is done
-        items: finalizeReasoning(s.items, s.liveReasoningId),
+        // collapse the live reasoning block once the turn is done, and settle a
+        // tool card that never heard its end (the record replays those as done)
+        items: finalizeReasoning(s.items, s.liveReasoningId).map((it) =>
+          it.kind === "tool" && it.status === "running"
+            ? { ...it, status: cancelled ? ("stopped" as const) : ("done" as const) }
+            : it,
+        ),
         liveReasoningId: null,
       }));
     };
@@ -540,7 +546,7 @@ export function createSessionStore() {
           case "usage":
             return onUsage(msg);
           case "turn_end":
-            return onTurnEnd();
+            return onTurnEnd(!!msg.cancelled);
           case "ui":
             return onUi(msg);
           case "popout_ready":

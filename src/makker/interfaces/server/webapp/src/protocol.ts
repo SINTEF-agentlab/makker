@@ -81,7 +81,16 @@ export type ServerMessage =
   /** The first message on every connection: the session as it stands. `messages`
    *  replays the record; while `busy`, a turn is running and `turn` holds what it
    *  has sent so far, applied as if this page had been connected all along. */
-  | { type: "snapshot"; messages: ReplayMessage[]; turn: ServerMessage[]; busy: boolean };
+  | {
+      type: "snapshot";
+      messages: ReplayMessage[];
+      turn: ServerMessage[];
+      busy: boolean;
+      /** The model the session runs; null for the server's default. */
+      model: string | null;
+    }
+  /** A model switch took effect: the session now runs `model`. */
+  | { type: "model"; model: string | null };
 
 export type ServerMessageType = ServerMessage["type"];
 

@@ -173,6 +173,17 @@ describe("turn end / error / notice", () => {
     expect(byKind("reasoning")[0].live).toBe(false);
   });
 
+  it("a stopped turn stops the spinner of the tool it interrupted", () => {
+    state().handle({ type: "tool", event: "requested", name: "run_julia", tool_call_id: "c1" });
+    state().handle({ type: "turn_end", text: "", cancelled: true });
+    expect(byKind("tool")[0].status).toBe("stopped");
+    // A turn that ends normally settles a card that never heard its end as done,
+    // which is how the record replays it.
+    state().handle({ type: "tool", event: "requested", name: "write_todos", tool_call_id: "c2" });
+    state().handle({ type: "turn_end", text: "" });
+    expect(byKind("tool").map((t) => t.status)).toEqual(["stopped", "done"]);
+  });
+
   it("error offers retry only after a prompt was sent", () => {
     state().handle({ type: "error", message: "first" });
     expect(byKind("error")[0].canRetry).toBe(false);
@@ -223,6 +234,7 @@ describe("snapshot", () => {
       type: "snapshot",
       messages: [{ type: "user", text: "simulate it" }],
       busy: true,
+      model: null,
       turn: [
         { type: "tool", event: "requested", name: "run_julia", tool_call_id: "c1" },
         {
@@ -243,7 +255,9 @@ describe("snapshot", () => {
   });
 
   it("leaves the composer free when no turn is running", () => {
-    state().handle({ type: "snapshot", messages: [{ type: "user", text: "hi" }], busy: false, turn: [] });
+    state().handle({
+      type: "snapshot", messages: [{ type: "user", text: "hi" }], busy: false, turn: [], model: null,
+    });
     expect(byKind("user")[0].text).toBe("hi");
     expect(state().busy).toBe(false);
   });
