@@ -130,6 +130,8 @@ describe("model control", () => {
     fireEvent.click(screen.getByRole("button", { name: "qwen3.8:27b" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: /Context size\s*Auto/ }));
     expect(await screen.findByText("16.4 GB")).toBeInTheDocument();
+    // The note goes once the figures are in.
+    await waitFor(() => expect(screen.queryByText("Measuring memory…")).toBeNull());
     expect(screen.getByText("31.0 GB · partly on CPU")).toBeInTheDocument();
     expect(screen.getByRole("menuitemradio", { name: /^Auto/ })).toHaveAttribute("aria-checked", "true");
     expect(measure).toHaveBeenCalledTimes(1);

@@ -277,12 +277,8 @@ function SettingMenu({
   const unmeasured = setting === "context" && !!data.context?.local && !data.context.measured;
   useEffect(() => {
     if (!unmeasured || busy) return;
-    let live = true;
     setMeasuring(true);
-    void controller.measureModel().finally(() => live && setMeasuring(false));
-    return () => {
-      live = false;
-    };
+    void controller.measureModel().finally(() => setMeasuring(false));
   }, [unmeasured, busy, controller]);
 
   const choose = (patch: Partial<ModelSettings["settings"]>) => {
@@ -355,7 +351,8 @@ function SettingMenu({
               .join(" · "),
           ),
         )}
-      {measuring ? <p className="model-note">Measuring memory…</p> : null}
+      {/* Gone as soon as the figures are in, whatever else is still settling. */}
+      {measuring && unmeasured ? <p className="model-note">Measuring memory…</p> : null}
       {typing ? (
         <div className="model-custom">
           <input
