@@ -1905,6 +1905,10 @@ def test_messages_endpoint_replays_conversation(tmp_path: Path) -> None:
                 {"tool_call_id": "c1", "name": "run_julia", "content": "2", "status": "success"},
             )
             log.append("message_assistant", {"content": "done — here it is"})
+            log.append(
+                "context_compaction",
+                {"summarized": 16, "kept": 3, "offloaded": True, "manual": False, "cutoff": 16},
+            )
         msgs = client.get(f"/sessions/{sid}/messages").json()["messages"]
     assert {"type": "user", "text": "set up a reservoir"} in msgs
     assert {"type": "reasoning", "text": "I'll build a small grid"} in msgs
@@ -1915,6 +1919,9 @@ def test_messages_endpoint_replays_conversation(tmp_path: Path) -> None:
     assert requested["tool_call_id"] == "c1" and requested["args"] == {"code": "1+1"}
     finished = next(m for m in msgs if m["type"] == "tool" and m["event"] == "finished")
     assert finished["tool_call_id"] == "c1" and finished["content"] == "2"
+    # A compaction replays as the same note the live turn showed.
+    compaction = next(m for m in msgs if m["type"] == "compaction")
+    assert compaction["text"].startswith("Context compacted automatically: summarized 16")
 
 
 def test_messages_endpoint_finishes_resultless_tool_calls(tmp_path: Path) -> None:

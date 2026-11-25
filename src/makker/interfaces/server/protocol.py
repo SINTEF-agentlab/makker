@@ -21,6 +21,7 @@ from typing import Any
 
 from makker.agent.approval import SupportsInterrupt, allowed_decisions_for_interrupt
 from makker.agent.turns import (
+    TurnCompaction,
     TurnReasoningDelta,
     TurnTextDelta,
     TurnTextEnd,
@@ -33,6 +34,7 @@ from makker.tool_labels import tool_label
 __all__ = [
     "PROTOCOL_VERSION",
     "artifact_to_wire",
+    "compaction_to_wire",
     "credential_required_to_wire",
     "error_to_wire",
     "interrupt_to_wire",
@@ -76,8 +78,8 @@ def credential_required_to_wire(*, provider: str, label: str, env_var: str) -> d
 def to_wire(event: Any) -> dict[str, Any] | None:
     """Serialize one streamed ``TurnRunner`` event, or ``None`` if it carries nothing.
 
-    Handles the three event types the runner emits to ``on_message``: assistant
-    text chunks, reasoning deltas, and tool-call lifecycle events. Anything else
+    Handles the event types the runner emits to ``on_message``: assistant text
+    chunks, reasoning deltas, tool-call lifecycle events, and compactions. Anything else
     (and an empty text/reasoning delta) returns ``None`` so the caller can skip it.
     """
 
@@ -102,6 +104,9 @@ def to_wire(event: Any) -> dict[str, Any] | None:
             "args": event.args,
             "content": event.content,
         }
+
+    if isinstance(event, TurnCompaction):
+        return compaction_to_wire(event.text, event.payload)
 
     return None
 
@@ -333,6 +338,16 @@ def model_to_wire(model: str | None) -> dict[str, Any]:
     """A model switch took effect: the session now runs ``model``."""
 
     return {"type": "model", "model": model}
+
+
+def compaction_to_wire(text: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """The conversation was compacted: the note to show, plus the trace event's fields.
+
+    Unlike ``notice`` it says nothing about a command finishing, so it can arrive
+    in the middle of a turn without ending the client's busy state.
+    """
+
+    return {"type": "compaction", "text": text, **payload}
 
 
 def notice_to_wire(text: str) -> dict[str, Any]:

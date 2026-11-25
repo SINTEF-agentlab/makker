@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from langchain.agents.middleware.internal_call_transformer import InternalCallTransformer
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.errors import GraphBubbleUp
@@ -26,40 +27,58 @@ from makker.trace.schema import (
 class TraceRecorder(AgentMiddleware):
     """Append model responses and tool round-trips to a trace log."""
 
+    # deepagents' summarizer makes its summary model call inside the model node and
+    # tags it as internal, but never declares the filter that keeps tagged calls out
+    # of ``run.messages``. Without it the summary streams into the chat as if the
+    # assistant had written it. Any middleware may declare the filter (langchain
+    # registers it once), so it sits on this one, which every agent has.
+    transformers = (InternalCallTransformer,)
+
     def __init__(self, trace: TraceLog) -> None:
         super().__init__()
         self._trace = trace
-        self._last_compaction: Any = None
+        self._traced_cutoff: int | None = None
 
     def _record_compaction(self, state: Any) -> None:
         """Emit a ``context_compaction`` event when the stock summarizer compacts.
 
         deepagents' SummarizationMiddleware is non-mutating: on the turns it
         compacts, it records a ``_summarization_event`` (a fresh summary message,
-        a cutoff index, and the offload path). We surface that into the trace
-        here, keyed on the summary message so each compaction is recorded once.
+        a cutoff index, and the offload path), which then stays in the state
+        until the next compaction replaces it. The cutoff only grows, so it
+        identifies the compaction. The trace is the record of which ones are
+        already written: manual ``/compact`` and earlier agents built for this
+        session (a resume, a model switch) write to it too.
         """
         event = state.get("_summarization_event") if isinstance(state, dict) else None
         if not isinstance(event, dict):
             return
-        marker = getattr(event.get("summary_message"), "id", None) or event.get("cutoff_index")
-        if marker == self._last_compaction:
-            return
-        self._last_compaction = marker
-        # The cutoff is the count of leading raw messages the summary replaced;
-        # the state still holds the full list (the middleware is non-mutating),
-        # so what remains after the cut is directly computable.
         cutoff = event.get("cutoff_index")
+        if not isinstance(cutoff, int):
+            return
+        if self._traced_cutoff is not None and cutoff <= self._traced_cutoff:
+            return
+        prior = _traced_cutoff(self._trace)
+        self._traced_cutoff = max(prior, cutoff)
+        if cutoff <= prior:
+            return
+        # The state still holds the full list (the middleware is non-mutating), so
+        # what the model saw after the cut is directly computable. The reply just
+        # produced came after the compaction: it is new, not kept.
         messages = state.get("messages")
         kept = None
-        if isinstance(messages, list) and isinstance(cutoff, int) and len(messages) >= cutoff:
-            kept = len(messages) - cutoff
+        if isinstance(messages, list) and len(messages) >= cutoff:
+            tail = messages[cutoff:]
+            if tail and isinstance(tail[-1], AIMessage):
+                tail = tail[:-1]
+            kept = len(tail)
         self._trace.append(
             CONTEXT_COMPACTION,
             compaction_payload(
-                summarized=cutoff if isinstance(cutoff, int) else None,
+                summarized=cutoff - prior,
                 kept=kept,
                 offloaded=event.get("file_path") is not None,
+                cutoff=cutoff,
             ),
         )
 
@@ -126,6 +145,13 @@ class TraceRecorder(AgentMiddleware):
                 },
             )
         return result
+
+
+def _traced_cutoff(trace: TraceLog) -> int:
+    """The furthest compaction cutoff already in the trace (0 when none is)."""
+
+    cutoffs = [event.payload.get("cutoff") for event in trace.events_of(CONTEXT_COMPACTION)]
+    return max((c for c in cutoffs if isinstance(c, int)), default=0)
 
 
 def _tool_error_result(call: dict[str, Any], exc: Exception) -> ToolMessage:

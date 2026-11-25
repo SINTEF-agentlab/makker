@@ -27,6 +27,32 @@ describe("assistant text streaming", () => {
   });
 });
 
+describe("compaction", () => {
+  const compaction = {
+    type: "compaction" as const,
+    text: "Context compacted automatically: summarized 16 older messages.",
+    summarized: 16,
+    kept: 3,
+    offloaded: true,
+    manual: false,
+  };
+
+  it("adds a note mid-turn without ending the turn, and later text starts a new bubble", () => {
+    state().beginWorking();
+    state().handle({ type: "text", text: "before" });
+    state().handle(compaction);
+    expect(state().busy).toBe(true);
+    state().handle({ type: "text", text: "after" });
+    expect(items().map((it) => it.kind)).toEqual(["assistant", "sys-note", "assistant"]);
+    expect(byKind("sys-note")[0].text).toBe(compaction.text);
+  });
+
+  it("replays as the same note", () => {
+    state().replay([{ type: "user", text: "q" }, compaction]);
+    expect(byKind("sys-note").map((it) => it.text)).toEqual([compaction.text]);
+  });
+});
+
 describe("reasoning", () => {
   it("streams into a live block and collapses it when assistant prose starts", () => {
     state().handle({ type: "reasoning", text: "thinking " });

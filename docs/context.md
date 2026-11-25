@@ -85,9 +85,15 @@ with. Sizing the trigger to the loaded window is what lets compaction fire
 before a local model overflows.
 
 - `/compact` runs a summarization pass on demand against the checkpointed
-  thread. Every compaction (automatic or manual) is recorded as a
+  thread. Every compaction (automatic or manual) is recorded once as a
   `context_compaction` trace event, and the full conversation remains in the
   trace; compaction is non-mutating, so nothing is lost from the record.
+- Both front ends show a note when a compaction happens, including an
+  automatic one in the middle of a turn, and the web replays it with the
+  conversation. The summary itself stays out of the chat: the summary model
+  call is tagged as internal, and `TraceRecorder` declares langchain's
+  `InternalCallTransformer`, which deepagents does not, so the call never
+  reaches the message stream.
 - Keep sessions task-shaped regardless: clearing and the summary preserve the
   working set and the conclusions, not every byte. Durable knowledge belongs in
   memory, which survives the session boundary by design.

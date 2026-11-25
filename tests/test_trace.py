@@ -59,5 +59,8 @@ def test_events_after_and_max_id(tmp_path: Path) -> None:
         assert log.events_after(log.max_id()) == []  # nothing past the latest
         assert [e.payload["content"] for e in log.events_of("message_user")] == ["hi"]
         assert log.events_of("artifact") == []
+        # Optionally only some kinds, e.g. to watch for one event type.
+        assert [e.kind for e in log.events_after(0, kinds=("message_user",))] == ["message_user"]
+        assert log.events_after(0, kinds=()) == []
     finally:
         log.close()

@@ -92,15 +92,17 @@ class TraceLog:
         ).fetchall()
         return [Event(id=r[0], timestamp=r[1], kind=r[2], payload=json.loads(r[3])) for r in rows]
 
-    def events_after(self, event_id: int) -> list[Event]:
-        """Events newer than ``event_id`` (ordered by id).
+    def events_after(self, event_id: int, kinds: Sequence[str] | None = None) -> list[Event]:
+        """Events newer than ``event_id`` (ordered by id), only of ``kinds`` if given.
 
         For incremental polling — e.g. flushing the side outputs produced since the
         last flush — so a long trace is not re-read and re-decoded each time."""
-        rows = self._conn.execute(
-            "SELECT id, timestamp, kind, payload_json FROM events WHERE id > ? ORDER BY id",
-            (event_id,),
-        ).fetchall()
+        query = "SELECT id, timestamp, kind, payload_json FROM events WHERE id > ?"
+        params: list[Any] = [event_id]
+        if kinds is not None:
+            query += f" AND kind IN ({', '.join('?' * len(kinds))})"
+            params.extend(kinds)
+        rows = self._conn.execute(query + " ORDER BY id", params).fetchall()
         return [Event(id=r[0], timestamp=r[1], kind=r[2], payload=json.loads(r[3])) for r in rows]
 
     def events_of(self, kind: str) -> list[Event]:

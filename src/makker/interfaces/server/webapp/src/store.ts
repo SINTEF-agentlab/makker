@@ -498,6 +498,19 @@ export function createSessionStore() {
       }));
     };
 
+    // The conversation was compacted. It can arrive mid-turn, so it closes any open
+    // assistant/reasoning segment like a new tool step does and leaves busy alone.
+    const onCompaction = (text: string) => {
+      set((s) => ({
+        liveAssistantId: null,
+        liveReasoningId: null,
+        items: [
+          ...finalizeReasoning(s.items, s.liveReasoningId),
+          { kind: "sys-note", id: nextId(), text },
+        ],
+      }));
+    };
+
     const onNotice = (text: string) => {
       // A command's result (e.g. /compact, /add-dir): the command finished.
       set((s) => ({
@@ -553,6 +566,8 @@ export function createSessionStore() {
             return; // the controller navigates the waiting popup window
           case "notice":
             return onNotice(msg.text);
+          case "compaction":
+            return onCompaction(msg.text);
           case "error":
             return onError(msg.message);
         }
@@ -585,6 +600,9 @@ export function createSessionStore() {
               break;
             case "artifact":
               onArtifact(m);
+              break;
+            case "compaction":
+              onCompaction(m.text);
               break;
           }
         }

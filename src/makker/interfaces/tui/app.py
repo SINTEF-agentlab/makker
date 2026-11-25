@@ -46,6 +46,7 @@ from makker.agent.approval import (
     pending_allowed_decisions,
 )
 from makker.agent.turns import (
+    TurnCompaction,
     TurnInterrupt,
     TurnReasoningDelta,
     TurnRunResult,
@@ -1367,7 +1368,7 @@ class TUIApp(App[None]):
             self._approval_menu.hide_menu()
 
     async def _render_message(self, msg: Any) -> None:
-        # TurnRunner emits exactly these four event types (see agent/turns.py);
+        # TurnRunner emits exactly these five event types (see agent/turns.py);
         # tool results arrive as TurnToolEvents, never as raw ToolMessages.
         if isinstance(msg, TurnTextDelta):
             if msg.text:
@@ -1385,6 +1386,11 @@ class TUIApp(App[None]):
 
         if isinstance(msg, TurnToolEvent):
             await self._render_tool_event(msg)
+            return
+
+        if isinstance(msg, TurnCompaction):
+            await self._flush_stream()
+            await self._note(msg.text)
 
     async def _render_reasoning_delta(self, msg: TurnReasoningDelta) -> None:
         await self._stream.append_reasoning(self._log, msg.text)
