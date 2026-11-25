@@ -95,6 +95,29 @@ def read_host_context(state_dir: Path) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def recorded_model(state_dir: Path) -> str | None:
+    """The model a session last ran, from its trace, so a resume continues on it.
+
+    ``None`` when the trace is missing or recorded no model (a session from
+    before models were recorded).
+    """
+    from makker.trace.schema import MODEL
+
+    path = state_dir / "trace.sqlite"
+    if not path.exists():
+        return None
+    try:
+        trace = TraceLog(path)
+        try:
+            event = trace.last_event((MODEL,))
+        finally:
+            trace.close()
+    except Exception:
+        return None
+    model = event.payload.get("model") if event else None
+    return model if isinstance(model, str) and model else None
+
+
 @dataclass(frozen=True)
 class SessionInfo:
     """One resumable session on disk, as shown by listings and pickers."""

@@ -330,6 +330,10 @@ async def create_session(
     # URL is only ever read from the session, so assigning it is all it needs.
     host.set_host_context(req.host_context, rebuild=False)
     host.session.host_api = host_api
+    if host.model:
+        from makker.recent_models import record_recent_model
+
+        record_recent_model(host.model)
     return {"session_id": host.session_id}
 
 
@@ -391,7 +395,7 @@ async def resume_session(
     # stored with the session. It has to be resolved here, before the build,
     # because it is a system-prompt layer: reading it after start would mean
     # rebuilding the agent we just built.
-    from makker.session import read_host_context
+    from makker.session import read_host_context, recorded_model
 
     state_dir = _session_state_dir(session_id)
     if state_dir is None:  # before anything starts a kernel for it
@@ -403,7 +407,8 @@ async def resume_session(
         host = await manager.resume(
             session_id,
             sim=_bound_sim(req.sim, defaults.sim),
-            model=req.model or defaults.model,
+            # The model it last ran, unless the request names one.
+            model=req.model or recorded_model(state_dir) or defaults.model,
             approval_mode=req.approval_mode or defaults.approval_mode,
             workspace=_workspace_for(req.workspace),
             extensions=_request_extensions(req.tools, host_context),

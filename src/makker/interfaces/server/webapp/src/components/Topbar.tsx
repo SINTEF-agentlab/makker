@@ -1,6 +1,6 @@
-// The top bar: sidebar toggle, the folder's simulator chip, the meta line
-// (model · session), the warming hint, and a "Views"
-// button to reopen the canvas after it was closed.
+// The top bar: sidebar toggle, the folder's simulator chip, the status line while a
+// session starts, the warming hint, and a "Views" button to reopen the canvas after
+// it was closed.
 
 import { useController, useSel } from "../context";
 import { MenuIcon, ViewsIcon } from "../icons";

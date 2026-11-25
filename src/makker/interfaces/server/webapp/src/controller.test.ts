@@ -225,7 +225,6 @@ describe("session lifecycle", () => {
     controller.setModel("openai:c");
     socket.receive({ type: "model", model: "openai:c" });
     expect(store.getState().model).toBe("openai:c");
-    expect(store.getState().meta).toContain("openai:c");
   });
 
   it("shows the model a reattached session runs", async () => {

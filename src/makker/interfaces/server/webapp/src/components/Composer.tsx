@@ -1,12 +1,13 @@
-// The composer: the message box plus its keyboard-driven slash-command menu, model
-// picker, prompt history (↑/↓), and file attach. The send button doubles as a stop
-// button while a turn runs.
+// The composer: the message box plus its keyboard-driven slash-command menu, prompt
+// history (↑/↓), and file attach, with the model and context controls below it. The
+// send button doubles as a stop button while a turn runs.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { SLASH_COMMANDS, type SlashCommand } from "../controller";
 import { useController, useSel } from "../context";
 import { ContextMeter } from "./Context";
+import { ModelControl } from "./Models";
 import { AttachIcon, SendIcon } from "../icons";
 import { replyDecision } from "../store";
 
@@ -14,18 +15,12 @@ export function Composer() {
   const controller = useController();
   const busy = useSel((s) => s.busy);
   const pending = useSel((s) => s.pending);
-  const models = useSel((s) => s.models);
-  const model = useSel((s) => s.model);
 
   const [value, setValue] = useState("");
   const [slashIndex, setSlashIndex] = useState(0);
-  const [modelOpen, setModelOpen] = useState(false);
-  const [modelIndex, setModelIndex] = useState(0);
-  const [refreshingModels, setRefreshingModels] = useState(false);
 
   const textarea = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-  const activeModelRef = useRef<HTMLDivElement>(null);
 
   const slashItems = useMemo<SlashCommand[]>(
     () =>
@@ -58,57 +53,11 @@ export function Composer() {
     return () => controller.setComposerSink(null);
   }, [controller]);
 
-  // Keep the highlighted model in view as the arrow keys move through the list.
-  useEffect(() => {
-    if (modelOpen) activeModelRef.current?.scrollIntoView?.({ block: "nearest" });
-  }, [modelIndex, modelOpen]);
-
-  useEffect(() => {
-    setModelIndex((i) => Math.min(i, Math.max(0, models.length - 1)));
-  }, [models.length]);
-
-  // Dismiss the model picker on an outside click.
-  useEffect(() => {
-    if (!modelOpen) return;
-    const onClick = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement)?.closest(".model-menu")) setModelOpen(false);
-    };
-    document.addEventListener("click", onClick);
-    return () => document.removeEventListener("click", onClick);
-  }, [modelOpen]);
-
   const focus = () => textarea.current?.focus();
-
-  const refreshModels = async () => {
-    setRefreshingModels(true);
-    try {
-      await controller.refreshAvailableModels();
-    } finally {
-      setRefreshingModels(false);
-    }
-  };
-
-  const openModelMenu = () => {
-    setModelIndex(Math.max(0, models.findIndex((m) => m.id === model)));
-    setModelOpen(true);
-    void refreshModels();
-    focus();
-  };
-
-  const chooseModel = (id: string) => {
-    setModelOpen(false);
-    controller.setModel(id);
-    setValue("");
-  };
 
   const submit = () => {
     const text = value.trim();
     if (!text) return;
-    if (text === "/model") {
-      setValue("");
-      openModelMenu();
-      return;
-    }
     if (controller.send(text)) setValue("");
   };
 
@@ -138,23 +87,7 @@ export function Composer() {
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Escape") {
-      if (modelOpen) return setModelOpen(false);
       if (busy) return controller.stop();
-      return;
-    }
-    if (modelOpen && models.length) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        return setModelIndex((i) => (i + 1) % models.length);
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        return setModelIndex((i) => (i - 1 + models.length) % models.length);
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
-        e.preventDefault();
-        return chooseModel(models[Math.min(modelIndex, models.length - 1)].id);
-      }
       return;
     }
     if (slashOpen) {
@@ -204,33 +137,6 @@ export function Composer() {
 
   return (
     <footer className="composer-wrap">
-      {modelOpen ? (
-        <div className="slash-menu model-menu">
-          <div className="slash-head model-head">
-            <span>Switch model</span>
-            <button type="button" onClick={() => void refreshModels()} disabled={refreshingModels}>
-              {refreshingModels ? "Refreshing…" : "Refresh list"}
-            </button>
-          </div>
-          {!models.length ? <div className="model-provider">No selectable models found.</div> : null}
-          {models.map((m, i) => {
-            const firstOfProvider = i === 0 || models[i - 1].provider !== m.provider;
-            return (
-              <div key={m.id}>
-                {firstOfProvider ? <div className="model-provider">{m.provider}</div> : null}
-                <div
-                  ref={i === modelIndex ? activeModelRef : undefined}
-                  className={`slash-item${i === modelIndex ? " active" : ""}`}
-                  onClick={() => chooseModel(m.id)}
-                >
-                  <span className="slash-name">{m.label}</span>
-                  <span className="slash-desc">{m.id}{m.note ? ` · ${m.note}` : ""}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
       {slashOpen ? (
         <div className="slash-menu">
           {slashItems.map((c, i) => (
@@ -285,6 +191,7 @@ export function Composer() {
         </button>
       </div>
       <div className="composer-foot">
+        <ModelControl />
         <ContextMeter />
       </div>
     </footer>

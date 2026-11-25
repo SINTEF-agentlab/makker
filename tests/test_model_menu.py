@@ -28,26 +28,41 @@ def _option_ids(menu: ModelMenu) -> list[str | None]:
     return [options.get_option_at_index(i).id for i in range(options.option_count)]
 
 
-async def test_model_menu_lists_discovered_models() -> None:
+@pytest.fixture
+def _openai_key_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    from makker.models import PROVIDERS
+
+    for info in PROVIDERS.values():
+        if info.key_env_var:
+            monkeypatch.delenv(info.key_env_var, raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+
+async def test_model_menu_opens_on_the_short_list(_openai_key_only) -> None:
+    from makker.model_choices import NEWEST_PER_PROVIDER
+
     app = _Host()
     async with app.run_test() as pilot:
-        app.push_screen(ModelMenu(current=None))
+        app.push_screen(ModelMenu(current="openai:gpt-6-luna"))
         await pilot.pause()
         ids = _option_ids(app.screen)
-        # A discovered id is present; provider headers are non-selectable (id=None).
-        assert "anthropic:claude-sonnet-4-6" in ids
-        assert any(id is not None and id.startswith("openrouter:") for id in ids)
+        # The current model, then the newest few of the provider with a key, under
+        # non-selectable headers (id=None). Nothing from providers without a key.
+        assert next(i for i in ids if i) == "openai:gpt-6-luna"
+        openai = [i for i in ids if i and i.startswith("openai:")]
+        assert len(openai) == 1 + NEWEST_PER_PROVIDER
+        assert not any(i and i.startswith(("anthropic:", "openrouter:")) for i in ids)
         assert None in ids
 
 
-async def test_model_menu_adds_api_listed_models(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_model_menu_search_covers_the_whole_catalog(monkeypatch, _openai_key_only) -> None:
     from makker import models
     from makker.interfaces.tui import model_menu
 
     def catalog():
         groups = {name: list(items) for name, items in models.discover_models().items()}
-        groups["openai"].insert(
-            0, models.ModelInfo("openai:test-api-only-model", "test-api-only-model")
+        groups["openai"].append(
+            models.ModelInfo("openai:test-api-only-model", "test-api-only-model")
         )
         return groups
 
@@ -58,18 +73,28 @@ async def test_model_menu_adds_api_listed_models(monkeypatch: pytest.MonkeyPatch
         await pilot.pause()
         await app.workers.wait_for_complete()
         await pilot.pause()
+        assert "openai:test-api-only-model" not in _option_ids(app.screen)
+        app.screen.query_one("#model-filter", Input).value = "api-only"
+        await pilot.pause()
         assert "openai:test-api-only-model" in _option_ids(app.screen)
+        app.screen.query_one("#model-filter", Input).value = "openrouter"
+        await pilot.pause()
+        assert any(i and i.startswith("openrouter:") for i in _option_ids(app.screen))
 
 
-async def test_model_menu_shows_recommended_and_cloud_ollama(monkeypatch) -> None:
-    # No installed local models in tests; recommended-to-pull local models and
-    # hosted cloud models still appear so you can pick without typing a tag.
+async def test_model_menu_lists_installed_local_models_and_finds_the_rest(monkeypatch) -> None:
+    # Installed models are on the short list; the recommended ones to pull and the
+    # hosted ones are a search away.
     from makker import ollama_client
 
-    async def _none() -> list[str]:
-        return []
+    async def _installed() -> list[str]:
+        return ["qwen3.8:27b"]
 
-    monkeypatch.setattr(ollama_client, "installed_models", _none)
+    async def _reachable() -> bool:
+        return True
+
+    monkeypatch.setattr(ollama_client, "installed_models", _installed)
+    monkeypatch.setattr(ollama_client, "is_reachable", _reachable)
     app = _Host()
     async with app.run_test() as pilot:
         app.push_screen(ModelMenu(current=None))
@@ -77,22 +102,28 @@ async def test_model_menu_shows_recommended_and_cloud_ollama(monkeypatch) -> Non
         await app.workers.wait_for_complete()
         await pilot.pause()
         ids = _option_ids(app.screen)
-        assert "ollama:qwen3.6:27b" in ids  # recommended local, pullable
-        assert "ollama:glm-5.1:cloud" in ids  # hosted cloud
+        assert "ollama:qwen3.8:27b" in ids
+        assert "ollama:qwen3.6:27b" not in ids
+        app.screen.query_one("#model-filter", Input).value = "qwen3.6"
+        await pilot.pause()
+        assert "ollama:qwen3.6:27b" in _option_ids(app.screen)  # recommended, pullable
+        app.screen.query_one("#model-filter", Input).value = "glm"
+        await pilot.pause()
+        assert "ollama:glm-5.1:cloud" in _option_ids(app.screen)  # hosted
 
 
-async def test_model_menu_shows_recent_section(monkeypatch) -> None:
-    # A free-text id that isn't in any provider catalog can only appear via the
-    # Recent section, so its presence proves that section is rendered.
+async def test_model_menu_shows_recent_and_pinned(monkeypatch) -> None:
+    # Ids in no provider catalog can only appear via these sections.
     from makker.interfaces.tui import model_menu as mm
 
     monkeypatch.setattr(mm, "load_recent_models", lambda: ["openrouter:custom/model"])
+    monkeypatch.setattr(mm, "load_pinned", lambda: ["openrouter:pinned/model"])
     app = _Host()
     async with app.run_test() as pilot:
         app.push_screen(ModelMenu(current=None))
         await pilot.pause()
-        model_ids = [mm._model_id(i) for i in _option_ids(app.screen)]
-        assert "openrouter:custom/model" in model_ids
+        ids = [i for i in _option_ids(app.screen) if i]
+        assert ids[:2] == ["openrouter:pinned/model", "openrouter:custom/model"]
 
 
 async def test_model_menu_filters_by_text() -> None:
@@ -195,6 +226,8 @@ async def test_model_menu_keeps_the_highlight_when_discovery_returns(monkeypatch
         return ["llama3.1:8b"]
 
     monkeypatch.setattr(ollama_client, "installed_models", _installed)
+    # A key puts that provider's newest models on the short list to move through.
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     results: list = []
     app = _Host()
     async with app.run_test() as pilot:

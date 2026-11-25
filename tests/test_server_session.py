@@ -105,7 +105,13 @@ def test_live_models_endpoint_uses_provider_catalog(tmp_path: Path, monkeypatch)
     from makker import models
 
     info = models.ModelInfo("openai:gpt-6-luna", "gpt-6-luna", "API-listed")
+    local = models.ModelInfo("ollama:qwen3.8:27b", "qwen3.8:27b", local=True)
     monkeypatch.setattr(models, "discover_available_models", lambda: {"openai": [info]})
+
+    async def ollama():
+        return [local]
+
+    monkeypatch.setattr(models, "discover_ollama_models", ollama)
     with _client(echo_agent, tmp_path) as client:
         body = client.get("/models/live").json()
     assert body == {
@@ -115,9 +121,97 @@ def test_live_models_endpoint_uses_provider_catalog(tmp_path: Path, monkeypatch)
                 "label": "gpt-6-luna",
                 "provider": "openai",
                 "note": "API-listed",
-            }
+                "window": None,
+                "local": False,
+            },
+            {
+                "id": "ollama:qwen3.8:27b",
+                "label": "qwen3.8:27b",
+                "provider": "ollama",
+                "note": "",
+                "window": None,
+                "local": True,
+            },
         ]
     }
+
+
+def test_model_menu_endpoint_returns_the_short_list(tmp_path: Path, monkeypatch) -> None:
+    from makker import models
+    from makker.model_choices import set_pinned
+    from makker.recent_models import record_recent_model
+
+    async def ollama():
+        return [models.ModelInfo("ollama:qwen3.8:27b", "qwen3.8:27b", local=True)]
+
+    monkeypatch.setattr(models, "discover_ollama_models", ollama)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    record_recent_model("openai:gpt-6-luna")
+    set_pinned("openrouter:vendor/model", True)
+    with _client(echo_agent, tmp_path) as client:
+        body = client.get("/models/menu", params={"current": "openai:gpt-6.2-sol"}).json()
+    titles = [section["title"] for section in body["sections"]]
+    assert titles[:2] == ["Pinned", "Recent"] and titles[-1] == "Local"
+    recent = [m["id"] for m in body["sections"][1]["models"]]
+    assert recent == ["openai:gpt-6.2-sol", "openai:gpt-6-luna"]
+    assert {"provider": "anthropic", "label": "Anthropic"} in body["add_key"]
+    assert body["pinned"] == ["openrouter:vendor/model"]
+
+
+def test_pinning_a_model_over_http(tmp_path: Path) -> None:
+    with _client(echo_agent, tmp_path) as client:
+        pinned = client.post("/models/pinned", json={"model": "openai:x", "pinned": True})
+        assert pinned.json() == {"pinned": ["openai:x"]}
+        unpinned = client.post("/models/pinned", json={"model": "openai:x", "pinned": False})
+        assert unpinned.json() == {"pinned": []}
+
+
+def test_a_new_session_counts_as_a_recent_use_of_its_model(tmp_path: Path) -> None:
+    from makker.recent_models import load_recent_models
+
+    async def factory(**kw: Any) -> SessionHost:
+        session = Session.create(
+            julia=FakeJulia(),
+            simulator=make_fake_adapter(tmp_path),
+            session_id=default_session_id(),
+            state_root=tmp_path,
+        )
+        return SessionHost(session=session, agent=echo_agent(), model=kw["model"])
+
+    app = create_app(SessionManager(host_factory=factory), default_model="openai:gpt-6-luna")
+    with TestClient(app) as client:
+        client.post("/sessions", json={"sim": "jutuldarcy"})
+    assert load_recent_models() == ["openai:gpt-6-luna"]
+
+
+def test_a_session_resumed_from_disk_runs_the_model_it_last_ran(tmp_path: Path) -> None:
+    from makker.session import sessions_root
+    from makker.trace import TraceLog
+    from makker.trace.schema import MODEL
+
+    sid = default_session_id()
+    trace = TraceLog(sessions_root() / sid / "trace.sqlite")
+    trace.append(MODEL, {"model": "anthropic:recorded"})
+    trace.close()
+    asked: list[str | None] = []
+
+    async def factory(**kw: Any) -> SessionHost:
+        asked.append(kw["model"])
+        session = Session.create(
+            julia=FakeJulia(),
+            simulator=make_fake_adapter(tmp_path),
+            session_id=kw["session_id"] or default_session_id(),
+            state_root=tmp_path,
+        )
+        return SessionHost(session=session, agent=echo_agent())
+
+    app = create_app(SessionManager(host_factory=factory), default_model="openai:launch")
+    with TestClient(app) as client:
+        for resumed in (sid, _on_disk(default_session_id())):
+            r = client.post(f"/sessions/{resumed}/resume", json={"sim": "jutuldarcy"})
+            assert r.status_code == 200, r.text
+    # The recorded model beats the launch default; a session with none gets it.
+    assert asked == ["anthropic:recorded", "openai:launch"]
 
 
 def test_models_endpoint_reports_the_launch_default_model(tmp_path: Path) -> None:
@@ -1564,6 +1658,13 @@ def test_command_reconfigures_session(tmp_path: Path) -> None:
             snapshot = ws.receive_json()
     assert calls == [{"model": "anthropic:c"}]
     assert switched == {"type": "model", "model": "anthropic:c"}
+    # Saved like the terminal's switch: the next session here starts on it.
+    from makker.paths import workspace_root
+    from makker.recent_models import load_recent_models
+    from makker.workspace import load_workspace_config
+
+    assert load_workspace_config(workspace_root()).model == "anthropic:c"
+    assert load_recent_models()[0] == "anthropic:c"
     assert meter["type"] == "context"
     assert host.approval_mode == "auto"
     assert err["type"] == "error" and "bogus" in err["message"]

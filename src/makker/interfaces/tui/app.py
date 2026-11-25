@@ -1103,8 +1103,9 @@ class TUIApp(App[None]):
         """Rebuild the agent on the new model and persist the choice."""
         if not await self._rebuild_agent(model_id):
             return
-        record_recent_model(model_id)
-        where = self._persist_model(model_id, scope)
+        from makker.model_choices import remember_model
+
+        where = remember_model(model_id, scope=scope, workspace=workspace_root())
         await self._note(f"model changed to `{model_id}` (saved to {where}).")
 
     async def _rebuild_agent(self, model_id: str) -> bool:
@@ -1128,27 +1129,6 @@ class TUIApp(App[None]):
         self._refresh_context_status()
         self._refresh_subtitle()
         return True
-
-    def _persist_model(self, model_id: str, scope: str) -> str:
-        """Save the model to the workspace or user-global config.
-
-        Returns where it was saved, for the confirmation note.
-        """
-        from dataclasses import replace
-
-        try:
-            if scope == "global":
-                from makker.user_config import load_user_config, write_user_config
-
-                write_user_config(replace(load_user_config(), model=model_id))
-                return "user config"
-            ws = workspace_root()
-            from makker.workspace import load_workspace_config, write_workspace_config
-
-            write_workspace_config(replace(load_workspace_config(ws), model=model_id), workspace=ws)
-            return "this workspace"
-        except OSError:
-            return "this session only (could not write config)"
 
     def _refresh_subtitle(self) -> None:
         parts = [self._session_label]

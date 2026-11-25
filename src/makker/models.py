@@ -33,13 +33,34 @@ class ProviderInfo:
 
 @dataclass(frozen=True)
 class ModelInfo:
+    """One model as the menus show it.
+
+    ``label`` is the provider's display name when its data has one. ``window`` is
+    the input context size the data reports, ``released`` its release date, and
+    ``local`` marks a model that runs on this machine.
+    """
+
     id: str
     label: str
     note: str = ""
+    window: int | None = None
+    released: str | None = None
+    local: bool = False
+    deprecated: bool = False
 
     @property
     def provider(self) -> str:
         return provider_of(self.id)
+
+    def to_wire(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "label": self.label,
+            "provider": self.provider,
+            "note": self.note,
+            "window": self.window,
+            "local": self.local,
+        }
 
 
 # The agent's default model and the env var that overrides it. They live here, in a
@@ -234,6 +255,24 @@ OLLAMA_CLOUD: tuple[str, ...] = (
 )
 
 
+def _from_profile(provider: str, name: str, profile: dict[str, Any]) -> ModelInfo:
+    window = profile.get("max_input_tokens")
+    deprecated = profile.get("status") == "deprecated"
+    return ModelInfo(
+        f"{provider}:{name}",
+        str(profile.get("name") or name),
+        "deprecated" if deprecated else "",
+        window=window if isinstance(window, int) and window > 0 else None,
+        released=profile.get("release_date") or None,
+        deprecated=deprecated,
+    )
+
+
+def _newest_first(models: list[ModelInfo]) -> list[ModelInfo]:
+    """By release date, newest first; models without one (live-listed) last."""
+    return sorted(models, key=lambda m: (m.released or "", m.id), reverse=True)
+
+
 @lru_cache(maxsize=1)
 def discover_models() -> dict[str, list[ModelInfo]]:
     """Tool-calling models from installed provider packages, grouped by provider.
@@ -241,22 +280,24 @@ def discover_models() -> dict[str, list[ModelInfo]]:
     Each non-local provider's ``data/_profiles.py`` is read and filtered to
     models that support tool calling and text I/O. The configured default is
     included even when its provider profile has not caught up. Providers are
-    ordered as in ``PROVIDERS``; models are sorted newest-ish first (reverse
-    name order, which tracks the version-in-name scheme of the major providers).
-    Cached for the process; call ``discover_models.cache_clear()`` to refresh.
+    ordered as in ``PROVIDERS``; models newest first. Cached for the process;
+    call ``discover_models.cache_clear()`` to refresh.
     """
     grouped: dict[str, list[ModelInfo]] = {}
     default_provider, _, default_name = DEFAULT_MODEL.partition(":")
     for name, info in PROVIDERS.items():
         if info.local:
             continue  # Ollama ships no profiles; the selector probes the daemon.
-        names = {
-            m for m, profile in _load_profiles(info.package).items() if _is_chat_capable(profile)
-        }
-        if name == default_provider:
-            names.add(default_name)
-        if names:
-            grouped[name] = [ModelInfo(f"{name}:{m}", m) for m in sorted(names, reverse=True)]
+        profiles = _load_profiles(info.package)
+        models = [
+            _from_profile(name, model, profile)
+            for model, profile in profiles.items()
+            if _is_chat_capable(profile)
+        ]
+        if name == default_provider and default_name not in profiles:
+            models.append(ModelInfo(DEFAULT_MODEL, default_name))
+        if models:
+            grouped[name] = _newest_first(models)
     return grouped
 
 
@@ -291,12 +332,27 @@ def discover_available_models() -> dict[str, list[ModelInfo]]:
             if f"{provider}:{name}" not in known
         ]
         if additions:
-            grouped[provider] = sorted(
-                [*grouped.get(provider, ()), *additions],
-                key=lambda model: model.label,
-                reverse=True,
-            )
+            grouped[provider] = _newest_first([*grouped.get(provider, ()), *additions])
     return grouped
+
+
+async def discover_ollama_models() -> list[ModelInfo]:
+    """Ollama's models: the installed local ones, the recommended local ones not
+    pulled yet, and the hosted ones. Empty when the daemon does not answer."""
+    from makker import ollama_client
+
+    if not await ollama_client.is_reachable():
+        return []
+    installed = await ollama_client.installed_models()
+    models = [ModelInfo(f"ollama:{name}", name, local=True) for name in installed]
+    bases = {name.split(":", 1)[0] for name in installed}
+    models += [
+        ModelInfo(f"ollama:{tag}", tag, "not pulled", local=True)
+        for tag in RECOMMENDED_OLLAMA_LOCAL
+        if tag.split(":", 1)[0] not in bases
+    ]
+    models += [ModelInfo(f"ollama:{tag}", tag) for tag in OLLAMA_CLOUD]
+    return models
 
 
 def _openai_available() -> list[str]:

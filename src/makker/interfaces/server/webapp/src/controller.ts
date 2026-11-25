@@ -5,7 +5,7 @@
 
 import type { StoreApi } from "zustand/vanilla";
 
-import { ApiError, api, type SysimageChoice, type UpdateStatus } from "./api";
+import { ApiError, api, type ModelMenu, type SysimageChoice, type UpdateStatus } from "./api";
 import { stageSize } from "./canvas/stageSize";
 import { hostApiUrl, hostContext } from "./hostContext";
 import { HISTORY_CHANGED, type ServerMessage } from "./protocol";
@@ -147,11 +147,6 @@ export class Controller {
     return this.store.getState();
   }
 
-  private meta(): string {
-    const { model, sessionId } = this.s;
-    return `${model || "no model"} · ${(sessionId || "").slice(0, 13)}`;
-  }
-
   // --- startup --------------------------------------------------------------
 
   async init(): Promise<void> {
@@ -224,7 +219,7 @@ export class Controller {
       });
       if (seq !== this.reenterSeq) return;
       this.s.setSession(session_id, "");
-      this.store.setState({ meta: this.meta() });
+      this.store.setState({ meta: "" });
       this.transport.open(session_id);
       this.flushQueuedPrompt();
     } catch (e) {
@@ -392,16 +387,13 @@ export class Controller {
   private effects(msg: ServerMessage): void {
     if (msg.type === "snapshot") {
       // The session's own model, which a reattach keeps whatever this page last chose.
-      if (msg.model && msg.model !== this.s.model) {
-        this.s.setModel(msg.model);
-        this.store.setState({ meta: this.meta() });
-      }
+      if (msg.model && msg.model !== this.s.model) this.s.setModel(msg.model);
       if (this.arrivalNote) this.s.addSysNote(this.arrivalNote);
       this.arrivalNote = null;
     } else if (msg.type === "model" && msg.model) {
       this.s.setModel(msg.model);
-      this.store.setState({ meta: this.meta() });
-      this.s.addSysNote(`Switched the model to ${msg.model}.`);
+      const label = this.s.models.find((m) => m.id === msg.model)?.label ?? msg.model;
+      this.s.addSysNote(`Switched to ${label}.`);
     } else if (msg.type === "turn_end") {
       this.refreshHistory();
       if (!msg.cancelled) this.notifyDone("The agent finished your turn.");
@@ -621,7 +613,7 @@ export class Controller {
       case "/context":
         return this.openContext();
       case "/model":
-        return this.setModel(arg); // empty arg opens the picker via the composer
+        return arg ? this.setModel(arg) : this.openModelMenu();
       case "/approval-mode":
         return this.setApproval(arg);
       case "/transcript":
@@ -637,8 +629,44 @@ export class Controller {
     }
   }
 
+  openModelMenu(): void {
+    this.s.setModelMenu("menu");
+  }
+
+  openMoreModels(): void {
+    this.s.setModelMenu("more");
+    void this.refreshAvailableModels();
+  }
+
+  closeModelMenu(): void {
+    this.s.setModelMenu("closed");
+  }
+
+  /** The menu's short list; it depends on the current model, recents and pins. */
+  async modelMenu(): Promise<ModelMenu> {
+    const menu = await api.modelMenu(this.s.model);
+    this.store.setState({ pinned: menu.pinned });
+    return menu;
+  }
+
+  async pinModel(id: string, pinned: boolean): Promise<void> {
+    try {
+      this.store.setState({ pinned: (await api.pinModel(id, pinned)).pinned });
+    } catch (e) {
+      this.s.addSysNote(failureMessage(e, "Could not save the pin."), "warn");
+    }
+  }
+
+  /** Ask for a provider's key from the model menu. */
+  addKey(provider: string): void {
+    this.closeModelMenu();
+    const cred = this.s.credentials.find((c) => c.provider === provider);
+    this.s.openApiKeys(cred ? { provider, label: cred.label, env_var: cred.env_var } : null);
+  }
+
   setModel(id: string): void {
-    if (!id) return; // the composer opens the picker for a bare /model
+    this.closeModelMenu();
+    if (!id) return;
     if (this.s.busy) {
       this.s.addSysNote("Finish the current turn before changing the model.", "warn");
       return;
@@ -812,7 +840,7 @@ export class Controller {
       await this.reenter(id);
     } catch (e) {
       // The page is still on the session it showed, socket and all.
-      this.store.setState({ meta: this.meta() });
+      this.store.setState({ meta: "" });
       this.s.addSysNote(failureMessage(e, "Could not resume that session."), "warn");
     }
   }
@@ -842,7 +870,7 @@ export class Controller {
     try {
       body = await api.resumeSession(id, {
         sim: this.s.sim || undefined,
-        model: this.s.model || undefined,
+        // No model: a session resumes on the one it last ran.
         // An older session reopened from the sidebar is brought up to date with
         // what the application has selected now, and pointed at where it listens
         // now, rather than what it had when the conversation was last touched.
@@ -857,7 +885,7 @@ export class Controller {
     void this.refreshHistory(); // liveness is decided by now
     this.transport.close();
     this.s.setSession(body.session_id, "");
-    this.store.setState({ meta: this.meta() });
+    this.store.setState({ meta: "" });
     this.arrivalNote = body.kernel_restarted === false ? REATTACHED_NOTE : RESTARTED_NOTE;
     this.transport.open(body.session_id);
     this.flushQueuedPrompt();

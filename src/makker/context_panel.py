@@ -44,7 +44,7 @@ PART_LABELS = {
 
 def format_tokens(count: int) -> str:
     if count >= 1_000_000:
-        return f"{count / 1_000_000:.1f}M"
+        return f"{count / 1_000_000:.1f}".removesuffix(".0") + "M"
     if count >= 10_000:
         return f"{count / 1000:.0f}k"
     if count >= 1_000:
