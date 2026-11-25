@@ -14,9 +14,6 @@ Slash commands typed into the input box:
 - ``/compact``: summarize older turns to free context space.
 - ``/memory [note | edit [note]]``: view workspace memory, or open it in $EDITOR.
 - ``/clear``: clear the visible log and restore the welcome card.
-- ``/approve``: approve the currently pending tool actions.
-- ``/reject [reason]``: reject the currently pending tool actions.
-- ``/respond <message>``: answer on behalf of the pending tool actions.
 - ``/approval-mode [ask|workspace|auto]``: cycle or set permission mode (Shift+Tab cycles).
 - ``/quit``: quit the app (same as Ctrl+D).
 - ``/help``: list available commands.

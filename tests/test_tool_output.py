@@ -20,6 +20,13 @@ def test_normalize_tool_message_repr() -> None:
     assert normalize_tool_output(raw) == "     1\tline one\n     2\tline two"
 
 
+def test_text_that_mentions_a_tool_message_is_left_alone() -> None:
+    # Reading a source file that builds a ToolMessage used to show only the
+    # captured content string in place of the file.
+    source = 'def reply():\n    return ToolMessage(content="done", tool_call_id="c1")\n'
+    assert normalize_tool_output(source) == source
+
+
 def test_interrupt_payload_detection() -> None:
     text = "Interrupt(value={'action_requests': [{'name': 'write_file'}]})"
     assert is_interrupt_payload(text) is True
