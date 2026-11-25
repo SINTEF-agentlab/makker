@@ -9,6 +9,7 @@ import { ApiError, api, type SysimageChoice, type UpdateStatus } from "./api";
 import { stageSize } from "./canvas/stageSize";
 import { hostApiUrl, hostContext } from "./hostContext";
 import { HISTORY_CHANGED, type ServerMessage } from "./protocol";
+import { readStored, writeStored } from "./storage";
 import { replyDecision, type CredentialPrompt, type SessionStore } from "./store";
 import { Transport } from "./transport";
 
@@ -353,11 +354,7 @@ export class Controller {
       await sleep(1500);
       const versions = await api.version();
       if (versions.boot && versions.boot !== boot) {
-        try {
-          sessionStorage.setItem(UPDATED_KEY, versions.makker ?? "");
-        } catch {
-          /* the note after the reload is a nicety */
-        }
+        writeStored("session", UPDATED_KEY, versions.makker ?? "");
         window.location.reload();
         return;
       }
@@ -373,13 +370,8 @@ export class Controller {
 
   /** After the reload into an updated server, say once how the update went. */
   private async noteFinishedUpdate(): Promise<void> {
-    let version: string | null = null;
-    try {
-      version = sessionStorage.getItem(UPDATED_KEY);
-      sessionStorage.removeItem(UPDATED_KEY);
-    } catch {
-      return;
-    }
+    const version = readStored("session", UPDATED_KEY);
+    writeStored("session", UPDATED_KEY, null);
     if (version === null) return;
     // The new server keeps the outcome: this page may not have seen the update run.
     const status = await api.updateStatus();
@@ -615,6 +607,7 @@ export class Controller {
   sendDecision(decision: string, message?: string): void {
     if (!this.s.pending) return;
     this.transport.send({ type: "decision", decision, ...(message ? { message } : {}) });
+    if (decision === "reject") this.s.markRejected(this.s.pending.actions);
     this.s.clearInterrupt();
     this.s.beginWorking();
   }

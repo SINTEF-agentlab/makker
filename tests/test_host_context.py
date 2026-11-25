@@ -72,7 +72,8 @@ def _manager(
         adapter = make_fake_adapter(tmp_path)
         sid = session_id or default_session_id()
         maker = Session.resume if resume else Session.create
-        session = maker(julia=FakeJulia(), simulator=adapter, session_id=sid, state_root=tmp_path)
+        # The default sessions root, where the server looks for a session to resume.
+        session = maker(julia=FakeJulia(), simulator=adapter, session_id=sid)
         return SessionHost(session=session, agent=agent_factory(), extensions=extensions)
 
     return SessionManager(host_factory=host_factory, max_live=max_live)

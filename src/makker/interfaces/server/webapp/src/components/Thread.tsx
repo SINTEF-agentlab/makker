@@ -7,6 +7,7 @@ import { memo, useLayoutEffect, useRef } from "react";
 import { useController, useSel } from "../context";
 import type { ThreadItem } from "../store";
 import { Approval } from "./Approval";
+import { ErrorBoundary } from "./ErrorBoundary";
 import {
   ArtifactFileCard,
   ArtifactImageCard,
@@ -82,7 +83,7 @@ const ThreadItemView = memo(function ThreadItemView({ item }: { item: ThreadItem
     case "ui-note":
       return <UiNote action={item.action} payload={item.payload} />;
     case "error":
-      return <ErrorCard message={item.message} canRetry={item.canRetry} />;
+      return <ErrorCard message={item.message} retry={item.retry} />;
     case "help":
       return <HelpCard />;
     case "context":
@@ -133,7 +134,11 @@ export function Thread() {
         {items.length === 0 ? (
           <Welcome />
         ) : (
-          items.map((item) => <ThreadItemView key={item.id} item={item} />)
+          items.map((item) => (
+            <ErrorBoundary key={item.id} what="item">
+              <ThreadItemView item={item} />
+            </ErrorBoundary>
+          ))
         )}
         {working ? <Working /> : null}
         {pending ? <Approval /> : null}

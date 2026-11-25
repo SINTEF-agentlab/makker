@@ -4,6 +4,8 @@
 // live in a single place (Canvas.tsx reads them for the grip, the controller
 // for the hint).
 
+import { readStored } from "../storage";
+
 /** The canvas width as a viewport fraction, persisted so the split survives a
  *  reload. Clamps mirror the CSS min/max so a restored value is always sane. */
 export const CANVAS_W_KEY = "jutul.canvas-w";
@@ -27,7 +29,7 @@ export function stageSize(): { width: number; height: number } {
   }
   const winW = window.innerWidth;
   const winH = window.innerHeight;
-  const saved = Number(localStorage.getItem(CANVAS_W_KEY));
+  const saved = Number(readStored("local", CANVAS_W_KEY));
   const frac = Number.isFinite(saved) && saved > 0 ? clampFrac(saved) : DEFAULT_FRAC;
   const width =
     winW <= OVERLAY_BREAKPOINT ? Math.min(OVERLAY_WIDTH, winW) : Math.round(winW * frac);

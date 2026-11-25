@@ -174,6 +174,23 @@ describe("canvas interaction", () => {
   });
 });
 
+describe("a part that fails to render", () => {
+  it("shows a note in its place and leaves the rest of the thread", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { store } = renderWithStore(<Thread />);
+    drive(
+      store,
+      { type: "text", text: "Before the bad card." },
+      // A model's malformed todo list: the card's preview reads each entry.
+      { type: "tool", event: "requested", name: "write_todos", tool_call_id: "t", args: { todos: [null] } },
+      { type: "turn_end", text: "" },
+    );
+    expect(screen.getByText("Could not show this item.")).toBeInTheDocument();
+    expect(screen.getByText("Before the bad card.")).toBeInTheDocument();
+    error.mockRestore();
+  });
+});
+
 describe("approval", () => {
   it("renders the request and clears it on approve", () => {
     const { store } = renderWithStore(<Thread />);
