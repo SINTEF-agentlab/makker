@@ -206,3 +206,44 @@ async def test_trace_recorder_normalizes_openai_reasoning_summary(tmp_path) -> N
     assert "thinking about primes" in events["message_reasoning"]["content"]
     assert events["message_assistant"]["content"] == "There are 10."
     log.close()
+
+
+async def test_command_tool_result_is_recorded(tmp_path) -> None:
+    """A tool that returns a Command (the task subagent, write_todos, read_file on
+    media) records the ToolMessage it carries, so transcripts show what came back."""
+
+    from langgraph.types import Command
+
+    from makker.transcript import render_html, render_markdown
+
+    log = TraceLog(tmp_path / "trace.sqlite")
+    recorder = TraceRecorder(log)
+
+    async def handler(_request):
+        # Shaped like deepagents' task tool: the message carries no tool name.
+        return Command(
+            update={
+                "todos": [],
+                "messages": [
+                    ToolMessage("the subagent found 3 wells", tool_call_id="other"),
+                    ToolMessage("the subagent found 7 wells", tool_call_id="call-1"),
+                    HumanMessage("attached media"),
+                ],
+            }
+        )
+
+    result = await recorder.awrap_tool_call(_request(name="task"), handler)
+    assert isinstance(result, Command)
+
+    events = list(log.iter_events())
+    assert [e.kind for e in events] == ["tool_call", "tool_result"]
+    assert events[1].payload == {
+        "tool_call_id": "call-1",
+        "name": "task",
+        "content": "the subagent found 7 wells",
+        "status": "success",
+    }
+    assert "### Tool result · `task`" in render_markdown(events)
+    assert "the subagent found 7 wells" in render_markdown(events)
+    assert "the subagent found 7 wells" in render_html(events)
+    log.close()

@@ -22,6 +22,7 @@ import re
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from makker.trace import Event, schema
 from makker.transcript.attempts import Attempt, build_attempt_tree
@@ -465,23 +466,31 @@ def _event_field(events: list[Event], kind: str, key: str, *, default: str = "")
     return default
 
 
+def _is_error_metric(key: str) -> bool:
+    lowered = key.lower()
+    return "rmse" in lowered or "mae" in lowered
+
+
 def _primary_key(metrics: dict) -> str:
-    for key in metrics:
-        lowered = key.lower()
-        if "rmse" in lowered or "mae" in lowered:
-            return key
-    return next(iter(metrics))
+    return next((key for key in metrics if _is_error_metric(key)), next(iter(metrics)))
+
+
+def _ranked_key(flat: list[Attempt]) -> str | None:
+    """The primary metric, when the report knows which way is better.
+
+    ``record_attempt`` logs bare numbers, with no direction. An error metric
+    (the RMSE or MAE ``_primary_key`` prefers) is better lower; for any other,
+    such as an R², the report names no best attempt and no improvement.
+    """
+    key = next((_primary_key(node.metrics) for node in flat if node.metrics), None)
+    return key if key is not None and _is_error_metric(key) else None
 
 
 def _best_attempt(flat: list[Attempt]) -> Attempt | None:
-    key: str | None = None
+    key = _ranked_key(flat)
     best: tuple[Attempt, float] | None = None
     for node in flat:
-        if not node.metrics:
-            continue
-        if key is None:
-            key = _primary_key(node.metrics)
-        if key not in node.metrics:
+        if key is None or key not in node.metrics:
             continue
         val = float(node.metrics[key])
         if best is None or val < best[1]:
@@ -600,7 +609,9 @@ def _embed_narrative_images(html_body: str, artifact_dirs: Sequence[Path]) -> st
         src = match.group(1)
         if src.startswith("data:"):
             return match.group(0)
-        inlined = image_data_uri(src, artifact_dirs)
+        # The markdown renderer percent-encodes the link (`små.png` becomes
+        # `sm%C3%A5.png`) and escapes it for the attribute; undo both.
+        inlined = image_data_uri(unquote(html.unescape(src)), artifact_dirs)
         if inlined is None:
             return match.group(0)
         return f'src="{inlined}"'
@@ -843,12 +854,8 @@ def _render_tree(
         rows.setdefault(depth[node.id], []).append(node)
     max_depth = max(rows)
 
-    # Pick the chart's primary key so the tree's tone reflects the same metric.
-    chart_key: str | None = None
-    for node in flat:
-        if node.metrics:
-            chart_key = _primary_key(node.metrics)
-            break
+    # Tone by the chart's primary metric, and only when its direction is known.
+    chart_key = _ranked_key(flat)
 
     box_w, box_h = 168, 56
     row_h = 96
@@ -884,7 +891,7 @@ def _render_tree(
         tone = _tone_for(node, parent, chart_key)
         is_best = node.id == best_id
         cls = f"box {tone}" + (" best" if is_best else "")
-        title = _truncate((node.notes or node.rationale or "Attempt").strip(), 28)
+        title = _truncate(_attempt_title(node), 28)
         metric = _primary_metric_text(node)
         boxes.append(
             f'<a href="#attempt-{index[node.id]}">'
@@ -904,13 +911,16 @@ def _render_tree(
         f"{''.join(edges)}{''.join(boxes)}"
         "</svg>"
     )
-    legend = (
-        '<div class="legend">'
-        '<span class="swatch baseline">Baseline</span>'
+    ranked = (
         '<span class="swatch improved">Improved vs parent</span>'
         '<span class="swatch regressed">Regressed vs parent</span>'
         '<span class="swatch neutral">No change</span>'
         '<span class="swatch best">Best</span>'
+    )
+    legend = (
+        '<div class="legend">'
+        '<span class="swatch baseline">Baseline</span>'
+        f"{ranked if chart_key else ''}"
         "</div>"
     )
     return svg, legend
@@ -921,6 +931,12 @@ def _primary_metric_text(node: Attempt) -> str:
         return ""
     key = _primary_key(node.metrics)
     return f"{key}={_fmt(float(node.metrics[key]))}"
+
+
+def _attempt_title(node: Attempt) -> str:
+    """The first line of the notes, else of the rationale, else "Attempt"."""
+    text = next((t for t in (node.notes, node.rationale) if t and t.strip()), "Attempt")
+    return text.strip().splitlines()[0]
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -950,7 +966,7 @@ def _render_attempt(
     *,
     is_best: bool = False,
 ) -> str:
-    title = (node.notes or node.rationale or "Attempt").strip().splitlines()[0]
+    title = _attempt_title(node)
     parent_html = (
         f'<span class="parent">from #{index[node.parent_id]}</span>'
         if node.parent_id and node.parent_id in index
