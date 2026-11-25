@@ -500,15 +500,9 @@ def _build_typed_run(events: Iterable[dict[str, Any]]) -> FakeTypedRun:
     _flush_open()
     # Like langgraph's tool-call transformer: a call still open at the end (a
     # tool paused by an interrupt) is closed with neither output nor error.
-    for buf in tool_call_buf.values():
-        tool_calls.append(
-            FakeToolCallStream(
-                tool_call_id=buf["tool_call_id"],
-                tool_name=buf["tool_name"],
-                input=buf.get("input"),
-                output_deltas=buf.get("deltas") or [],
-            )
-        )
+    for call in started.values():
+        if call.result is None:
+            call.result = (None, None)
     return FakeTypedRun(
         messages=messages,
         tool_calls=tool_calls,
