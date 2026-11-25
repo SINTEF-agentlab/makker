@@ -339,14 +339,13 @@ export function UiNote({ action, payload }: { action: string; payload: Record<st
   );
 }
 
-export function ErrorCard({ message, canRetry }: { message: string; canRetry: boolean }) {
+export function ErrorCard({ message, retry }: { message: string; retry: string | null }) {
   const controller = useController();
-  const lastPrompt = useSel((s) => s.lastPrompt);
   return (
     <div className="error-card">
       <div className="err-msg">{message}</div>
-      {canRetry && lastPrompt ? (
-        <button className="btn" onClick={() => controller.retry(lastPrompt)}>
+      {retry ? (
+        <button className="btn" onClick={() => controller.retry(retry)}>
           Retry
         </button>
       ) : null}

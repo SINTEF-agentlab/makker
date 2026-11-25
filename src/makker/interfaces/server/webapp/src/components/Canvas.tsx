@@ -9,6 +9,7 @@ import { LiveFrames } from "../canvas/LiveFrames";
 import { isImageView, panelFor } from "../canvas/registry";
 import { CANVAS_W_KEY, clampFrac } from "../canvas/stageSize";
 import { useController, useSel } from "../context";
+import { readStored, writeStored } from "../storage";
 import {
   BackIcon,
   CloseIcon,
@@ -20,7 +21,7 @@ import {
 } from "../icons";
 
 function restoreCanvasWidth(): void {
-  const saved = Number(localStorage.getItem(CANVAS_W_KEY));
+  const saved = Number(readStored("local", CANVAS_W_KEY));
   if (Number.isFinite(saved) && saved > 0) {
     document.documentElement.style.setProperty(
       "--canvas-w",
@@ -90,7 +91,7 @@ export function Canvas() {
       grip.removeEventListener("pointermove", move);
       grip.removeEventListener("pointerup", up);
       grip.removeEventListener("pointercancel", up);
-      if (frac > 0) localStorage.setItem(CANVAS_W_KEY, String(frac));
+      if (frac > 0) writeStored("local", CANVAS_W_KEY, String(frac));
       // The split changed the stage: refresh the server's panel-size hint so
       // the next plot (or regenerate) is fitted to the panel as it is now.
       controller.sendCanvasHint();

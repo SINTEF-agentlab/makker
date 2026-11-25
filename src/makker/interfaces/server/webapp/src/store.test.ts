@@ -226,12 +226,21 @@ describe("turn end / error / notice", () => {
     expect(byKind("tool").map((t) => t.status)).toEqual(["stopped", "done"]);
   });
 
-  it("error offers retry only after a prompt was sent", () => {
+  it("an error offers to retry the prompt that failed, once one was sent", () => {
     state().handle({ type: "error", message: "first" });
-    expect(byKind("error")[0].canRetry).toBe(false);
+    expect(byKind("error")[0].retry).toBeNull();
     state().startTurn("hello");
     state().handle({ type: "error", message: "second" });
-    expect(byKind("error").at(-1)?.canRetry).toBe(true);
+    state().startTurn("again");
+    expect(byKind("error").map((e) => e.retry)).toEqual([null, "hello"]);
+  });
+
+  it("a declined call's card shows it was rejected instead of spinning", () => {
+    const args = { file_path: "a.txt", content: "x" };
+    state().handle({ type: "tool", event: "requested", name: "write_file", tool_call_id: "w", args });
+    state().handle({ type: "tool", event: "requested", name: "read_file", tool_call_id: "r", args: {} });
+    state().markRejected([{ name: "write_file", args }]);
+    expect(byKind("tool").map((t) => t.status)).toEqual(["rejected", "running"]);
   });
 
   it("notice clears busy and adds a system note", () => {

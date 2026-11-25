@@ -58,9 +58,11 @@ async def _serve_stream(websocket: WebSocket, manager: SessionManager, session_i
         while True:
             try:
                 message = await websocket.receive_json()
-            except ValueError:  # a non-JSON text frame (json.JSONDecodeError)
+            except (ValueError, KeyError, TypeError):  # not JSON, or a binary frame
+                message = None
+            if not isinstance(message, dict):
                 await _safe_send(
-                    websocket, protocol.error_to_wire("invalid message (expected JSON)")
+                    websocket, protocol.error_to_wire("invalid message (expected a JSON object)")
                 )
                 continue
             await stream.handle(message)

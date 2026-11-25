@@ -57,6 +57,15 @@ def _client(agent_factory: Callable[[], Any], tmp_path: Path) -> TestClient:
     return TestClient(create_app(_manager(agent_factory, tmp_path)))
 
 
+def _on_disk(session_id: str) -> str:
+    """Leave a session's record on disk, as an earlier server would have."""
+    from makker.session import sessions_root
+    from makker.trace import TraceLog
+
+    TraceLog(sessions_root() / session_id / "trace.sqlite").close()
+    return session_id
+
+
 def _drain_turn(ws: Any) -> list[dict]:
     """Read events until the turn ends or pauses for approval."""
     events: list[dict] = []
@@ -193,7 +202,7 @@ def test_disk_resume_reports_stale_sysimage_as_conflict(tmp_path: Path) -> None:
     manager = SessionManager(host_factory=unavailable_factory)
     with TestClient(create_app(manager)) as client:
         response = client.post(
-            f"/sessions/{default_session_id()}/resume",
+            f"/sessions/{_on_disk(default_session_id())}/resume",
             json={"sim": "jutuldarcy"},
         )
 
@@ -218,7 +227,7 @@ def test_outdated_environment_is_a_conflict_not_a_server_error(
         if endpoint == "create":
             response = client.post("/sessions", json={})
         else:
-            response = client.post(f"/sessions/{default_session_id()}/resume", json={})
+            response = client.post(f"/sessions/{_on_disk(default_session_id())}/resume", json={})
 
     assert response.status_code == 409
     assert "requires JutulDarcy 0.4" in response.json()["detail"]
@@ -855,6 +864,33 @@ def test_ws_unknown_session(tmp_path: Path) -> None:
         client.websocket_connect("/sessions/nope/stream") as ws,
     ):
         assert ws.receive_json() == {"type": "error", "message": "no such session"}
+
+
+def test_resuming_a_session_with_no_record_starts_nothing(tmp_path: Path) -> None:
+    started: list[str] = []
+
+    async def factory(**kwargs: Any) -> SessionHost:
+        started.append(kwargs["session_id"])
+        raise AssertionError("no kernel for a session that does not exist")
+
+    with TestClient(create_app(SessionManager(host_factory=factory))) as client:
+        response = client.post(f"/sessions/{default_session_id()}/resume", json={})
+
+    assert response.status_code == 404
+    assert started == []
+
+
+def test_a_frame_that_is_not_a_json_object_keeps_the_connection(tmp_path: Path) -> None:
+    with _client(echo_agent, tmp_path) as client:
+        sid = client.post("/sessions", json={"sim": "demo"}).json()["session_id"]
+        with open_stream(client, sid) as ws:
+            ws.send_bytes(b"\x00\x01")
+            ws.send_text("[1, 2]")
+            ws.send_text("not json")
+            for _ in range(3):
+                assert ws.receive_json()["type"] == "error"
+            ws.send_json({"type": "prompt", "text": "still here?"})
+            assert _drain_turn(ws)[-1]["type"] == "turn_end"
 
 
 def test_ws_decision_without_pending_is_error(tmp_path: Path) -> None:

@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiKeys } from "./components/ApiKeys";
 import { Canvas } from "./components/Canvas";
 import { Composer } from "./components/Composer";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { Thread } from "./components/Thread";
 import { Topbar } from "./components/Topbar";
@@ -14,6 +15,7 @@ import { UpdateDialog } from "./components/UpdateDialog";
 import { Controller } from "./controller";
 import { SessionProvider, useSel } from "./context";
 import { installDebug } from "./debug";
+import { readStored, writeStored } from "./storage";
 import { createSessionStore } from "./store";
 
 function ReconnectingBar() {
@@ -42,13 +44,13 @@ export function App() {
   }, [ctx]);
 
   const [collapsed, setCollapsed] = useState(() => {
-    const v = localStorage.getItem("ja_sidebar");
+    const v = readStored("local", "ja_sidebar");
     return v === "collapsed" || (v === null && window.innerWidth <= 760);
   });
   const toggleSidebar = () =>
     setCollapsed((c) => {
       const next = !c;
-      localStorage.setItem("ja_sidebar", next ? "collapsed" : "open");
+      writeStored("local", "ja_sidebar", next ? "collapsed" : "open");
       return next;
     });
 
@@ -88,7 +90,9 @@ export function App() {
           <Thread />
           <Composer />
         </div>
-        <Canvas />
+        <ErrorBoundary what="panel">
+          <Canvas />
+        </ErrorBoundary>
         <ApiKeys />
         <UpdateDialog />
       </div>

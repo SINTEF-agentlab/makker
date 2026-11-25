@@ -58,7 +58,8 @@ export interface View {
 }
 
 // "stopped": the turn was stopped while the tool ran, so it never finished.
-export type ToolStatus = "running" | "done" | "error" | "stopped";
+// "rejected": the user declined the call at its approval, so it never ran.
+export type ToolStatus = "running" | "done" | "error" | "stopped" | "rejected";
 
 export type ThreadItem =
   | { kind: "user"; id: string; text: string }
@@ -84,7 +85,8 @@ export type ThreadItem =
   | { kind: "artifact-file"; id: string; url: string; caption: string }
   | { kind: "sys-note"; id: string; text: string; level?: "warn" }
   | { kind: "ui-note"; id: string; action: string; payload: Record<string, unknown> }
-  | { kind: "error"; id: string; message: string; canRetry: boolean }
+  // `retry` is the prompt of the turn that failed, when it can be sent again.
+  | { kind: "error"; id: string; message: string; retry: string | null }
   | { kind: "help"; id: string }
   | { kind: "context"; id: string; markdown: string };
 
@@ -215,6 +217,7 @@ export interface SessionActions {
   beginWorking: () => void;
   pinBottom: () => void;
   clearInterrupt: () => void;
+  markRejected: (actions: InterruptAction[]) => void;
   addSysNote: (text: string, level?: "warn") => void;
   addHelp: () => void;
   addContext: (markdown: string) => void;
@@ -521,7 +524,7 @@ export function createSessionStore() {
         working: false,
         items: [
           ...s.items,
-          { kind: "error", id: nextId(), message, canRetry: !!s.lastPrompt && !s.pending },
+          { kind: "error", id: nextId(), message, retry: s.pending ? null : s.lastPrompt || null },
         ],
       }));
     };
@@ -690,6 +693,20 @@ export function createSessionStore() {
       pinBottom: () => set((s) => ({ bottomPin: s.bottomPin + 1 })),
 
       clearInterrupt: () => set({ pending: null }),
+      // A declined call never runs, so no tool event ends its card. The approval
+      // names calls by tool and arguments, which is how the card is found.
+      markRejected: (actions) =>
+        set((s) => {
+          const call = (name: string | null, args: unknown) => `${name} ${JSON.stringify(args ?? {})}`;
+          const declined = new Set(actions.map((a) => call(a.name, a.args)));
+          return {
+            items: s.items.map((it) =>
+              it.kind === "tool" && it.status === "running" && declined.has(call(it.name, it.args))
+                ? { ...it, status: "rejected" as const }
+                : it,
+            ),
+          };
+        }),
 
       addSysNote: (text, level) =>
         set((s) => ({ items: [...s.items, { kind: "sys-note", id: nextId(), text, level }] })),

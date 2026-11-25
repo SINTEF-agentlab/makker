@@ -394,8 +394,10 @@ async def resume_session(
     from makker.session import read_host_context
 
     state_dir = _session_state_dir(session_id)
+    if state_dir is None:  # before anything starts a kernel for it
+        raise HTTPException(status_code=404, detail="no such session")
     host_context = req.host_context
-    if host_context is None and state_dir is not None:
+    if host_context is None:
         host_context = read_host_context(state_dir)
     try:
         host = await manager.resume(
