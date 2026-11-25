@@ -1,9 +1,9 @@
 """User-global API-key storage and provider-credential checks.
 
 Keys live in a global ``.env`` file at ``state_home()/.env``, loaded on startup
-alongside any repo or workspace ``.env``. Shell environment and a project
-``.env`` take precedence; this file is the fallback filled in when the user
-enters a key interactively (at ``init``, in the model selector, via the
+after the provider keys in the workspace's ``.env``. Shell environment and the
+workspace ``.env`` take precedence; this file is the fallback filled in when the
+user enters a key interactively (at ``init``, in the model selector, via the
 ``makker key`` command, or in the web UI). Keys are kept out of
 ``config.toml`` so that file stays safe to share.
 """
@@ -17,8 +17,8 @@ from pathlib import Path
 
 from dotenv import dotenv_values, load_dotenv, set_key
 
-from makker.models import PROVIDERS, ProviderInfo, key_env_var, provider_info
-from makker.paths import state_home
+from makker.models import PROVIDERS, ProviderInfo, key_env_var, provider_info, provider_key_vars
+from makker.paths import state_home, workspace_root
 
 
 def user_env_path() -> Path:
@@ -27,7 +27,16 @@ def user_env_path() -> Path:
 
 
 def load_user_credentials() -> None:
-    """Load the global ``.env`` without overriding existing variables."""
+    """Load provider keys from the workspace ``.env``, then the global ``.env``.
+
+    Neither overrides a variable already set. Only the provider keys are read
+    from the workspace file: it belongs to the user's project, and its other
+    settings are not Makker's to apply.
+    """
+    workspace_values = dotenv_values(workspace_root() / ".env")
+    for name in provider_key_vars():
+        if value := workspace_values.get(name):
+            os.environ.setdefault(name, value)
     path = user_env_path()
     if path.exists():
         load_dotenv(path, override=False)

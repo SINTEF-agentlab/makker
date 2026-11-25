@@ -16,6 +16,7 @@ them once on startup and library code can read them via the helpers.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import re
@@ -56,12 +57,19 @@ def default_state_home() -> Path:
 
 def state_home() -> Path:
     if _state_home_override is not None:
-        return _state_home_override
-    # Temporary: an install from before the rename keeps its data under the old
-    # name until Makker has moved it.
-    from makker import legacy
+        home = _state_home_override
+    else:
+        # Temporary: an install from before the rename keeps its data under the
+        # old name until Makker has moved it.
+        from makker import legacy
 
-    return legacy.resolve_state_home(default_state_home())
+        home = legacy.resolve_state_home(default_state_home())
+    # It holds keys, chats and memory, so create it owner-only (a no-op on
+    # Windows before Python 3.13). A folder that cannot be made is left to the
+    # write that needs it to report.
+    with contextlib.suppress(OSError):
+        home.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return home
 
 
 def user_config_path() -> Path:

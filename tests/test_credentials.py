@@ -18,7 +18,7 @@ from makker.credentials import (
     store_credential_for_provider,
     user_env_path,
 )
-from makker.paths import state_home
+from makker.paths import state_home, workspace_root
 
 # The autouse ``_reset_workspace_overrides`` fixture isolates state_home per
 # test, so ``user_env_path()`` points at a fresh tmp dir.
@@ -82,6 +82,31 @@ def test_load_user_credentials_does_not_override_existing(monkeypatch: pytest.Mo
     assert os.environ[_VAR] == "from-shell"
     assert os.environ.get("MAKKER_TEST_OTHER") == "loaded"
     os.environ.pop("MAKKER_TEST_OTHER", None)
+
+
+def test_load_user_credentials_reads_only_provider_keys_from_the_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Set, then delete, so teardown also removes what the load sets.
+    for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "MAKKER_TEST_OTHER"):
+        monkeypatch.setenv(var, "")
+        monkeypatch.delenv(var)
+    monkeypatch.setenv("GOOGLE_API_KEY", "from-shell")
+    (workspace_root() / ".env").write_text(
+        "OPENAI_API_KEY=from-workspace\nGOOGLE_API_KEY=from-workspace\n"
+        "ANTHROPIC_API_KEY=\nMAKKER_TEST_OTHER=from-workspace\n",
+        encoding="utf-8",
+    )
+    path = user_env_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("OPENAI_API_KEY=from-global\nANTHROPIC_API_KEY=from-global\n", encoding="utf-8")
+
+    load_user_credentials()
+
+    assert os.environ["OPENAI_API_KEY"] == "from-workspace"  # beats the global file
+    assert os.environ["GOOGLE_API_KEY"] == "from-shell"  # the shell beats both
+    assert os.environ["ANTHROPIC_API_KEY"] == "from-global"  # an empty entry is no key
+    assert "MAKKER_TEST_OTHER" not in os.environ  # nothing else comes from the workspace
 
 
 @pytest.fixture

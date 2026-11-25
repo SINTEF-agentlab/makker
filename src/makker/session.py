@@ -305,9 +305,10 @@ class Session:
     # model gave no explicit size; ``None`` until a client reports one.
     web_canvas_hint: tuple[int, int] | None = None
     _ephemeral_memory_dir: Path | None = field(default=None, repr=False)
-    # Folders holding a report written this session, whose sidecar transcript is
-    # refreshed at turn end (see ``refresh_report_transcripts``).
-    _report_transcript_dirs: set[Path] = field(default_factory=set, repr=False)
+    # Reports written this session (resolved paths). ``write_report`` may replace
+    # them, and the transcript beside each is refreshed at turn end (see
+    # ``refresh_report_transcripts``).
+    reports: set[Path] = field(default_factory=set, repr=False)
     _warm: WarmPackage | None = field(default=None, repr=False)
 
     @property
@@ -498,10 +499,10 @@ class Session:
 
         ``write_report`` runs mid-turn, before the model's closing message, so
         the transcript it writes beside the report is a snapshot. Recording the
-        folder here lets the turn loop rewrite it from the complete trace once
+        report here lets the turn loop rewrite it from the complete trace once
         the turn settles.
         """
-        self._report_transcript_dirs.add(Path(report_path).parent)
+        self.reports.add(Path(report_path).resolve())
 
     def refresh_report_transcripts(self) -> None:
         """Rewrite the transcript beside each report written this session.
@@ -510,12 +511,12 @@ class Session:
         transcript includes the model's closing message. Best-effort: a write
         failure must never disturb the turn loop.
         """
-        if not self._report_transcript_dirs:
+        if not self.reports:
             return
         from makker.transcript.report import write_sidecar_transcript
 
         events = list(self.trace.iter_events())
-        for directory in self._report_transcript_dirs:
+        for directory in {report.parent for report in self.reports}:
             with contextlib.suppress(OSError):
                 write_sidecar_transcript(directory, events)
 

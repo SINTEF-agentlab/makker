@@ -192,6 +192,22 @@ def render_memory_overview(memory_dir: Path) -> str:
     return "\n".join(lines)
 
 
+_TITLE_MAX_CHARS = 80
+# What a title keeps besides letters and digits: no characters that start
+# markdown structure, end the index entry's code span or open a tag.
+_TITLE_PUNCTUATION = frozenset(" .,:;'\"()/+=%&?!_-")
+
+
+def _clean_title(title: str) -> str:
+    """The title as one plain, short line.
+
+    It goes into ``MEMORY.md``, which every later session loads into its system
+    prompt, so it may not add lines or structure to it.
+    """
+    kept = "".join(ch if ch.isalnum() or ch in _TITLE_PUNCTUATION else " " for ch in title)
+    return " ".join(kept.split())[:_TITLE_MAX_CHARS].rstrip() or "Untitled"
+
+
 def _slugify(title: str) -> str:
     slug = (re.sub(r"[^a-z0-9]+", "-", title.strip().lower()).strip("-") or "note")[:48]
     # The index is MEMORY.md. On a case-insensitive filesystem a note saved as
@@ -237,7 +253,8 @@ def make_remember_tool(memory_dir: Path):
         Args:
             content: The fact, in a few sentences of Markdown. For a
                 correction, include why it matters and how to apply it.
-            title: Short human-readable title (also used to name the file).
+            title: Short human-readable title, one line (also used to name
+                the file).
             kind: One of ``user``, ``project``, ``simulator``, ``preference``,
                 ``reference``. Defaults to ``project``.
 
@@ -249,21 +266,21 @@ def make_remember_tool(memory_dir: Path):
         if normalized_kind not in _VALID_KINDS:
             normalized_kind = "project"
 
+        title = _clean_title(title)
         name = _slugify(title)
         filename = f"{name}.md"
         note_path = memory_dir / filename
         body = content.strip()
         note_path.write_text(
-            f"---\nname: {name}\ndescription: {title.strip()}\ntype: {normalized_kind}\n---\n\n"
-            f"{body}\n",
+            f"---\nname: {name}\ndescription: {title}\ntype: {normalized_kind}\n---\n\n{body}\n",
             encoding="utf-8",
         )
         _append_index_entry(
             memory_dir / MEMORY_INDEX_FILENAME,
-            title=title.strip(),
+            title=title,
             filename=filename,
             hook=_index_hook(body),
         )
-        return f"remembered `{title.strip()}` → {note_path} (kind={normalized_kind})"
+        return f"remembered `{title}` → {note_path} (kind={normalized_kind})"
 
     return remember

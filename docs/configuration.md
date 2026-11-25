@@ -48,11 +48,13 @@ Set it from the TUI model selector with `Ctrl+A` (save for all workspaces).
 
 ## API keys
 
-Keys are read from the process environment, a `.env` in the working
-directory, and the user-global `<state home>/.env`, in that order of
+Keys are read from the process environment, a `.env` in the workspace
+folder, and the user-global `<state home>/.env`, in that order of
 precedence. The global file is what the interactive key prompts write to,
 with owner-only permissions. Recognized:
 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `OPENROUTER_API_KEY`.
+Only these are read from the workspace `.env`; its other variables are left
+alone.
 Ollama needs none. The agent's shell commands and Julia session run without
 these variables, so a command that prints its environment cannot copy a key
 into the session's trace or transcript.
@@ -106,7 +108,7 @@ In the workspace:
       artifacts/         # plots and reports the agent saved
 ```
 
-In the state home (default `~/.local/share/makker/`):
+In the state home (default `~/.local/share/makker/`, created owner-only):
 
 ```
 config.toml              # user config

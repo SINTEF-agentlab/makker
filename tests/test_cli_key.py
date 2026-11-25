@@ -2,29 +2,19 @@
 
 from __future__ import annotations
 
-import sys
-
 import pytest
 
-import makker.interfaces.cli.main  # noqa: F401  (ensure the submodule is imported)
 from makker.interfaces.cli import main
 
-# The package re-exports the ``main`` function, shadowing the submodule attribute,
-# so reach the module object through sys.modules to patch its ``load_dotenv``.
-cli_main = sys.modules["makker.interfaces.cli.main"]
-
-# The autouse ``_reset_workspace_overrides`` fixture points state_home at a fresh
-# tmp dir, so the global .env these tests read is empty unless a test writes it.
+# The autouse ``_reset_workspace_overrides`` fixture points the workspace and
+# state_home at fresh tmp dirs, so the .env files these tests read are empty
+# unless a test writes them.
 
 
 @pytest.fixture(autouse=True)
 def _no_provider_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"):
         monkeypatch.delenv(var, raising=False)
-    # main() calls load_dotenv(), which finds a .env relative to the caller's file
-    # (so the repo's own .env would seed real keys here). Stub it so the status the
-    # test sees comes only from the isolated tmp state-home .env.
-    monkeypatch.setattr(cli_main, "load_dotenv", lambda *a, **k: None)
 
 
 def test_key_show_lists_providers(capsys: pytest.CaptureFixture[str]) -> None:

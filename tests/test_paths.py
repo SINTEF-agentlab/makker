@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import stat
+import sys
 from pathlib import Path
+
+import pytest
 
 from makker.paths import (
     resolve_agent_path,
@@ -35,6 +39,14 @@ def test_state_home_honours_override(tmp_path: Path) -> None:
     custom = tmp_path / "custom-state"
     set_state_home(custom)
     assert state_home() == custom.resolve()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file mode")
+def test_state_home_is_created_owner_only(tmp_path: Path) -> None:
+    home = tmp_path / "data" / "makker"
+    set_state_home(home)
+    (state_home() / "sessions").mkdir(parents=True)
+    assert stat.S_IMODE(home.stat().st_mode) == 0o700
 
 
 def test_state_home_defaults_to_xdg(monkeypatch, tmp_path: Path) -> None:

@@ -31,8 +31,6 @@ import contextlib
 import difflib
 import sys
 
-from dotenv import load_dotenv
-
 from makker.interfaces.cli import doctor as doctor_cmd
 from makker.interfaces.cli import init as init_cmd
 from makker.interfaces.cli import run as run_cmd
@@ -94,7 +92,6 @@ COMMANDS = (
 
 def main(argv: list[str] | None = None) -> int:
     _force_utf8_streams()
-    load_dotenv()
     argv = sys.argv[1:] if argv is None else argv
 
     if argv and argv[0] in ("-h", "--help"):

@@ -94,8 +94,8 @@ def _set_key(provider: str) -> int:
 def run(args: argparse.Namespace) -> int:
     from makker.credentials import load_user_credentials
 
-    # Reflect the saved global .env in the environment, so status matches what a
-    # real session would resolve (the top-level CLI only loads a project .env).
+    # Load the keys a real session would see (the workspace .env, then the
+    # saved global one), so the status matches what it would resolve.
     load_user_credentials()
 
     if args.provider:
