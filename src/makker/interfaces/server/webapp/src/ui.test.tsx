@@ -77,8 +77,13 @@ describe("model control", () => {
     act(() => store.setState({ models: [luna], model: luna.id }));
 
     fireEvent.click(await screen.findByRole("button", { name: "GPT-6 Luna Medium" }));
-    expect(await screen.findByRole("menuitem", { name: /Output length\s*Default/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("menuitem", { name: /Effort\s*Medium/ }));
+    const effortRow = await screen.findByRole("menuitem", { name: /Effort\s*Medium/ });
+    // The output length is in the config file only.
+    expect(screen.queryByRole("menuitem", { name: /Output length/ })).toBeNull();
+    // Passing over a row opens nothing; a click does.
+    fireEvent.mouseEnter(effortRow);
+    expect(screen.queryByRole("menu", { name: "Effort" })).toBeNull();
+    fireEvent.click(effortRow);
     fireEvent.click(within(screen.getByRole("menu", { name: "Effort" })).getByRole("menuitemradio", { name: "Extra high" }));
     expect(screen.queryByRole("menu")).toBeNull();
     await waitFor(() => expect(screen.getByRole("button", { name: "GPT-6 Luna Extra high" })).toBeInTheDocument());
@@ -128,6 +133,7 @@ describe("model control", () => {
 
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Custom…" }));
     const input = screen.getByRole("textbox", { name: "Context size in tokens" });
+    expect(screen.getByRole("menu", { name: "Model" })).toBeInTheDocument();
     fireEvent.change(input, { target: { value: "8k" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.getByText("Between 16k and 256k")).toBeInTheDocument();

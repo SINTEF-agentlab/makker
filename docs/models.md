@@ -37,12 +37,15 @@ Each model can be set to run differently, with only the settings it supports:
   cheaper session or to see compaction sooner. Any size from 16K up to the
   model's maximum can be typed in.
 - **Output length:** the most the model may write in one reply, its reasoning
-  included, up to its maximum.
+  included. Left alone, a model may write up to its maximum (Anthropic models,
+  which need a limit, get 24K). Raise it if long replies are cut off, or lower it
+  to cap them. It is set in the config file only (`output` under the model, see
+  [configuration](configuration.md#user-config)).
 
 Settings are saved per model in the user config and apply in every workspace.
 A change applies to the running session from its next turn. In the web UI the
 effort shows after the model's name, and the model menu ends with a row for
-each setting the current model supports; each opens its choices beside the
+the effort and one for the context size; a click opens the choices beside the
 menu. In the terminal, `/effort` lists the levels and `/effort <level>` sets
 one.
 
