@@ -10,6 +10,7 @@ import type {
   CredentialInfo,
   HistoryEntry,
   ModelInfo,
+  ModelSettings,
   SimDetails,
   UpdateStatus,
   VersionInfo,
@@ -175,7 +176,9 @@ export interface SessionState {
   model: string | null;
   models: ModelInfo[];
   // the model menu under the message box, or the full list it opens
-  modelMenu: "closed" | "menu" | "more";
+  modelMenu: "closed" | "menu" | "more" | "settings";
+  /** The current model's settings, for the footer and the settings page. */
+  modelSettings: { model: string; data: ModelSettings } | null;
   pinned: string[];
   meta: string;
   // status
@@ -257,6 +260,7 @@ const initialState: SessionState = {
   model: null,
   models: [],
   modelMenu: "closed",
+  modelSettings: null,
   pinned: [],
   meta: "",
   busy: false,
@@ -674,6 +678,7 @@ export function createSessionStore() {
           model: s.model,
           models: s.models,
           pinned: s.pinned,
+          modelSettings: s.modelSettings,
           history: s.history,
           // key status is account-wide, not per-session; keep it across a reset
           credentials: s.credentials,

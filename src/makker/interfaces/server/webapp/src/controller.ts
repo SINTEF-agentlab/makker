@@ -5,7 +5,15 @@
 
 import type { StoreApi } from "zustand/vanilla";
 
-import { ApiError, api, type ModelMenu, type SysimageChoice, type UpdateStatus } from "./api";
+import {
+  ApiError,
+  api,
+  type ModelMenu,
+  type ModelSettings,
+  type ModelSettingsPatch,
+  type SysimageChoice,
+  type UpdateStatus,
+} from "./api";
 import { stageSize } from "./canvas/stageSize";
 import { hostApiUrl, hostContext } from "./hostContext";
 import { HISTORY_CHANGED, type ServerMessage } from "./protocol";
@@ -639,6 +647,47 @@ export class Controller {
 
   closeModelMenu(): void {
     this.s.setModelMenu("closed");
+  }
+
+  /** The current model's settings page, in the model menu's place. */
+  openModelSettings(): void {
+    this.s.setModelMenu("settings");
+  }
+
+  /** Read what `model` can be set to, for the footer and the settings page. */
+  async loadModelSettings(model: string | null): Promise<void> {
+    const data = model ? await api.modelSettings(model) : null;
+    if (model === this.s.model) {
+      this.store.setState({ modelSettings: model && data ? { model, data } : null });
+    }
+  }
+
+  /** Save a change to the current model's settings and apply it to the running
+   *  session, which rebuilds its agent on the same model to pick it up. */
+  async saveModelSettings(patch: ModelSettingsPatch): Promise<void> {
+    const current = this.s.modelSettings;
+    if (!current || current.model !== this.s.model) return;
+    let data: ModelSettings;
+    try {
+      data = await api.saveModelSettings(current.model, { ...current.data.settings, ...patch });
+    } catch (e) {
+      this.s.addSysNote(failureMessage(e, "Could not save the setting."), "warn");
+      return;
+    }
+    this.store.setState({ modelSettings: { model: current.model, data } });
+    this.sendCommand("set_model", current.model);
+  }
+
+  /** Measure the current local model's memory at each context size. */
+  async measureModel(): Promise<void> {
+    const model = this.s.model;
+    if (!model) return;
+    try {
+      const data = await api.measureModel(model);
+      if (model === this.s.model) this.store.setState({ modelSettings: { model, data } });
+    } catch (e) {
+      this.s.addSysNote(failureMessage(e, "Could not measure the model's memory."), "warn");
+    }
   }
 
   /** The menu's short list; it depends on the current model, recents and pins. */

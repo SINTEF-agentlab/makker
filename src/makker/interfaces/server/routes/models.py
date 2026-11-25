@@ -116,6 +116,47 @@ def pin_model(req: PinRequest) -> dict[str, Any]:
     return {"pinned": set_pinned(req.model, req.pinned)}
 
 
+class SettingsRequest(BaseModel):
+    model: str
+    effort: str | None = None
+    output: int | None = None
+    context: int | None = None
+
+
+class MeasureRequest(BaseModel):
+    model: str
+
+
+@router.get("/models/settings")
+def get_model_settings(model: str) -> dict[str, Any]:
+    """The settings ``model`` supports, each with its choices, default and current
+    value (``model_settings.options``)."""
+    from makker.model_settings import options
+
+    return options(model)
+
+
+@router.post("/models/settings")
+def set_model_settings(req: SettingsRequest) -> dict[str, Any]:
+    """Save a model's settings (an omitted one runs at its default) and return
+    them as ``GET`` does. A running session picks them up when its model is
+    rebuilt (the ``set_model`` command, sent again with the same model)."""
+    from makker.model_settings import options, save_settings, settings_from
+
+    save_settings(req.model, settings_from(req.model_dump()))
+    return options(req.model)
+
+
+@router.post("/models/measure")
+def measure_model(req: MeasureRequest) -> dict[str, Any]:
+    """Measure a local model's memory at each context size, by loading it in
+    Ollama (seconds to a minute, once per model version), and return the
+    settings as ``GET /models/settings`` does."""
+    from makker.model_settings import options
+
+    return options(req.model, measure=True)
+
+
 @router.get("/models/window")
 def model_window(model: str | None = None) -> dict[str, Any]:
     """A model's context window (for the % indicator), where it came from

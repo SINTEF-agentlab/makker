@@ -743,6 +743,85 @@ details.block .body {
   border-top: 1px solid var(--border);
   padding-top: 0.3rem;
 }
+/* The effort after the model's name: its own button, opening the settings. */
+.effort-btn {
+  margin-left: -0.3rem;
+  opacity: 0.75;
+}
+/* The current model's settings, in the menu's place. */
+.model-settings {
+  width: min(17rem, 90vw);
+  padding-bottom: 0.45rem;
+}
+.model-back {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.35rem 0.8rem 0.35rem 0.55rem;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.model-back:hover,
+.model-back:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}
+.effort-levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0.2rem 0.8rem 0.35rem;
+}
+.effort-levels button {
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.effort-levels button:hover:not(:disabled) {
+  color: var(--text);
+}
+.effort-levels button[aria-checked="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.model-row:disabled,
+.effort-levels button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.model-setting {
+  display: block;
+}
+.model-setting select {
+  display: block;
+  width: calc(100% - 1.6rem);
+  margin: 0.2rem 0.8rem 0;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+}
+.model-note {
+  margin: 0.2rem 0.8rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
 
 /* How full the context is, as a ring; amber, then red, as compaction nears. */
 .ctx-ring {

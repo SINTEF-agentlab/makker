@@ -22,6 +22,22 @@ export interface ModelMenu {
   pinned: string[];
 }
 
+/** What a model can be set to, and how it is set, from `GET /models/settings`. */
+export interface ModelSettings {
+  settings: { effort: string | null; output: number | null; context: number | null };
+  /** Absent when the model offers no effort levels. */
+  effort: { levels: string[]; default: string | null; current: string | null } | null;
+  output: { choices: number[]; default: number } | null;
+  /** Local models only: each size with the memory it takes here, once measured. */
+  context: {
+    choices: { tokens: number; memory: number | null; on_gpu: boolean | null }[];
+    auto: number | null;
+    measured: boolean;
+  } | null;
+}
+
+export type ModelSettingsPatch = Partial<ModelSettings["settings"]>;
+
 export interface SimDetails {
   display_name?: string;
   examples?: string[];
@@ -202,6 +218,14 @@ export const api = {
 
   pinModel: (model: string, pinned: boolean) =>
     postJSON<{ pinned: string[] }>("/models/pinned", { model, pinned }),
+
+  modelSettings: (model: string) =>
+    getJSON<ModelSettings | null>(`/models/settings?model=${encodeURIComponent(model)}`, null),
+
+  saveModelSettings: (model: string, settings: ModelSettings["settings"]) =>
+    postJSON<ModelSettings>("/models/settings", { model, ...settings }),
+
+  measureModel: (model: string) => postJSON<ModelSettings>("/models/measure", { model }),
 
   credentials: async (): Promise<CredentialInfo[]> => {
     const data = await getJSON<{ path: string; providers: CredentialInfo[] }>(

@@ -166,6 +166,21 @@ def test_pinning_a_model_over_http(tmp_path: Path) -> None:
         assert unpinned.json() == {"pinned": []}
 
 
+def test_model_settings_over_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from makker import models
+    from makker.model_settings import load_settings
+
+    profile = {"reasoning_effort_levels": ["low", "medium", "high"], "max_output_tokens": 64_000}
+    monkeypatch.setattr(models, "bundled_profile", lambda model_id: profile)
+    with _client(echo_agent, tmp_path) as client:
+        body = client.get("/models/settings", params={"model": "openai:x"}).json()
+        assert body["effort"]["current"] == "medium"
+        assert body["output"]["choices"][-1] == 64_000 and body["context"] is None
+        saved = client.post("/models/settings", json={"model": "openai:x", "effort": "high"})
+        assert saved.json()["effort"]["current"] == "high"
+    assert load_settings("openai:x").effort == "high"
+
+
 def test_a_new_session_counts_as_a_recent_use_of_its_model(tmp_path: Path) -> None:
     from makker.recent_models import load_recent_models
 
