@@ -29,7 +29,9 @@ export function Approval() {
 
   return (
     <div className="approval" ref={ref}>
-      <div className="title">Approve {names}?</div>
+      <div className="title" role="alert">
+        Approve {names}?
+      </div>
       {pending.actions.map((a, i) => {
         // The server carries the full card body (command, content preview, or
         // on-disk diff) as markdown; the one-line arg preview is the fallback

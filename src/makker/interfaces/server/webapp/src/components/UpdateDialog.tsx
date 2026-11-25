@@ -8,6 +8,7 @@ import { terminalSegments } from "../ansi";
 import type { SysimageChoice, UpdateStatus } from "../api";
 import { useController, useSel } from "../context";
 import { CloseIcon } from "../icons";
+import { Dialog } from "./Dialog";
 
 export function UpdateDialog() {
   const update = useSel((s) => s.update);
@@ -21,119 +22,111 @@ export function UpdateDialog() {
   const plan = status ? describe(status) : null;
 
   return (
-    <div className="modal-backdrop" onClick={() => controller.closeUpdate()}>
-      <div
-        className="modal update-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Update"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="modal-head">
-          <h2>{plan?.title ?? "Update"}</h2>
-          {!busy && phase !== "starting" && (
+    <Dialog className="update-dialog" label="Update" onClose={() => controller.closeUpdate()}>
+      <div className="modal-head">
+        <h2>{plan?.title ?? "Update"}</h2>
+        {!busy && phase !== "starting" && (
+          <button
+            className="icon-btn"
+            aria-label="Close"
+            onClick={() => controller.closeUpdate()}
+          >
+            <CloseIcon />
+          </button>
+        )}
+      </div>
+
+      {confirming ? (
+        !status ? (
+          <p className="update-text">Checking…</p>
+        ) : (
+          <>
+            {plan!.lines.map((line) => (
+              <p className="update-text" key={line}>
+                {line}
+              </p>
+            ))}
+            {plan!.note && <p className="update-note">{plan!.note}</p>}
+            {plan!.action && status.env?.sysimage && (
+              <fieldset className="update-sysimage">
+                <legend>
+                  This folder starts Julia from a system image. A new environment needs a new
+                  image:
+                </legend>
+                <label>
+                  <input
+                    type="radio"
+                    checked={sysimage === "rebuild"}
+                    onChange={() => setSysimage("rebuild")}
+                  />
+                  Rebuild it (about 20 minutes more)
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    checked={sysimage === "off"}
+                    onChange={() => setSysimage("off")}
+                  />
+                  Stop using one (build it again later with{" "}
+                  <code>makker sysimage build</code>)
+                </label>
+              </fieldset>
+            )}
+            {update.error && <p className="update-error">{update.error}</p>}
+            {plan!.action && (
+              <p className="update-sub">
+                Open chats are closed while it runs; their conversations are kept. This takes a
+                few minutes.
+                {plan!.action.install &&
+                  (status.separate_window
+                    ? " Makker then closes, updates in a separate window and runs there" +
+                      " after. This page reloads when it's back."
+                    : " Makker then restarts and this page reloads.")}
+              </p>
+            )}
+          </>
+        )
+      ) : (
+        <Progress
+          lines={update.lines}
+          phase={phase}
+          error={update.error}
+          separateWindow={status?.separate_window ?? false}
+        />
+      )}
+
+      <div className="modal-foot">
+        {confirming && plan?.action ? (
+          <>
             <button
-              className="icon-btn"
-              aria-label="Close"
+              className="btn"
+              disabled={phase === "starting"}
               onClick={() => controller.closeUpdate()}
             >
-              <CloseIcon />
+              Cancel
             </button>
-          )}
-        </div>
-
-        {confirming ? (
-          !status ? (
-            <p className="update-text">Checking…</p>
-          ) : (
-            <>
-              {plan!.lines.map((line) => (
-                <p className="update-text" key={line}>
-                  {line}
-                </p>
-              ))}
-              {plan!.note && <p className="update-note">{plan!.note}</p>}
-              {plan!.action && status.env?.sysimage && (
-                <fieldset className="update-sysimage">
-                  <legend>
-                    This folder starts Julia from a system image. A new environment needs a new
-                    image:
-                  </legend>
-                  <label>
-                    <input
-                      type="radio"
-                      checked={sysimage === "rebuild"}
-                      onChange={() => setSysimage("rebuild")}
-                    />
-                    Rebuild it (about 20 minutes more)
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      checked={sysimage === "off"}
-                      onChange={() => setSysimage("off")}
-                    />
-                    Stop using one (build it again later with{" "}
-                    <code>makker sysimage build</code>)
-                  </label>
-                </fieldset>
-              )}
-              {update.error && <p className="update-error">{update.error}</p>}
-              {plan!.action && (
-                <p className="update-sub">
-                  Open chats are closed while it runs; their conversations are kept. This takes a
-                  few minutes.
-                  {plan!.action.install &&
-                    (status.separate_window
-                      ? " Makker then closes, updates in a separate window and runs there" +
-                        " after. This page reloads when it's back."
-                      : " Makker then restarts and this page reloads.")}
-                </p>
-              )}
-            </>
-          )
+            <button
+              className="btn primary"
+              disabled={phase === "starting"}
+              onClick={() =>
+                void controller.startUpdate(
+                  plan.action!.install,
+                  status?.env?.sysimage ? sysimage : null,
+                )
+              }
+            >
+              {phase === "starting" ? "Starting…" : plan.action.label}
+            </button>
+          </>
         ) : (
-          <Progress
-            lines={update.lines}
-            phase={phase}
-            error={update.error}
-            separateWindow={status?.separate_window ?? false}
-          />
+          !busy && (
+            <button className="btn primary" onClick={() => controller.closeUpdate()}>
+              Close
+            </button>
+          )
         )}
-
-        <div className="modal-foot">
-          {confirming && plan?.action ? (
-            <>
-              <button
-                className="btn"
-                disabled={phase === "starting"}
-                onClick={() => controller.closeUpdate()}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn primary"
-                disabled={phase === "starting"}
-                onClick={() =>
-                  void controller.startUpdate(
-                    plan.action!.install,
-                    status?.env?.sysimage ? sysimage : null,
-                  )
-                }
-              >
-                {phase === "starting" ? "Starting…" : plan.action.label}
-              </button>
-            </>
-          ) : (
-            !busy && (
-              <button className="btn primary" onClick={() => controller.closeUpdate()}>
-                Close
-              </button>
-            )
-          )}
-        </div>
       </div>
-    </div>
+    </Dialog>
   );
 }
 

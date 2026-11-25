@@ -115,26 +115,22 @@ export function Canvas() {
             const view = views[id];
             if (!view) return null;
             return (
-              <button
-                key={id}
-                className={`tab${id === activeView ? " active" : ""}`}
-                onClick={() => openView(id)}
-              >
-                <span className="tab-ico">
-                  <KindIcon kind={view.kind} />
-                </span>
-                <span className="tab-label">{view.title}</span>
-                <span
+              <div key={id} className={`tab${id === activeView ? " active" : ""}`}>
+                <button className="tab-open" onClick={() => openView(id)}>
+                  <span className="tab-ico">
+                    <KindIcon kind={view.kind} />
+                  </span>
+                  <span className="tab-label">{view.title}</span>
+                </button>
+                <button
                   className="tab-close"
                   title="Remove view"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removeView(id);
-                  }}
+                  aria-label={`Remove ${view.title}`}
+                  onClick={() => removeView(id)}
                 >
                   <CloseIcon />
-                </span>
-              </button>
+                </button>
+              </div>
             );
           })}
         </div>

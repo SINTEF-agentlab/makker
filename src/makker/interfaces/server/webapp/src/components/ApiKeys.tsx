@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CredentialInfo } from "../api";
 import { useController, useSel } from "../context";
 import { CloseIcon } from "../icons";
+import { Dialog } from "./Dialog";
 
 export function ApiKeys() {
   const open = useSel((s) => s.apiKeys.open);
@@ -58,82 +59,74 @@ export function ApiKeys() {
   };
 
   return (
-    <div className="modal-backdrop" onClick={() => controller.closeKeys(false)}>
-      <div
-        className="modal api-keys"
-        role="dialog"
-        aria-modal="true"
-        aria-label="API keys"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="modal-head">
-          <h2>API keys</h2>
-          <button className="icon-btn" aria-label="Close" onClick={() => controller.closeKeys(false)}>
-            <CloseIcon />
-          </button>
-        </div>
-
-        {required ? (
-          <p className="api-keys-banner">
-            {required.label} needs an API key before this can run. Paste it below to continue.
-          </p>
-        ) : (
-          <p className="api-keys-sub">
-            Add or replace a provider key. Keys are saved on this machine and used right away.
-          </p>
-        )}
-
-        <div className="api-keys-rows">
-          {rows.map((c) => (
-            <div className="api-keys-row" key={c.provider}>
-              <div className="api-keys-meta">
-                <span className="api-keys-name">{c.label}</span>
-                <code className="api-keys-var">{c.env_var}</code>
-                <span className={`api-keys-status ${statusClass(c)}`}>{statusText(c)}</span>
-              </div>
-              <div className="api-keys-entry">
-                <input
-                  ref={required?.provider === c.provider ? requiredInput : undefined}
-                  type="password"
-                  autoComplete="off"
-                  placeholder={c.is_set ? "Replace the saved key" : `Paste ${c.env_var}`}
-                  value={values[c.provider] || ""}
-                  onChange={(e) => setValues((v) => ({ ...v, [c.provider]: e.target.value }))}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void save(c.provider);
-                  }}
-                />
-                <button
-                  className="btn"
-                  disabled={saving === c.provider || !(values[c.provider] || "").trim()}
-                  onClick={() => void save(c.provider)}
-                >
-                  {saving === c.provider ? "Saving…" : "Save"}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {error ? <p className="api-keys-error">{error}</p> : null}
-
-        <div className="modal-foot">
-          {required ? (
-            <button
-              className="btn primary"
-              disabled={!requiredSatisfied}
-              onClick={() => controller.closeKeys(true)}
-            >
-              Continue
-            </button>
-          ) : (
-            <button className="btn primary" onClick={() => controller.closeKeys(false)}>
-              Done
-            </button>
-          )}
-        </div>
+    <Dialog className="api-keys" label="API keys" onClose={() => controller.closeKeys(false)}>
+      <div className="modal-head">
+        <h2>API keys</h2>
+        <button className="icon-btn" aria-label="Close" onClick={() => controller.closeKeys(false)}>
+          <CloseIcon />
+        </button>
       </div>
-    </div>
+
+      {required ? (
+        <p className="api-keys-banner">
+          {required.label} needs an API key before this can run. Paste it below to continue.
+        </p>
+      ) : (
+        <p className="api-keys-sub">
+          Add or replace a provider key. Keys are saved on this machine and used right away.
+        </p>
+      )}
+
+      <div className="api-keys-rows">
+        {rows.map((c) => (
+          <div className="api-keys-row" key={c.provider}>
+            <div className="api-keys-meta">
+              <span className="api-keys-name">{c.label}</span>
+              <code className="api-keys-var">{c.env_var}</code>
+              <span className={`api-keys-status ${statusClass(c)}`}>{statusText(c)}</span>
+            </div>
+            <div className="api-keys-entry">
+              <input
+                ref={required?.provider === c.provider ? requiredInput : undefined}
+                type="password"
+                autoComplete="off"
+                placeholder={c.is_set ? "Replace the saved key" : `Paste ${c.env_var}`}
+                value={values[c.provider] || ""}
+                onChange={(e) => setValues((v) => ({ ...v, [c.provider]: e.target.value }))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void save(c.provider);
+                }}
+              />
+              <button
+                className="btn"
+                disabled={saving === c.provider || !(values[c.provider] || "").trim()}
+                onClick={() => void save(c.provider)}
+              >
+                {saving === c.provider ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {error ? <p className="api-keys-error">{error}</p> : null}
+
+      <div className="modal-foot">
+        {required ? (
+          <button
+            className="btn primary"
+            disabled={!requiredSatisfied}
+            onClick={() => controller.closeKeys(true)}
+          >
+            Continue
+          </button>
+        ) : (
+          <button className="btn primary" onClick={() => controller.closeKeys(false)}>
+            Done
+          </button>
+        )}
+      </div>
+    </Dialog>
   );
 }
 

@@ -351,6 +351,18 @@
   color: var(--text);
   border-color: var(--border);
 }
+.tab .tab-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
 .tab .tab-ico {
   display: flex;
   flex: none;
@@ -376,6 +388,9 @@
 .tab:hover .tab-close,
 .tab.active .tab-close {
   opacity: 0.7;
+}
+.tab .tab-close:focus-visible {
+  opacity: 1;
 }
 .tab .tab-close:hover {
   opacity: 1;
