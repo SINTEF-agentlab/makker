@@ -26,6 +26,34 @@ jobs:
       - name: Format check
         run: uv run ruff format --check .
 
+  web-ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/makker/interfaces/server/webapp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/makker/interfaces/server/webapp/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      # The server ships the committed bundle, so it must be what the source builds.
+      - name: Committed web_dist matches the source
+        run: |
+          if [ -n "$(git status --porcelain -- ../web_dist)" ]; then
+            git status --porcelain -- ../web_dist
+            echo "::error::web_dist is stale: run npm ci and npm run build in the webapp, then commit web_dist."
+            exit 1
+          fi
+
   test:
     name: test (${{ matrix.os }}, ${{ matrix.python }})
     strategy:

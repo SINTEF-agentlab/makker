@@ -7,6 +7,8 @@ These tests make the change fail loudly at test time, with a map of what to fix.
 
 from __future__ import annotations
 
+import pytest
+
 
 def test_summarization_engine_private_methods_still_exist() -> None:
     from deepagents.middleware.summarization import SummarizationMiddleware
@@ -72,3 +74,93 @@ def test_openrouter_message_serialization_hook_still_exists() -> None:
 
     hook = getattr(ChatOpenRouter, "_create_message_dicts", None)
     assert callable(hook), "Update agent/openrouter.py against the new serialization path."
+
+
+@pytest.mark.filterwarnings("ignore:The v3 streaming protocol")
+async def test_v3_projections_have_the_shape_turns_reads_and_the_fakes_copy(tmp_path) -> None:
+    import asyncio
+
+    from langchain_core.messages import HumanMessage, ToolMessage
+
+    from makker.agent.builder import build_agent
+    from makker.lab import fakes
+    from makker.session import Session
+
+    async def observe(agent) -> tuple[list, list, list]:
+        """What each projection yields, read the way agent/turns.py reads it."""
+
+        run = await agent.astream_events(
+            {"messages": [{"role": "user", "content": "go"}]},
+            config={"configurable": {"thread_id": "t"}},
+            version="v3",
+        )
+        messages, tools = [], []
+
+        async def read_messages() -> None:
+            async for stream in run.messages:
+                text = [delta async for delta in stream.text]
+                _ = [delta async for delta in stream.reasoning]
+                _ = [chunk async for chunk in stream.tool_calls]
+                calls = [(c["name"], c["id"], c["args"]) for c in await stream.tool_calls]
+                messages.append((stream.node, "".join(text), calls))
+
+        async def read_tool_calls() -> None:
+            async for call in run.tool_calls:
+                at_start = (
+                    call.tool_name,
+                    call.tool_call_id,
+                    call.input,
+                    call.completed,
+                    call.output,
+                )
+                deltas = [delta async for delta in call.output_deltas]
+                tools.append((*at_start, deltas, call.completed, call.output, call.error))
+
+        await asyncio.gather(read_messages(), read_tool_calls())
+        assert await run.interrupts() == []
+        final = [type(m).__name__ for m in (await run.output())["messages"]]
+        return messages, tools, final
+
+    args = {"code": "2 + 2"}
+    ask = fakes.scripted_tool_call(tool_name="run_julia", args=args, tool_call_id="j1")
+    done = fakes.scripted_final("Done: 4")
+    session = Session.create(
+        julia=fakes.FakeJulia(answers={"2 + 2": "4"}, stream_chunks=["progress\n"]),
+        state_root=tmp_path,
+        simulator=fakes.make_fake_adapter(tmp_path),
+    )
+    try:
+        real, _ = build_agent(session, model=fakes.make_scripted_model([ask, done]))
+        seen_real = await observe(real)
+    finally:
+        session.finalize()
+
+    human, result = HumanMessage("go"), ToolMessage("4", tool_call_id="j1", name="run_julia")
+    started = {"tool_call_id": "j1", "tool_name": "run_julia", "input": args}
+    fake = fakes.ScriptedV3Agent(
+        [
+            fakes.v3_message_event(human),
+            fakes.v3_message_event(ask),
+            fakes.v3_tool_event({"event": "tool-started", **started}),
+            fakes.v3_tool_event(
+                {"event": "tool-output-delta", "tool_call_id": "j1", "delta": "progress\n"}
+            ),
+            fakes.v3_tool_event({"event": "tool-finished", "tool_call_id": "j1", "output": "4"}),
+            fakes.v3_message_event(result),
+            fakes.v3_message_event(done),
+            fakes.v3_values_event([human, ask, result, done]),
+        ]
+    )
+
+    # One stream per model call, from the model node; the tool result is not among
+    # them. A tool call is yielded when it starts and has its output once its deltas end.
+    expected = (
+        [("model", "", [("run_julia", "j1", args)]), ("model", "Done: 4", [])],
+        [("run_julia", "j1", args, False, None, ["progress\n"], True, "4", None)],
+        ["HumanMessage", "AIMessage", "ToolMessage", "AIMessage"],
+    )
+    assert seen_real == expected, (
+        "langgraph's v3 projections changed shape. Update agent/turns.py, then "
+        "make lab/fakes.py copy the new shape."
+    )
+    assert await observe(fake) == expected, "lab/fakes.py no longer copies the v3 projections."

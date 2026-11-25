@@ -33,13 +33,11 @@ MessageCallback = Callable[[Any], Awaitable[None] | None]
 ResumePayload = dict[str, dict[str, list[dict[str, str]]]]
 
 # langchain's ``create_agent`` (which deepagents builds on) runs the model in a
-# graph node named ``"model"``. Tool results come from the ``"tools"`` node, and
-# middleware hooks from ``"{name}.before_model"`` / ``".after_model"``. The v3
-# ``run.messages`` projection surfaces a per-message stream for *every* node —
-# including whole ``ToolMessage``s, whose ``.text`` is the full tool result. Only
-# the model node's stream is the assistant's visible turn, so we render text and
-# reasoning from that node alone; otherwise tool output (file reads, skill and
-# memory text) leaks into the chat as if the assistant had typed it.
+# graph node named ``"model"``, and middleware hooks in ``"{name}.before_model"`` /
+# ``".after_model"``. The v3 ``run.messages`` projection leaves tool results out
+# (they come on ``run.tool_calls``) but surfaces a whole message that any other
+# node writes. Only the model node's streams are the assistant's visible turn, so
+# we render text and reasoning from that node alone.
 _MODEL_NODE = "model"
 
 
@@ -213,8 +211,8 @@ async def _drain_messages(run: Any, on_message: MessageCallback | None) -> None:
     """Stream text + reasoning + tool-call deltas from ``run.messages``.
 
     Each ``run.messages`` item is one node's message stream. Only the model
-    node carries the assistant's visible turn; for every other stream (tool
-    results, summarization/memory middleware) we still drain the projections
+    node carries the assistant's visible turn; for every other stream (a
+    message a middleware node wrote) we still drain the projections
     so the caller-driven pump advances, but emit nothing. See ``_MODEL_NODE``.
     """
 

@@ -1,5 +1,5 @@
 // The REST surface of the server (everything except the per-turn WebSocket),
-// typed. Mirrors the FastAPI routes in interfaces/server/app.py.
+// typed. Mirrors the FastAPI routes in interfaces/server/routes/.
 
 import type { HostContext } from "./hostContext";
 import { withBase } from "./basePath";

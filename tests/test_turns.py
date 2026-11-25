@@ -176,9 +176,8 @@ async def test_turn_runner_streams_v3_reasoning_and_tool_events() -> None:
 
 
 async def test_tool_result_does_not_leak_into_assistant_text() -> None:
-    """A ToolMessage rides ``run.messages`` (node='tools') with its full content
-    as ``.text``. The turn runner must render it only through tool events — never
-    as assistant prose — so file reads / skill / memory text don't get dumped."""
+    """A tool result reaches the UI only as a tool event, never as assistant
+    prose, so file reads and skill and memory text don't get dumped."""
 
     tool_output = "---\nname: battmo-overview\ndescription: workflow\n---\nLOTS OF SKILL TEXT"
     agent = ScriptedV3Agent(
@@ -203,6 +202,23 @@ async def test_tool_result_does_not_leak_into_assistant_text() -> None:
     # The result still reaches the UI as a tool event (the tool card), not prose.
     finished = [m for m in seen if isinstance(m, TurnToolEvent) and m.event == "finished"]
     assert any(tool_output in (e.content or "") for e in finished)
+
+
+async def test_a_message_another_node_writes_is_not_prose() -> None:
+    # ``run.messages`` also carries a whole message that a middleware node writes.
+    note = AIMessage(content="MIDDLEWARE NOTE")
+    agent = ScriptedV3Agent(
+        [
+            v3_message_event(note, node="SomeMiddleware.before_model"),
+            v3_message_event(AIMessage(content="hello")),
+            v3_values_event([note]),
+        ]
+    )
+    seen: list[object] = []
+
+    await TurnRunner(agent, thread_id="thread-1").run_prompt("hi", on_message=seen.append)
+
+    assert [m.text for m in seen if isinstance(m, TurnTextDelta)] == ["hello"]
 
 
 async def test_turn_runner_parses_server_tool_call() -> None:

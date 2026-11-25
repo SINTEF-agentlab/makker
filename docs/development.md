@@ -58,7 +58,9 @@ Two test workflows:
 
 - `ci.yml`, on every PR and push to main: lint (ruff check + format) and
   the full non-integration suite on Linux/macOS/Windows. Two pytest workers
-  run test files in parallel; the workflow installs no Julia.
+  run test files in parallel; the workflow installs no Julia. A `web-ui` job
+  typechecks, tests and builds the web UI, and fails if the committed
+  `web_dist` is not what the source builds.
 - `simulators.yml`: runs the live JuliaKernel and all four simulator jobs
   on every PR and push. The JutulDarcy job also runs GLMakie plot integration
   tests, sharing its setup and precompile. Weekly and manually dispatched
