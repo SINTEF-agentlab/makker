@@ -45,7 +45,9 @@ GitHub Actions workflows:
 
 - `ci.yml`: every push/PR. `lint` (ruff); `test` across Linux/Windows/macOS
   on Python 3.12, plus Linux on 3.14, the newest Python `uv tool install` tends
-  to pick (`pytest -m "not integration" -n 2 --dist loadfile`, no Julia).
+  to pick (`pytest -m "not integration" -n 2 --dist loadfile`, no Julia);
+  `web-ui` (`npm ci`, typecheck, tests, build, then fails if the committed
+  `web_dist` differs from the build).
 - `simulators.yml`: runs JuliaKernel and all four simulator integration jobs
   on every PR and push to `main`, plus weekly Monday and manual runs. The
   JutulDarcy smoke job also runs real plot tests. Each smoke job instantiates
@@ -160,8 +162,9 @@ silently at runtime. The contacts:
   Import-guarded: if it moves, streaming silently disables.
 - `agent/turns.py` + `makker/lab/fakes.py`: consume the v3
   `astream_events` typed projections (`run.messages` / `run.tool_calls` /
-  `run.interrupts` / `run.output`); the fakes mirror that shape, so a
-  projection change shows up as test failures.
+  `run.interrupts` / `run.output`), and most turn tests run on the fakes. A
+  canary drives one tool call through the real graph and through the fakes
+  and requires both to yield the shape `turns.py` reads.
 - `agent/summarization.py`: manual `/compact` composes the summarization
   middleware's private engine methods. Guarded by a `hasattr` sweep that
   degrades to a clear "unavailable" message.

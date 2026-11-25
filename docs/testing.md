@@ -84,6 +84,8 @@ calls never run under pytest. They are bench runs
 
 - `ci.yml`: lint and the full non-integration suite with two pytest workers
   on Linux/macOS/Windows, on every PR and push to main; no Julia installation.
+  Its `web-ui` job runs the web UI's typecheck and tests and checks that the
+  committed `web_dist` matches the source.
 - `simulators.yml`: live JuliaKernel, all four simulator smoke jobs, and
   JutulDarcy plot tests on every PR and push. Weekly and manual runs repeat
   them against current upstream releases, since the simulator envs carry no

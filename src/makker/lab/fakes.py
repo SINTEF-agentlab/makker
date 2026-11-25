@@ -103,10 +103,10 @@ class Interrupt:
 # ``ScriptedV3Agent`` reads them and synthesizes typed projections.
 
 
-def v3_message_event(payload: Any) -> dict[str, Any]:
+def v3_message_event(payload: Any, *, node: str = "model") -> dict[str, Any]:
     """A ``messages`` event carrying one BaseMessage or content-block dict."""
 
-    return {"kind": "message", "payload": payload}
+    return {"kind": "message", "payload": payload, "node": node}
 
 
 def v3_tool_event(payload: dict[str, Any]) -> dict[str, Any]:
@@ -200,9 +200,9 @@ class FakeMessageStream:
     """Per-message typed-projection mock (text/reasoning/tool_calls/output).
 
     ``node`` mirrors ``langgraph_node`` on the real ``ChatModelStream``: the
-    model node (``"model"``) carries the assistant's visible turn, while tool
-    results surface under ``"tools"``. The turn runner keys on it to avoid
-    dumping tool output into the chat as prose.
+    model node (``"model"``) carries the assistant's visible turn, while a
+    middleware node can write a whole message of its own. The turn runner
+    renders the model node's streams only.
     """
 
     def __init__(
@@ -266,25 +266,32 @@ class _AwaitableValue:
 
 
 class FakeToolCallStream:
-    """Per-tool typed-projection mock."""
+    """Per-tool typed-projection mock.
 
-    def __init__(
-        self,
-        *,
-        tool_call_id: str | None,
-        tool_name: str,
-        input: dict[str, Any] | None,
-        output: Any = None,
-        error: str | None = None,
-        output_deltas: list[Any] | None = None,
-    ) -> None:
+    Like the real stream it is yielded when the tool starts: ``output``,
+    ``error`` and ``completed`` are set once ``output_deltas`` is drained.
+    """
+
+    def __init__(self, *, tool_call_id: str | None, tool_name: str, input: Any) -> None:
         self.tool_call_id = tool_call_id
         self.tool_name = tool_name
         self.input = input
-        self.output_deltas = _AsyncDeltaIter(list(output_deltas or []))
-        self.output = output
-        self.error = error
-        self.completed = True
+        self.output: Any = None
+        self.error: str | None = None
+        self.completed = False
+        self.deltas: list[Any] = []
+        self.result: tuple[Any, str | None] | None = None  # (output, error) once it ends
+
+    @property
+    def output_deltas(self):
+        async def deltas():
+            for delta in self.deltas:
+                yield delta
+            if self.result is not None:
+                self.output, self.error = self.result
+                self.completed = True
+
+        return deltas()
 
 
 class FakeTypedRun:
@@ -346,7 +353,7 @@ def _build_typed_run(events: Iterable[dict[str, Any]]) -> FakeTypedRun:
     interrupts: list[Any] = []
     seen_interrupt_ids: set[str] = set()
     final_messages: list[BaseMessage] = []
-    tool_call_buf: dict[str, dict[str, Any]] = {}
+    started: dict[str, FakeToolCallStream] = {}
 
     # Active "open" message under construction (for content-block streams
     # that arrive across multiple events).
@@ -382,26 +389,9 @@ def _build_typed_run(events: Iterable[dict[str, Any]]) -> FakeTypedRun:
         if kind == "message":
             payload = event.get("payload")
 
-            if isinstance(payload, ToolMessage):
-                # The real ``run.messages`` projection surfaces a ToolMessage as
-                # its own stream (``node="tools"``) whose ``.text`` is the full
-                # tool result. Reproduce that so the turn runner's node filter is
-                # exercised. The result must render as a tool card, never prose.
-                _flush_open()
-                content = payload.content if isinstance(payload.content, str) else ""
-                messages.append(
-                    FakeMessageStream(
-                        text_deltas=[content] if content else [],
-                        reasoning_deltas=[],
-                        tool_call_chunks=[],
-                        tool_calls_final=[],
-                        output=AIMessage(content=content),
-                        node="tools",
-                    )
-                )
-                continue
-
-            if isinstance(payload, HumanMessage):
+            # ``run.messages`` carries model output only: langgraph keeps tool
+            # results to the tool projection and the state.
+            if isinstance(payload, HumanMessage | ToolMessage):
                 _flush_open()
                 continue
 
@@ -446,6 +436,7 @@ def _build_typed_run(events: Iterable[dict[str, Any]]) -> FakeTypedRun:
                         tool_call_chunks=tool_call_chunks,
                         tool_calls_final=tool_calls_final,
                         output=payload,
+                        node=event.get("node", "model"),
                     )
                 )
                 continue
@@ -482,52 +473,21 @@ def _build_typed_run(events: Iterable[dict[str, Any]]) -> FakeTypedRun:
             payload = event.get("payload") or {}
             tool_event = payload.get("event")
             tool_id = payload.get("tool_call_id")
-            if tool_event == "tool-started":
-                tool_call_buf[tool_id] = {
-                    "tool_call_id": tool_id,
-                    "tool_name": payload.get("tool_name") or "tool",
-                    "input": payload.get("input"),
-                    "output": None,
-                    "error": None,
-                    "deltas": [],
-                }
-            elif tool_event == "tool-output-delta":
-                buf = tool_call_buf.get(tool_id)
-                if buf is not None:
-                    delta = payload.get("delta")
-                    if delta is not None:
-                        buf.setdefault("deltas", []).append(delta)
+            call = started.get(tool_id)
+            if call is None:
+                call = FakeToolCallStream(
+                    tool_call_id=tool_id,
+                    tool_name=payload.get("tool_name") or "tool",
+                    input=payload.get("input"),
+                )
+                started[tool_id] = call
+                tool_calls.append(call)
+            if tool_event == "tool-output-delta" and payload.get("delta") is not None:
+                call.deltas.append(payload["delta"])
             elif tool_event == "tool-finished":
-                buf = tool_call_buf.pop(tool_id, None)
-                if buf is None:
-                    buf = {
-                        "tool_call_id": tool_id,
-                        "tool_name": payload.get("tool_name") or "tool",
-                        "input": None,
-                    }
-                tool_calls.append(
-                    FakeToolCallStream(
-                        tool_call_id=buf["tool_call_id"],
-                        tool_name=buf["tool_name"],
-                        input=buf.get("input"),
-                        output=payload.get("output"),
-                        output_deltas=buf.get("deltas") or [],
-                    )
-                )
+                call.result = (payload.get("output"), None)
             elif tool_event == "tool-error":
-                buf = tool_call_buf.pop(tool_id, None) or {
-                    "tool_call_id": tool_id,
-                    "tool_name": payload.get("tool_name") or "tool",
-                    "input": None,
-                }
-                tool_calls.append(
-                    FakeToolCallStream(
-                        tool_call_id=buf["tool_call_id"],
-                        tool_name=buf["tool_name"],
-                        input=buf.get("input"),
-                        error=str(payload.get("message") or "tool error"),
-                    )
-                )
+                call.result = (None, str(payload.get("message") or "tool error"))
 
         elif kind == "values":
             final_messages = list(event.get("messages") or [])
