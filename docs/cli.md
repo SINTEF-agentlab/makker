@@ -29,8 +29,11 @@ never starts a server.
 makker [--sim <name>] [--approval-mode <mode>] [--model <m>] [--host <addr>] [--port <n>]
 ```
 
-Serves the web UI (default <http://127.0.0.1:8742>) and prints the link to
-open it with, carrying the server's [token](server-interface.md#who-may-use-it).
+Serves the web UI (default <http://127.0.0.1:8742>) and opens it in your
+browser once it is up. It also prints the link, which carries the server's
+[token](server-interface.md#who-may-use-it). The browser opens only for a
+launch from a terminal on this computer: not over SSH, not on a machine without
+a desktop, and not when another program starts Makker.
 `makker web` is the same command with the same options. One folder is bound to
 one simulator — from `--sim`, the workspace config, or auto-detection — and the
 choice is remembered. Runs locally for a single trusted user; the protocol and
@@ -52,6 +55,7 @@ changed per session in the UI.
 | `--sysimage` / `--no-sysimage` | Start sessions from the folder's [system image](sysimage.md), or skip it, overriding the folder's setting |
 | `--host <addr>` | Address to bind (default `127.0.0.1`, localhost only) |
 | `--port <n>` | Port to bind (default `8742`) |
+| `--no-browser` | Don't open the browser; only print the link |
 | `--allowed-origin <origin>` | Let pages from another origin use the server (repeatable). Only its own pages may by default; see [who may use it](server-interface.md#who-may-use-it) |
 
 ### makker tui

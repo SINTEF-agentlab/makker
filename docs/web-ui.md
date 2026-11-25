@@ -14,9 +14,10 @@ Start it from a simulator workspace:
 makker
 ```
 
-This serves the UI at `http://127.0.0.1:8742` by default and prints a link to
-open in a browser, which ends in `?token=…`. The browser keeps the token after
-that, so the plain address works there too. The first session in a folder
+This serves the UI at `http://127.0.0.1:8742` by default and opens it in your
+browser. It also prints the link, which ends in `?token=…`, for another browser
+or a launch over SSH. The browser keeps the token after that, so the plain
+address works there too. The first session in a folder
 builds the simulator's Julia environment, which can take a few minutes; later
 sessions start in seconds. Use `--port` to change the port and `--sim` to pick
 the simulator; see the [CLI reference](cli.md) for the full set of options.

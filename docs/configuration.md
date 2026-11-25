@@ -85,7 +85,7 @@ so a stale shell variable can't silently override a key you just changed.
 | `MAKKER_HYPRE_THREADS` | OpenMP threads for HYPRE's BoomerAMG (JutulDarcy's CPR pressure preconditioner). Defaults to physical cores minus one, capped at 8 (HYPRE's solver performance degrades with many threads). Independent of the Julia compute-thread count. |
 | `MAKKER_NO_XVFB` | Opt out of starting a virtual display on headless Linux (plotting then errors at use) |
 | `MAKKER_SYSIMAGE` | Start from the folder's [system image](sysimage.md) when the workspace config says nothing (`1`/`true` to enable). The `--sysimage` / `--no-sysimage` flags override it |
-| `MAKKER_NO_OPEN` | Never open artifacts in the OS default application (CI, tests) |
+| `MAKKER_NO_OPEN` | Never open the web UI in a browser or artifacts in the OS default application (CI, tests) |
 | `MAKKER_NO_UPDATE_CHECK` | Skip the once-a-day release check at launch |
 | `MAKKER_REVIEW` | Developer tool: set to `1` to auto-review every finished turn (see [session review](review.md)) |
 | `MAKKER_REVIEW_MODEL` | Model the reviewer uses (default `openai:gpt-5.4`) |
