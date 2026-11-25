@@ -117,7 +117,8 @@ describe("model control", () => {
         ...unmeasured.context,
         choices: [
           { tokens: 32_768, memory: 16.4 * 2 ** 30, on_gpu: true },
-          { tokens: 262_144, memory: 31 * 2 ** 30, on_gpu: false },
+          { tokens: 131_072, memory: 31 * 2 ** 30, on_gpu: false },
+          { tokens: 262_144, memory: null, on_gpu: null, too_large: true },
         ],
         measured: true,
       },
@@ -133,6 +134,9 @@ describe("model control", () => {
     // The note goes once the figures are in.
     await waitFor(() => expect(screen.queryByText("Measuring memory…")).toBeNull());
     expect(screen.getByText("31.0 GB · partly on CPU")).toBeInTheDocument();
+    // A size Ollama refused can't be chosen.
+    expect(screen.getByRole("menuitemradio", { name: /^256k/ })).toBeDisabled();
+    expect(screen.getByText("too large")).toBeInTheDocument();
     expect(screen.getByRole("menuitemradio", { name: /^Auto/ })).toHaveAttribute("aria-checked", "true");
     expect(measure).toHaveBeenCalledTimes(1);
 

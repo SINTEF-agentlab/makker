@@ -286,14 +286,21 @@ function SettingMenu({
     void controller.saveModelSettings(patch);
   };
 
-  const item = (key: string, name: string, checked: boolean, onClick: () => void, detail = "") => (
+  const item = (
+    key: string,
+    name: string,
+    checked: boolean,
+    onClick: () => void,
+    detail = "",
+    unavailable = false,
+  ) => (
     <button
       key={key}
       type="button"
       role="menuitemradio"
       aria-checked={checked}
       className="model-row"
-      disabled={busy}
+      disabled={busy || unavailable}
       title={busy ? BUSY_TITLE : undefined}
       onClick={onClick}
     >
@@ -346,9 +353,12 @@ function SettingMenu({
             formatTokens(c.tokens),
             chosen === c.tokens,
             () => choose({ context: c.tokens }),
-            [c.memory ? formatMemory(c.memory) : "", c.on_gpu === false ? "partly on CPU" : ""]
-              .filter(Boolean)
-              .join(" · "),
+            c.too_large
+              ? "too large"
+              : [c.memory ? formatMemory(c.memory) : "", c.on_gpu === false ? "partly on CPU" : ""]
+                  .filter(Boolean)
+                  .join(" · "),
+            c.too_large,
           ),
         )}
       {/* Gone as soon as the figures are in, whatever else is still settling. */}
