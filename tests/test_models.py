@@ -273,3 +273,34 @@ def test_context_window_google_sdk_fallback(monkeypatch) -> None:
     monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
     monkeypatch.setattr(models, "_google_context_window", lambda name: 1_048_576)
     assert models.context_window("google_genai:unknown-test-model") == 1_048_576
+
+
+def test_gemini_lookups_use_the_chat_models_api_version(monkeypatch) -> None:
+    """google-genai 3 defaults to v1, which lacks previews and -latest aliases."""
+    from types import SimpleNamespace
+
+    from google import genai
+
+    from makker import models
+
+    versions: list[str | None] = []
+
+    class _Client:
+        def __init__(self, **kwargs) -> None:
+            versions.append(kwargs["http_options"].api_version)
+            self.models = SimpleNamespace(
+                get=lambda model: SimpleNamespace(input_token_limit=1_000),
+                list=lambda: [],
+            )
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc) -> bool:
+            return False
+
+    monkeypatch.setattr(genai, "Client", _Client)
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+    assert models._google_context_window("gemini-test-model") == 1_000
+    assert models._google_available() == []
+    assert versions == ["v1beta", "v1beta"]

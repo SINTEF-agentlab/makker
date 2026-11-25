@@ -327,6 +327,10 @@ async def _drain_tool_calls(run: Any, on_message: MessageCallback | None) -> Non
 
         if on_message is None:
             continue
+        # A tool paused by an interrupt ends the run with neither output nor
+        # error; it finishes when the run resumes, so it isn't finished now.
+        if call.error is None and call.output is None:
+            continue
         if call.error is not None:
             if _should_skip_tool_error(call.error):
                 continue

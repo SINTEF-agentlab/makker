@@ -175,14 +175,16 @@ silently at runtime. The contacts:
 - `agent/openrouter.py`: overrides `ChatOpenRouter._create_message_dicts` to
   serialize canonical tool images until upstream supports them. Tests exercise
   the real SDK with mocked HTTP for ordinary and streaming requests.
-- `agent/backend.py`: subclasses `CompositeBackend` (overriding `grep`/`glob`
-  so patterns recurse) and `LocalShellBackend` (overriding `write`/`edit`/
-  `delete`/`execute` to refuse depot writes, reading `cwd` to resolve relative
-  paths). A subclass breaks loudly if a base method's signature moves, but a
-  narrowed override degrades quietly, which is why the search overrides
-  forward `**kwargs`. After the real-paths refactor nothing routes through a
-  mount, so `added_dirs.py` only records the added folders; every tool already
-  reaches them by absolute path.
+- `agent/backend.py`: subclasses `CompositeBackend` (overriding `glob` for
+  Windows drive patterns) and `LocalShellBackend` (overriding `write`/`edit`/
+  `delete` to refuse depot writes, and the private `_execute` to refuse shell
+  `julia`, reading `cwd` to resolve relative paths). The guard is on `_execute`,
+  not `execute`, because upstream only kills a cancelled command when `execute`
+  is not overridden; a canary checks both. A subclass breaks loudly if a base
+  method's signature moves, but a narrowed override degrades quietly, which is
+  why `_execute` forwards `**kwargs`. After the real-paths refactor nothing
+  routes through a mount, so `added_dirs.py` only records the added folders;
+  every tool already reaches them by absolute path.
 - `agent/real_paths.py`: wraps `deepagents.backends.utils.validate_path` (and
   the copies the filesystem middleware and skill loader import) so a relative
   path stays relative for the backend to resolve, instead of being rooted at

@@ -143,11 +143,19 @@ async def compact_thread(
     history_session_id = middleware._get_session_id(values)
     file_path = await middleware._aoffload_to_backend(backend, to_summarize, history_session_id)
     summary_msg = middleware._build_new_messages_with_path(summary, file_path)[0]
-    state_cutoff = middleware._compute_state_cutoff(prior_event, cutoff)
+    state_cutoff = middleware._compute_state_cutoff(prior_event, cutoff, messages)
+    # The same event upstream's compact tool records: the cutoff is anchored by
+    # message id, and ``created_at_index`` marks the kept turns whose Claude
+    # thinking blocks must be dropped (Anthropic rejects them once the history
+    # they were bound to is replaced by the summary).
     new_event: SummarizationEvent = {
         "cutoff_index": state_cutoff,
+        "cutoff_message_id": (
+            messages[state_cutoff].id if 0 <= state_cutoff < len(messages) else None
+        ),
         "summary_message": summary_msg,
         "file_path": file_path,
+        "created_at_index": len(messages),
     }
     await aupdate_state(
         config,

@@ -43,6 +43,21 @@ def test_deepagents_validate_path_still_patchable() -> None:
         )
 
 
+def test_shell_guard_keeps_upstream_cancellation_cleanup() -> None:
+    from deepagents.backends import LocalShellBackend
+
+    from makker.agent.backend import WorkspaceShellBackend
+
+    assert callable(getattr(LocalShellBackend, "_execute", None)), (
+        "LocalShellBackend no longer routes commands through _execute; the shell "
+        "julia guard in agent/backend.py no longer runs. Re-point it."
+    )
+    assert WorkspaceShellBackend.execute is LocalShellBackend.execute, (
+        "Overriding execute makes LocalShellBackend skip killing a cancelled "
+        "command; keep the guard on _execute."
+    )
+
+
 def test_deepagents_harness_profile_resolver_still_exists() -> None:
     from deepagents.profiles.harness import harness_profiles
 

@@ -17,12 +17,12 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "deepagents>=0.7.26",
+    "deepagents>=0.7.41",
     "python-dotenv>=1.0",
     # Provider packages we bundle so the selected models work out of the box
     # (langchain-anthropic arrives via deepagents). ollama covers local models;
     # any other provider works once the user installs its langchain-* package.
-    "langchain-openai>=0.2",
+    "langchain-openai>=1.8.2",
     "langchain-openrouter>=0.2.9",
     "langchain-google-genai>=4.2.2",
     "langchain-ollama>=1.1.0",
@@ -38,7 +38,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     # Used directly by the declarative HTTP tools (agent/capabilities.py) to call a
     # host application's endpoints, and by the web interface's live-plot reverse
-    # proxy (interfaces/server/app.py) to forward HTTP/websocket traffic to each
+    # proxy (interfaces/server/live.py) to forward HTTP/websocket traffic to each
     # session's Bonito server.
     "httpx>=0.27",
     "websockets>=13",
@@ -123,7 +123,7 @@ cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true 
 # reproducible result for the loose ranges above (CI installs it with
 # `uv sync --locked`). To move forward: bump the date, run `uv lock`, run the
 # tests, and commit the updated lock.
-exclude-newer = "2026-10-16T23:59:59Z"
+exclude-newer = "2026-11-25T23:59:59Z"
 
 [tool.ruff]
 line-length = 100
@@ -145,6 +145,7 @@ testpaths = ["tests"]
 # tests.
 addopts = "-ra --ignore=tests/live --timeout=120"
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 markers = [
     "integration: requires a live Julia runtime (the kernel tests need only base Julia; the simulator/plot tests need an instantiated env)",
 ]

@@ -147,8 +147,9 @@ def register_provider_profiles() -> None:
 # Reasoning visibility: models that can reason get it requested explicitly.
 # OpenAI's recent reasoning models default to effort "none" (no reasoning at
 # all) and stream nothing during the thinking phase unless a summary is
-# requested; Anthropic's extended thinking is off unless a budget is given;
-# Gemini thinks by default but keeps the thoughts hidden.
+# requested; older Claude models think only when given a budget, newer ones
+# think adaptively but keep it hidden unless a summary is asked for; Gemini
+# thinks by default but keeps the thoughts hidden.
 _OPENAI_REASONING = {"effort": "medium", "summary": "auto"}
 _ANTHROPIC_THINKING_BUDGET_TOKENS = 10_000
 # Thinking spends from the same output budget as the answer, so the cap must
@@ -193,32 +194,36 @@ def _ollama_settings(model_id: str) -> dict[str, Any]:
 
 
 def _openai_settings(model_id: str) -> dict[str, Any] | None:
-    # The profile must also mark the temperature parameter unsupported: that
-    # separates true reasoning models (which accept reasoning.effort) from
-    # the -chat hybrids (which reject it).
+    # The -chat hybrids reject reasoning.effort, so they are excluded by name.
+    # The profile's temperature flag no longer tells them apart: newer
+    # reasoning models (gpt-5.1 on) accept temperature as well.
     profile = model_profile(model_id)
     name = model_id.partition(":")[2]
+    if "-chat" in name:
+        return None
     major = re.match(r"^gpt-(\d+)(?:[.-]|$)", name)
     # Provider profiles lag new model releases. GPT-6+ reasoning models need
     # the Responses API for function tools, even before their profile ships.
-    newer_reasoning = (
-        not profile and major is not None and int(major[1]) >= 6 and "-chat" not in name
-    )
-    if (profile.get("reasoning_output") and profile.get("temperature") is False) or newer_reasoning:
+    newer_reasoning = not profile and major is not None and int(major[1]) >= 6
+    if profile.get("reasoning_output") or newer_reasoning:
         return {"reasoning": dict(_OPENAI_REASONING), "use_responses_api": True}
     return None
 
 
 def _anthropic_settings(model_id: str) -> dict[str, Any] | None:
-    if model_profile(model_id).get("reasoning_output"):
-        return {
-            "thinking": {
-                "type": "enabled",
-                "budget_tokens": _ANTHROPIC_THINKING_BUDGET_TOKENS,
-            },
-            "max_tokens": _ANTHROPIC_MAX_TOKENS,
-        }
-    return None
+    profile = model_profile(model_id)
+    if not profile.get("reasoning_output"):
+        return None
+    # The models that dropped the sampling settings (Opus 4.7 on, Sonnet 5 on,
+    # Haiku 5.5, Fable) also dropped the fixed thinking budget and refuse it.
+    # They think adaptively at the model's default effort, and the summary
+    # keeps the thinking visible. The profile's temperature flag marks them
+    # all; its effort levels miss Haiku 5.5.
+    if profile.get("temperature") is False:
+        thinking = {"type": "adaptive", "display": "summarized"}
+    else:
+        thinking = {"type": "enabled", "budget_tokens": _ANTHROPIC_THINKING_BUDGET_TOKENS}
+    return {"thinking": thinking, "max_tokens": _ANTHROPIC_MAX_TOKENS}
 
 
 def _google_settings(model_id: str) -> dict[str, Any] | None:

@@ -57,8 +57,12 @@ async def test_compact_thread_round_trip(tmp_path: Path) -> None:
         state = await agent.aget_state({"configurable": {"thread_id": session.session_id}})
         # Non-mutating: the raw conversation log is preserved in full...
         assert len(state.values["messages"]) == 12
-        # ...and the compaction is recorded as an event the next turn applies.
-        assert state.values["_summarization_event"]["cutoff_index"] == 4
+        # ...and the compaction is recorded as an event the next turn applies,
+        # anchored by message id and marking where the kept turns ended.
+        event = state.values["_summarization_event"]
+        assert event["cutoff_index"] == 4
+        assert event["cutoff_message_id"] == state.values["messages"][4].id
+        assert event["created_at_index"] == 12
         history_id = state.values["_summarization_session_id"]
         assert history_id
 

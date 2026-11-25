@@ -186,6 +186,36 @@ def test_execute_refuses_shell_julia_only(tmp_path) -> None:
         assert backend.execute(command).exit_code != 2, command
 
 
+async def test_async_execute_refuses_shell_julia(tmp_path) -> None:
+    backend = WorkspaceShellBackend(root_dir=tmp_path, virtual_mode=False)
+    result = await backend.aexecute("julia -e 1")
+    assert result.exit_code == 2
+    assert "run_julia" in result.output
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+async def test_cancelling_a_shell_command_stops_it(tmp_path: Path) -> None:
+    # A stopped turn cancels the tool call; the command must not keep running.
+    import asyncio
+    import os
+
+    backend = WorkspaceShellBackend(root_dir=tmp_path, virtual_mode=False)
+    pid_file = tmp_path / "pid"
+    task = asyncio.create_task(backend.aexecute(f"echo $$ > {pid_file}; sleep 30"))
+    for _ in range(200):
+        if pid_file.exists() and pid_file.read_text().strip():
+            break
+        await asyncio.sleep(0.05)
+    pid = int(pid_file.read_text())
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell syntax")
 def test_shell_commands_never_see_provider_keys(tmp_path: Path, monkeypatch) -> None:
     from makker.models import provider_key_vars

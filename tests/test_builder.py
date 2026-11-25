@@ -6,6 +6,7 @@ import pytest
 
 from makker.agent.builder import _set_profile_window, register_provider_profiles
 from makker.models import DEFAULT_MODEL, MODEL_ENV_VAR, resolve_model
+from makker.models import model_profile as bundled_model_profile
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +23,15 @@ def _provider_capabilities(monkeypatch: pytest.MonkeyPatch) -> None:
         }
         for provider in ("openai", "anthropic", "google_genai")
     }
-    profiles["openai:hybrid-test-model"] = {"reasoning_output": True, "temperature": True}
+    # Newer OpenAI reasoning models accept temperature too; the -chat hybrids
+    # are told apart by name.
+    profiles["openai:temperature-reasoning-test-model"] = {
+        "reasoning_output": True,
+        "temperature": True,
+    }
+    profiles["openai:hybrid-test-model-chat"] = {"reasoning_output": True, "temperature": True}
+    # Older Claude models accept sampling settings and a thinking budget.
+    profiles["anthropic:budget-test-model"] = {"reasoning_output": True, "temperature": True}
     profiles["google_genai:plain-test-model"] = {"reasoning_output": False}
     monkeypatch.setattr(builder, "model_profile", lambda model_id: profiles.get(model_id, {}))
     monkeypatch.setattr(models, "model_profile", builder.model_profile)
@@ -136,15 +145,19 @@ def test_resolve_model_for_agent_enables_openai_reasoning(
     profile = _harness_profile_for_model(model, None)
     assert profile.general_purpose_subagent.enabled is False
     # New reasoning models work before the provider's static profile catches up.
-    for spec in (DEFAULT_MODEL, "openai:gpt-99-test-model"):
+    for spec in (
+        DEFAULT_MODEL,
+        "openai:gpt-99-test-model",
+        "openai:temperature-reasoning-test-model",
+    ):
         newer = _resolve_model_for_agent(spec)
         assert isinstance(newer, BaseChatModel)
         assert getattr(newer, "reasoning", None) == {"effort": "medium", "summary": "auto"}
         assert getattr(newer, "use_responses_api", None) is True
     # Non-reasoning models are built too (for the request timeout) but are not
-    # asked to reason, and neither are the -chat hybrids, whose profile keeps
-    # temperature support and whose API rejects reasoning.effort.
-    for spec in ("openai:plain-test-model", "openai:hybrid-test-model"):
+    # asked to reason, and neither are the -chat hybrids, whose API rejects
+    # reasoning.effort.
+    for spec in ("openai:plain-test-model", "openai:hybrid-test-model-chat"):
         plain = _resolve_model_for_agent(spec)
         assert isinstance(plain, BaseChatModel), spec
         assert getattr(plain, "reasoning", None) is None, spec
@@ -159,10 +172,14 @@ def test_resolve_model_for_agent_enables_anthropic_thinking(
 
     register_provider_profiles()
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    model = _resolve_model_for_agent("anthropic:reasoning-test-model")
+    model = _resolve_model_for_agent("anthropic:budget-test-model")
     assert isinstance(model, BaseChatModel)
     assert getattr(model, "thinking", None) == {"type": "enabled", "budget_tokens": 10_000}
     assert getattr(model, "max_tokens", None) == 24_000
+    # Models without sampling settings think adaptively, summarized to stay visible.
+    adaptive = _resolve_model_for_agent("anthropic:reasoning-test-model")
+    assert getattr(adaptive, "thinking", None) == {"type": "adaptive", "display": "summarized"}
+    assert getattr(adaptive, "max_tokens", None) == 24_000
     # A model the installed provider package has no profile for is still built
     # (every cloud request is bounded) but is not asked to think. A fictional id,
     # so the assertion can't be invalidated by the provider package later
@@ -170,6 +187,41 @@ def test_resolve_model_for_agent_enables_anthropic_thinking(
     unknown = _resolve_model_for_agent("anthropic:unknown-test-model")
     assert isinstance(unknown, BaseChatModel)
     assert getattr(unknown, "thinking", None) is None
+
+
+@pytest.mark.parametrize(
+    ("model_id", "thinking"),
+    [
+        ("claude-haiku-4-5", "enabled"),
+        ("claude-sonnet-4-6", "enabled"),
+        ("claude-opus-4-7", "adaptive"),
+        ("claude-sonnet-5", "adaptive"),
+        ("claude-sonnet-5-5", "adaptive"),
+        ("claude-haiku-5-5", "adaptive"),
+        ("claude-opus-5-5", "adaptive"),
+        ("claude-fable-5-2", "adaptive"),
+    ],
+)
+def test_claude_requests_use_the_thinking_each_model_accepts(
+    monkeypatch: pytest.MonkeyPatch, model_id: str, thinking: str
+) -> None:
+    """Against the bundled profiles: a budget where it is still accepted,
+    adaptive thinking at the model's default effort everywhere else."""
+    from langchain_core.messages import HumanMessage
+
+    from makker.agent import builder
+
+    monkeypatch.setattr(builder, "model_profile", bundled_model_profile)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    # Building the request runs the client's own model checks, which raise for
+    # a budget on Opus 5, Sonnet 5.5 and Fable.
+    payload = builder._resolve_model_for_agent(f"anthropic:{model_id}")._get_request_payload(
+        [HumanMessage("hi")]
+    )
+    assert payload["thinking"]["type"] == thinking
+    if thinking == "adaptive":
+        assert payload["thinking"] == {"type": "adaptive", "display": "summarized"}
+        assert "effort" not in payload.get("output_config", {})
 
 
 def test_resolve_model_for_agent_bounds_cloud_requests(
