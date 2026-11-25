@@ -103,7 +103,11 @@ def test_resolve_model_for_agent_handles_ollama_and_cloud(monkeypatch: pytest.Mo
     # is the size measured for this machine, and; crucially; our
     # harness profile now resolves for it (it does NOT for such a spec as a string).
     model = _resolve_model_for_agent("ollama:local-test-model:tag")
-    assert isinstance(model, BaseChatModel)
+    from makker.agent.ollama import ChatOllamaParallelTools
+
+    # Built so parallel tool calls stream as separate calls (tests/test_ollama_tool_calls.py).
+    assert isinstance(model, ChatOllamaParallelTools)
+    assert model.model == "local-test-model:tag"
     assert getattr(model, "num_ctx", None) == 65536
     # Thinking-capable local models get think mode requested explicitly, so
     # the thinking is separated instead of silently swallowing the turn.

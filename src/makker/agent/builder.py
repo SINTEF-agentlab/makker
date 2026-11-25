@@ -306,6 +306,10 @@ def _resolve_model_for_agent(model: Any) -> Any:
                 from makker.agent.openrouter import ChatOpenRouterWithToolImages
 
                 instance = ChatOpenRouterWithToolImages(model=model.partition(":")[2], **kwargs)
+            elif provider == "ollama":
+                from makker.agent.ollama import ChatOllamaParallelTools
+
+                instance = ChatOllamaParallelTools(model=model.partition(":")[2], **kwargs)
             else:
                 from langchain.chat_models import init_chat_model
 
