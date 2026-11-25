@@ -1583,8 +1583,9 @@ async def test_starting_a_turn_leaves_other_workers_running(session: Session) ->
 async def test_file_links_open_only_inside_the_workspace(
     session: Session, tmp_path: Path, monkeypatch
 ) -> None:
-    """The model writes the links. One into the workspace (the test's tmp_path)
-    opens; one elsewhere is only revealed, so a click never launches it."""
+    """The model writes the links and the files. A document in the workspace
+    (the test's tmp_path) opens; a script there, or anything elsewhere, is only
+    revealed, so a click never launches it (macOS runs a `.py` on open)."""
     from types import SimpleNamespace
 
     from makker.interfaces.tui import app as app_module
@@ -1593,17 +1594,19 @@ async def test_file_links_open_only_inside_the_workspace(
     revealed: list[Path] = []
     monkeypatch.setattr(app_module, "open_path", opened.append)
     monkeypatch.setattr(app_module, "reveal_path", revealed.append)
-    inside = tmp_path / "plot.png"
-    outside = tmp_path.parent / f"{tmp_path.name}-elsewhere" / "run.command"
+    plot = tmp_path / "plot.png"
+    script = tmp_path / "run.py"
+    elsewhere = tmp_path.parent / f"{tmp_path.name}-elsewhere"
+    outside = [elsewhere / "run.command", elsewhere / "report.pdf"]
 
     app = TUIApp(agent=_stub_agent(), session=session)
-    for path in (inside, outside):
+    for path in (plot, script, *outside):
         app.on_markdown_link_clicked(
             SimpleNamespace(href=path.as_uri(), prevent_default=lambda: None)
         )
 
-    assert opened == [inside.resolve()]
-    assert revealed == [outside.resolve()]
+    assert opened == [plot.resolve()]
+    assert revealed == [path.resolve() for path in (script, *outside)]
 
 
 async def test_replacing_the_key_in_use_rebuilds_the_agent(session: Session, monkeypatch) -> None:

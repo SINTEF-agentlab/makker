@@ -104,6 +104,12 @@ if TYPE_CHECKING:
 _RESIZE_DEBOUNCE_SECONDS = 0.05
 # Most prior messages replayed into the log when resuming a session.
 _REPLAY_MAX_MESSAGES = 40
+# File types a clicked link opens in their viewer. Anything else is revealed in
+# its folder: on macOS some types run when opened (a `.py`, a `.jar`).
+_VIEWABLE_SUFFIXES = frozenset(
+    {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+    | {".pdf", ".html", ".htm", ".csv", ".txt", ".md"}
+)
 
 
 def _resolve_editor() -> str | None:
@@ -709,16 +715,18 @@ class TUIApp(App[None]):
     def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
         """Open file:// links in the OS default application.
 
-        Only inside the workspace or the session's output. The model writes these
-        links and can point one anywhere, so anything else is revealed in its
-        folder instead: a click never launches a program from elsewhere.
+        Only a document (an image, PDF, page, table or text) inside the workspace
+        or the session's output. The model writes these links and the files they
+        point at, so anything else is revealed in its folder instead: a click
+        never launches a program.
         """
         href = event.href
         if href.startswith("file://"):
             path = Path(urllib.request.url2pathname(urllib.parse.urlparse(href).path))
             target = path.resolve()
             roots = (workspace_root(), self._session.output_dir)
-            if any(target.is_relative_to(root.resolve()) for root in roots):
+            inside = any(target.is_relative_to(root.resolve()) for root in roots)
+            if inside and target.suffix.lower() in _VIEWABLE_SUFFIXES:
                 open_path(target)
             else:
                 reveal_path(target)
