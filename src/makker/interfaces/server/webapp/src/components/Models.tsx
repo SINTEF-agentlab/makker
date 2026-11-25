@@ -1,7 +1,8 @@
 // The model control under the message box: the current model and its effort, and a
 // menu with the models most likely wanted (built by the server, the same list the
-// terminal shows), the current model's settings as rows that open a list beside
-// the menu, the full catalog behind "More models…", and the API keys.
+// terminal shows), the current model's effort and context size as rows that open a
+// list beside the menu, the full catalog behind "More models…", and the API keys.
+// The output length is set in the config file only.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -73,7 +74,7 @@ export function ModelControl() {
   );
 }
 
-type Setting = "effort" | "context" | "output";
+type Setting = "effort" | "context";
 
 /** The items a key press moves between: those of the open submenu when focus is
  *  in it, else the menu's own (leaving any submenu's out). */
@@ -108,10 +109,13 @@ function ModelMenuPopover() {
     (checked ?? menuItems(ref.current)[0])?.focus();
   }, [menu]);
 
-  // Close on a click anywhere outside the control.
+  // Close on a click anywhere outside the control. A row the click replaced (such
+  // as "Custom…" turning into a field) is gone by the time it gets here; it was inside.
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement | null)?.closest(".model-control")) controller.closeModelMenu();
+      const target = e.target as HTMLElement | null;
+      if (!target?.isConnected || target.closest(".model-control")) return;
+      controller.closeModelMenu();
     };
     document.addEventListener("click", onClick);
     return () => document.removeEventListener("click", onClick);
@@ -127,6 +131,8 @@ function ModelMenuPopover() {
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    // Keys typed into the custom size are for the field, except Escape.
+    if ((e.target as HTMLElement).tagName === "INPUT" && e.key !== "Escape") return;
     const active = document.activeElement as HTMLElement | null;
     const inSub = !!active?.closest(".model-sub");
     if (e.key === "Escape" || (e.key === "ArrowLeft" && inSub)) {
@@ -156,8 +162,11 @@ function ModelMenuPopover() {
     items[(next + items.length) % items.length]?.focus();
   };
 
+  // A setting's list opens on a click (or Enter, or the right arrow) and stays open
+  // until another is opened or the menu closes, so the pointer can cross other rows
+  // on its way to it.
   const row = (setting: Setting, label: string, value: string) => (
-    <div className="model-setting-row" onMouseEnter={() => setOpen(setting)}>
+    <div className="model-setting-row">
       <button
         type="button"
         role="menuitem"
@@ -181,7 +190,7 @@ function ModelMenuPopover() {
 
   return (
     <div className="model-menu" role="menu" aria-label="Model" ref={ref} onKeyDown={onKeyDown}>
-      <div className="model-menu-list" onMouseEnter={() => setOpen(null)}>
+      <div className="model-menu-list">
         {menu?.sections.map((section) => (
           <div key={section.title} role="group" aria-label={section.title}>
             <div className="model-menu-title">{section.title}</div>
@@ -207,10 +216,7 @@ function ModelMenuPopover() {
         <div className="model-menu-foot">
           {data?.effort?.current ? row("effort", "Effort", effortLabel(data.effort.current)) : null}
           {data?.context ? row("context", "Context size", contextValue(data.context, data.settings.context)) : null}
-          {data?.output
-            ? row("output", "Output length", data.settings.output ? formatTokens(data.settings.output) : "Default")
-            : null}
-          <div className="model-menu-tail" onMouseEnter={() => setOpen(null)}>
+          <div className="model-menu-tail">
             <button
               type="button"
               role="menuitem"
@@ -293,20 +299,6 @@ function SettingMenu({ setting, data }: { setting: Setting; data: ModelSettings 
           item(level, effortLabel(level), level === current, () =>
             choose({ effort: level === fallback ? null : level }),
           ),
-        )}
-      </div>
-    );
-  }
-
-  if (setting === "output" && data.output) {
-    const chosen = data.settings.output;
-    return (
-      <div className="model-menu model-sub" role="menu" aria-label="Output length">
-        {item("default", "Default", !chosen, () => choose({ output: null }), formatTokens(data.output.default))}
-        {data.output.choices
-          .filter((tokens) => tokens !== data.output?.default)
-          .map((tokens) =>
-          item(String(tokens), formatTokens(tokens), chosen === tokens, () => choose({ output: tokens })),
         )}
       </div>
     );
