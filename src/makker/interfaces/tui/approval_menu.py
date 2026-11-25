@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 from rich.text import Text
@@ -97,11 +98,16 @@ class ApprovalMenu(Vertical):
             self.option = option
             super().__init__()
 
+    # "Yes" is preselected, so an Enter pressed just as the menu appears (typed for
+    # something else) would approve a card nobody has read. Enter waits this long.
+    confirm_grace_seconds = 0.5
+
     def __init__(self, *, id: str | None = None) -> None:
         super().__init__(id=id)
         self._options: list[ApprovalOption] = []
         self._index = 0
         self._reply_preview = ""
+        self._shown_at = 0.0
 
     def compose(self):
         yield Static("", classes="approval-options", id="approval-options")
@@ -119,6 +125,7 @@ class ApprovalMenu(Vertical):
     def show_menu(self) -> None:
         self.add_class("visible")
         self._index = 0
+        self._shown_at = time.monotonic()
         self._refresh()
 
     def hide_menu(self) -> None:
@@ -193,7 +200,7 @@ class ApprovalMenu(Vertical):
             self._refresh()
 
     def action_confirm(self) -> None:
-        if not self._options:
+        if not self._options or time.monotonic() - self._shown_at < self.confirm_grace_seconds:
             return
         self.post_message(self.Selected(self._options[self._index]))
 

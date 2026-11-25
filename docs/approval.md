@@ -22,8 +22,10 @@ person. If it does, the graph pauses, the pending call (tool name and
 arguments) surfaces as an approval request, and the turn resumes with the
 decision. Calls the policy allows run without a pause, so an approval card
 only ever holds what needs a decision. In the TUI this is the approval card.
-Every request and decision is recorded in the trace (`hitl_request`,
-`hitl_response`).
+Typing a reply instead of choosing declines the request and gives the agent
+your text as the reason. When several requests are pending at once, the card
+shows them all and one decision answers every one. Every request and decision
+is recorded in the trace (`hitl_request`, `hitl_response`).
 
 A card that holds only edits to files inside the workspace offers "always
 allow file edits" for the rest of the session. Nothing else can be always
@@ -41,8 +43,10 @@ an edit to a file outside the workspace.
 Set it at launch (`--approval-mode`), with `/approval-mode` in the TUI and
 web UI, or cycle with `Shift+Tab` in the TUI. A folder never sets it, so a
 folder from someone else can't turn approval off.
-A change applies from the agent's next tool call, mid-turn included, and a
-pending approval the new mode allows is resumed at once. Headless runs cannot
+A change applies from the agent's next tool call, mid-turn included, and
+`/approval-mode` resumes a pending approval the new mode allows at once.
+`Shift+Tab` leaves the card on screen for you to answer, since cycling from
+"accept edits" back to "default" passes through `auto`. Headless runs cannot
 prompt, so a gated call under `ask` ends the turn with an error; scripts and
 the bench run with `auto`.
 

@@ -90,6 +90,7 @@ def normalize_screen(text: str) -> str:
 async def _render(scenario: Scenario) -> tuple[str, str]:
     """Drive a scenario and return ``(svg, transcript_markdown)``."""
     from makker.interfaces.tui import TUIApp
+    from makker.interfaces.tui.approval_menu import ApprovalMenu
     from makker.paths import set_workspace_root
     from makker.session import Session
     from makker.transcript import render_markdown
@@ -101,6 +102,8 @@ async def _render(scenario: Scenario) -> tuple[str, str]:
     agent = scenario.build_agent() if scenario.build_agent else None
     app = TUIApp(agent=agent, session=session, model_label=scenario.model_label)
     async with app.run_test(size=scenario.size) as pilot:
+        # Scripted keys, not a person: an Enter may confirm an approval at once.
+        app.query_one(ApprovalMenu).confirm_grace_seconds = 0.0
         await _settle(app)
         await _drive(app, pilot, scenario.steps)
         # Pin a deterministic scroll/layout state before the screenshot. The app
