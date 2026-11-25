@@ -16,6 +16,9 @@ Sample metadata understood by the solver:
   workspace first (slow on a cold depot; off by default).
 - ``needs_display``: start a managed virtual display so GLMakie plotting
   works headless.
+- ``answer``: mapping of key -> what the value is. The prompt then asks for a
+  final ``ANSWER: {...}`` line holding them, which the value scorers read
+  (see :mod:`makker.eval.answer`).
 """
 
 from __future__ import annotations
@@ -261,6 +264,13 @@ async def _run_makker_session(
     return _final_text(result.messages)
 
 
+def answer_instruction(keys: Mapping[str, str] | None) -> str:
+    """The answer-line request for a sample that names its values, else nothing."""
+    from makker.eval import answer
+
+    return answer.instruction(keys) if keys else ""
+
+
 @solver
 def makker_solver(simulator: str = "jutuldarcy") -> Solver:
     """Solve each sample by handing it to a fresh Makker session."""
@@ -277,7 +287,7 @@ def makker_solver(simulator: str = "jutuldarcy") -> Solver:
         async with _SESSION_LOCK, agent_bridge(agent_state):
             final = await _run_makker_session(
                 simulator=sim,
-                prompt=state.input_text,
+                prompt=state.input_text + answer_instruction(state.metadata.get("answer")),
                 fixtures=fixtures,
                 needs_env=needs_env,
                 needs_display=needs_display,

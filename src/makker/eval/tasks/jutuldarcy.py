@@ -37,7 +37,13 @@ def jutuldarcy() -> Task:
                 "Report the final water saturation range across the column as "
                 "two numbers between 0 and 1."
             ),
-            metadata={"needs_env": True},
+            metadata={
+                "answer": {
+                    "saturation_min": "the lowest final water saturation in the column",
+                    "saturation_max": "the highest final water saturation in the column",
+                },
+                "needs_env": True,
+            },
         ),
     ]
     return Task(
@@ -45,7 +51,7 @@ def jutuldarcy() -> Task:
         solver=makker_solver(simulator="jutuldarcy"),
         scorer=[
             # A saturation is a fraction; goldens replace this once captured.
-            numeric_answer(0.0, 1.0, count=2),
+            numeric_answer(0.0, 1.0, keys=("saturation_min", "saturation_max")),
             used_tools(["run_julia"]),
             no_interpreters_via_execute(),
         ],
@@ -70,13 +76,21 @@ def jutuldarcy_rate_change() -> Task:
             "rate halved. Report the average reservoir pressure at the end "
             "of each run, in bar: base case first, then halved."
         ),
-        metadata={"needs_env": True},
+        metadata={
+            "answer": {
+                "base_pressure": "the final average pressure of the base case, in bar",
+                "halved_pressure": "the final average pressure of the halved-rate case, in bar",
+            },
+            "needs_env": True,
+        },
     )
     return Task(
         dataset=[sample],
         solver=makker_solver(simulator="jutuldarcy"),
         scorer=[
-            numeric_answer(1.0, 1000.0, count=2, order="decreasing"),
+            numeric_answer(
+                1.0, 1000.0, keys=("base_pressure", "halved_pressure"), order="decreasing"
+            ),
             used_tools(["run_julia"]),
             no_interpreters_via_execute(),
             no_repeated_identical_calls(),
@@ -114,6 +128,7 @@ def jutuldarcy_unit_conversion() -> Task:
             "pressure."
         ),
         metadata={
+            "answer": {"pressure": "the final average reservoir pressure, in bar"},
             "needs_env": True,
             # Recorded into the session trace so a later review can judge the answer
             # against ground truth (the eval cross-check in the reviewer).
@@ -126,7 +141,7 @@ def jutuldarcy_unit_conversion() -> Task:
         scorer=[
             # Golden from a trusted 0.3.8 run; the tolerance absorbs solver noise but
             # is far tighter than the gap to any unconverted-permeability result.
-            numeric_close(203.705, 8.0),
+            numeric_close(203.705, 8.0, key="pressure"),
             used_tools(["run_julia"]),
             no_interpreters_via_execute(),
         ],

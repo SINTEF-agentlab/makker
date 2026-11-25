@@ -34,14 +34,22 @@ def fimbul() -> Task:
                 "produced-water temperature at the start and at the end of "
                 "the simulation, in degrees Celsius."
             ),
-            metadata={"needs_env": True},
+            metadata={
+                "answer": {
+                    "start_temperature": "the produced-water temperature at the start, in deg C",
+                    "end_temperature": "the produced-water temperature at the end, in deg C",
+                },
+                "needs_env": True,
+            },
         ),
     ]
     return Task(
         dataset=samples,
         solver=makker_solver(simulator="fimbul"),
         scorer=[
-            numeric_answer(1.0, 250.0, count=2, order="decreasing"),
+            numeric_answer(
+                1.0, 250.0, keys=("start_temperature", "end_temperature"), order="decreasing"
+            ),
             used_tools(["run_julia"]),
             no_interpreters_via_execute(),
         ],

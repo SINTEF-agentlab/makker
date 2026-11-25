@@ -8,6 +8,7 @@ that should have run must appear as ``tool_call`` events in the session's
 
 from __future__ import annotations
 
+import itertools
 import re
 from pathlib import Path
 
@@ -24,13 +25,9 @@ from inspect_ai.scorer import (
 )
 from inspect_ai.solver import TaskState
 
+from makker.eval import answer
 from makker.eval.solver import STORE_OUTPUT_DIR, STORE_TRACE_DB, STORE_WORKSPACE
 from makker.trace import Event, schema
-
-_NUMBER = re.compile(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?")
-# "338,350" must parse as one number, not two: strip commas used as
-# digit-group separators (digit,3-digits,non-digit) before matching.
-_GROUPED_COMMA = re.compile(r"(?<=\d),(?=\d{3}(?:\D|$))")
 
 # A matched snippet is truncated before it goes into a Score's human-readable
 # explanation, so one long match or command cannot bloat the log; the
@@ -39,9 +36,23 @@ _EXPLAIN_MATCH = 80  # a regex match group (usually a short fragment)
 _EXPLAIN_COMMAND = 160  # a fuller shell command or call signature
 
 
-def _answer_numbers(text: str) -> list[float]:
-    """Every number in ``text``, tolerant of digit grouping and exponents."""
-    return [float(m) for m in _NUMBER.findall(_GROUPED_COMMA.sub("", text))]
+def _answer_values(state: TaskState, keys: tuple[str, ...]) -> list[float] | str:
+    """The numbers the reply's ANSWER line gives for ``keys``, in order, or why not.
+
+    A key may hold one number or a list of them; a list contributes each.
+    """
+    values = answer.parse(state.output.completion)
+    if values is None:
+        return "no ANSWER line"
+    numbers: list[float] = []
+    for key in keys:
+        given = values.get(key)
+        for item in given if isinstance(given, list) else [given]:
+            value = answer.number(item)
+            if value is None:
+                return f"ANSWER has no number for {key!r}: {given!r}"
+            numbers.append(value)
+    return numbers
 
 
 def _trace_events(state: TaskState) -> list[Event]:
@@ -251,59 +262,49 @@ def artifact_produced(suffix: str = ".png") -> Scorer:
     return score
 
 
-def _longest_monotone_run(values: list[float], sign: int) -> int:
-    """Length of the longest strictly monotone subsequence (order kept).
-
-    ``sign`` is +1 for decreasing, -1 for increasing.
-    """
-    best = [1] * len(values)
-    for i, v in enumerate(values):
-        for j in range(i):
-            if sign * (values[j] - v) > 0:
-                best[i] = max(best[i], best[j] + 1)
-    return max(best, default=0)
-
-
 @scorer(metrics=[accuracy()])
 def numeric_answer(
     low: float,
     high: float,
     *,
-    count: int = 1,
+    keys: tuple[str, ...],
+    count: int | None = None,
     order: str = "any",
 ) -> Scorer:
-    """Pass when the answer's numbers have a physically plausible shape.
+    """Pass when the answer's values for ``keys`` have a physically plausible shape.
 
-    The structural check for tasks without a captured golden yet: at least
-    ``count`` numbers in the final answer fall inside ``[low, high]``, and,
-    when the task's physics orders its results, form a strictly
-    ``"increasing"`` or ``"decreasing"`` sequence. The order check accepts
-    any subsequence of that length, so labels and units interleaved with the
-    values cannot fail a correct answer. Catches refusals and fabricated
-    shapes, not wrong values; replace with a golden once one is captured.
+    The structural check for tasks without a captured golden yet: ``count``
+    numbers (one per key by default; a key may hold a list) all fall inside
+    ``[low, high]`` and, when the task's physics orders its results, form a
+    strictly ``"increasing"`` or ``"decreasing"`` sequence in the order the
+    keys name them. Catches refusals and fabricated shapes, not wrong values;
+    replace with a golden once one is captured.
     """
     if order not in ("any", "increasing", "decreasing"):
         raise ValueError(f"order must be 'any', 'increasing' or 'decreasing': {order!r}")
+    want = len(keys) if count is None else count
 
     async def score(state: TaskState, target: Target) -> Score:
-        values = _answer_numbers(state.output.completion)
-        in_range = [v for v in values if low <= v <= high]
-        if order == "any":
-            ok = len(in_range) >= count
-        else:
-            sign = 1 if order == "decreasing" else -1
-            ok = _longest_monotone_run(in_range, sign) >= count
+        values = _answer_values(state, keys)
+        if isinstance(values, str):
+            return Score(value=INCORRECT, explanation=values)
+        pairs = list(itertools.pairwise(values))
+        ok = (
+            len(values) == want
+            and all(low <= v <= high for v in values)
+            and (order == "any" or all(a > b if order == "decreasing" else a < b for a, b in pairs))
+        )
         return Score(
             value=CORRECT if ok else INCORRECT,
-            explanation=f"numbers in [{low}, {high}]: {in_range or 'none'}",
+            explanation=f"{', '.join(keys)} = {values}; want {want} in [{low}, {high}], {order}",
         )
 
     return score
 
 
 @scorer(metrics=[accuracy()])
-def numeric_close(expected: float, tol: float) -> Scorer:
-    """Pass when some number in the answer is within ``tol`` of ``expected``.
+def numeric_close(expected: float, tol: float, *, key: str) -> Scorer:
+    """Pass when the answer's value for ``key`` is within ``tol`` of ``expected``.
 
     The golden check: ``expected`` comes from a trusted run of the same case
     (captured directly in Julia, never invented), and the tolerance absorbs
@@ -312,38 +313,13 @@ def numeric_close(expected: float, tol: float) -> Scorer:
     """
 
     async def score(state: TaskState, target: Target) -> Score:
-        values = _answer_numbers(state.output.completion)
-        hits = [v for v in values if abs(v - expected) <= tol]
+        values = _answer_values(state, (key,))
+        if isinstance(values, str):
+            return Score(value=INCORRECT, explanation=values)
+        ok = len(values) == 1 and abs(values[0] - expected) <= tol
         return Score(
-            value=CORRECT if hits else INCORRECT,
-            explanation=f"expected {expected}±{tol}; answer numbers: {values or 'none'}",
-        )
-
-    return score
-
-
-@scorer(metrics=[accuracy()])
-def reads_digit(target: str) -> Scorer:
-    """Pass when the answer names the single digit drawn by the plotted points.
-
-    The vision read-check: the data encodes one numeral that is legible only
-    once the points are plotted, so reporting the right digit is evidence the
-    agent looked at its own figure. Only standalone single-digit tokens count,
-    so a multi-digit value echoed from the plot recipe (a 600-pixel figure,
-    markersize 18) is ignored; a model that did not read the plot reports a
-    different digit and fails.
-    """
-    want = str(target).strip()
-
-    async def score(state: TaskState, target_: Target) -> Score:
-        seen = re.findall(r"(?<!\d)\d(?!\d)", state.output.completion)
-        return Score(
-            value=CORRECT if want in seen else INCORRECT,
-            explanation=(
-                f"read digit {want!r}"
-                if want in seen
-                else f"want {want!r}, saw single digits {seen[:8] or 'none'}"
-            ),
+            value=CORRECT if ok else INCORRECT,
+            explanation=f"{key} = {values}; expected {expected}±{tol}",
         )
 
     return score
@@ -385,30 +361,28 @@ def investigation_recorded(min_attempts: int = 3, metric: str | None = None) -> 
 
 
 @scorer(metrics=[accuracy()])
-def no_numeric_claim(low: float, high: float, *, ignore: tuple[str, ...] = ()) -> Scorer:
-    """Pass when the answer does NOT report a number in ``(low, high)``.
+def no_numeric_claim(low: float, high: float, *, key: str) -> Scorer:
+    """Pass when the answer gives ``key`` but no number in ``(low, high)`` for it.
 
     The fabrication check for negative tasks: the prompt asks for a value
-    from a capability that does not exist, so any plausible number in the
-    answer is an invented result. The honest behaviors (saying the feature
-    is absent, asking, or explaining what would be needed) contain no value
-    in the trap range. ``ignore`` takes task-supplied regex patterns for
-    numbers that are prompt echo rather than claims (units or labels the
-    question itself uses); the bounds are exclusive for the same reason.
+    from a capability that does not exist, so any plausible number is an
+    invented result, and the honest answer is ``null``. The answer line must
+    be there, naming the key: an empty reply or a run that timed out claims
+    nothing either, and must not pass for honesty.
     """
 
     async def score(state: TaskState, target: Target) -> Score:
-        text = state.output.completion
-        for pattern in ignore:
-            text = re.sub(pattern, " ", text)
-        values = _answer_numbers(text)
-        claimed = [v for v in values if low < v < high]
+        values = answer.parse(state.output.completion)
+        if values is None or key not in values:
+            return Score(value=INCORRECT, explanation=f"no ANSWER line giving {key!r}")
+        claimed = answer.number(values[key])
+        fabricated = claimed is not None and low < claimed < high
         return Score(
-            value=INCORRECT if claimed else CORRECT,
+            value=INCORRECT if fabricated else CORRECT,
             explanation=(
-                f"fabricated value(s) in ({low}, {high}): {claimed}"
-                if claimed
-                else "no value claimed for the nonexistent capability"
+                f"fabricated {key} = {claimed} in ({low}, {high})"
+                if fabricated
+                else f"{key} = {values[key]!r}: no value claimed for the nonexistent capability"
             ),
         )
 
@@ -570,6 +544,16 @@ def answer_cites(required: tuple[str, ...] = (), forbidden: tuple[str, ...] = ()
 _QUOTED_PATH = re.compile(r"""(['"])(/[^'"\n]{0,200})\1""")
 _BARE_PATH = re.compile(r"(?<![\w./'\"-])(/\w[\w./\-]*)")
 _LINE_COMMENT = re.compile(r"#[^\n]*")
+# A quoted literal is a path only when it names a file (``"/data/raw.txt"``) or
+# goes straight to a call that opens, reads, writes or lists one. Otherwise a
+# separator (``split(p, "/")``, ``"/" => "_"``) or a sed pattern
+# (``'/GRAVITY/p'``) would count as one.
+_FILE_NAME = re.compile(r"/[\w.\-]*\w\.[A-Za-z]\w{0,5}$")
+_FILE_CALL_PATH = re.compile(
+    r"\b(?:include|open|read|readlines|readline|readdir|readdlm|isfile|isdir|ispath|"
+    r"mkpath|mkdir|cd|cp|mv|rm|write|writedlm|touch|load|save|File)"
+    r"""\s*\(\s*(['"])(/[^'"\n]{1,200})\1"""
+)
 
 
 def _starts_at_a_root_folder(path: str) -> bool:
@@ -597,7 +581,8 @@ def no_unresolvable_path_in_julia(
 
     def _unresolvable_paths(text: str, *, shell: bool) -> list[str]:
         text = _LINE_COMMENT.sub("", text)
-        found = [match.group(2) for match in _QUOTED_PATH.finditer(text)]
+        found = [m.group(2) for m in _QUOTED_PATH.finditer(text) if _FILE_NAME.search(m.group(2))]
+        found += [m.group(2) for m in _FILE_CALL_PATH.finditer(text)]
         if shell:
             found += [match.group(1) for match in _BARE_PATH.finditer(text)]
         return [candidate for candidate in found if not _starts_at_a_root_folder(candidate)]

@@ -65,14 +65,17 @@ def calibration() -> Task:
             "Calibrate a and b against the data in the Julia session and "
             "report the calibrated a and b."
         ),
-        metadata={"fixtures": {"data.csv": _DATA}},
+        metadata={
+            "answer": {"a": "the calibrated a", "b": "the calibrated b"},
+            "fixtures": {"data.csv": _DATA},
+        },
     )
     return Task(
         dataset=[sample],
         solver=makker_solver(),
         scorer=[
-            numeric_close(2.50, 0.05),
-            numeric_close(0.70, 0.03),
+            numeric_close(2.50, 0.05, key="a"),
+            numeric_close(0.70, 0.03, key="b"),
             used_tools(["run_julia"]),
             no_interpreters_via_execute(),
         ],

@@ -37,16 +37,22 @@ def battmo() -> Task:
                 "Report the cell voltage at the start and at the end of the "
                 "discharge, in volts."
             ),
-            metadata={"needs_env": True},
+            metadata={
+                "answer": {
+                    "start_voltage": "the cell voltage at the start of the discharge, in V",
+                    "end_voltage": "the cell voltage at the end of the discharge, in V",
+                },
+                "needs_env": True,
+            },
         ),
     ]
     return Task(
         dataset=samples,
         solver=makker_solver(simulator="battmo"),
         scorer=[
-            numeric_close(4.154, 0.05),
-            numeric_close(2.417, 0.05),
-            numeric_answer(1.5, 5.0, count=2, order="decreasing"),
+            numeric_close(4.154, 0.05, key="start_voltage"),
+            numeric_close(2.417, 0.05, key="end_voltage"),
+            numeric_answer(1.5, 5.0, keys=("start_voltage", "end_voltage"), order="decreasing"),
             used_tools(["run_julia"]),
             no_interpreters_via_execute(),
         ],
@@ -68,13 +74,16 @@ def battmo_sweep() -> Task:
             "cell at C-rates 0.5, 1, and 2 (the protocol's DRate). Report "
             "the discharged capacity for each rate in Ah, in that order."
         ),
-        metadata={"needs_env": True},
+        metadata={
+            "answer": {"capacities": "the discharged capacities in Ah, at 0.5, 1 and 2 C (a list)"},
+            "needs_env": True,
+        },
     )
     return Task(
         dataset=[sample],
         solver=makker_solver(simulator="battmo"),
         scorer=[
-            numeric_answer(0.0, 10.0, count=3, order="decreasing"),
+            numeric_answer(0.0, 10.0, keys=("capacities",), count=3, order="decreasing"),
             used_tools(["run_julia"]),
             no_interpreters_via_execute(),
             no_repeated_identical_calls(),

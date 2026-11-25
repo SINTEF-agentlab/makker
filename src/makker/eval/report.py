@@ -78,6 +78,8 @@ class SampleRecord:
     commit: str
     epoch: int = 1  # which repetition of the sample this run is
     tool_calls: int = 0  # tool calls the agent made this run (harness efficiency)
+    # How the tasks were scored (runconfig ``eval_version``); 1 before it was recorded.
+    eval_version: int = 1
 
 
 def _model_short(model: str) -> str:
@@ -109,6 +111,9 @@ def _classify(sample, scores: dict[str, str]) -> tuple[str, str, list[str]]:
     must never be read as a failed check.
     """
     if sample.error is not None:
+        return "infra", "infra", []
+    # Nothing graded pass or fail (the scorers never ran) is not a pass.
+    if not any(value in ("C", "I") for value in scores.values()):
         return "infra", "infra", []
     failed = [name for name, value in scores.items() if value == "I"]
     if not failed:
@@ -192,6 +197,7 @@ def collect(prefixes: str | list[str], log_dir: Path | None = None) -> list[Samp
                 wall_s=getattr(s, "total_time", None),
                 messages=len(s.messages or []),
                 commit=commit,
+                eval_version=int(runconfig.get("eval_version") or 1),
                 epoch=getattr(s, "epoch", 1) or 1,
                 tool_calls=tool_calls,
             )
@@ -294,6 +300,12 @@ def render_markdown(records: list[SampleRecord]) -> str:
         f"**{times}**, and cells aggregate across runs, so a fraction like 2/3 means "
         "the sample passed two of three runs.\n\n"
     )
+    versions = sorted({r.eval_version for r in records})
+    if len(versions) > 1:
+        w(
+            f"**These runs were scored by different eval versions ({', '.join(map(str, versions))})"
+            ", so their scores do not compare.**\n\n"
+        )
 
     # Overview: pass rate, cost, and wall time per model, all in one place.
     w("## Overview\n\n")

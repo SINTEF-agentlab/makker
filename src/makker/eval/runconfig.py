@@ -62,6 +62,33 @@ def _skill_hashes(adapter: Any) -> dict[str, str]:
     return hashes
 
 
+# Bumped when the tasks or their scoring change so that scores no longer compare
+# with earlier runs'. 2: values are read from a final ANSWER line, not the prose.
+EVAL_VERSION = 2
+
+
+def _julia_packages(julia_project: Path | None) -> dict[str, str | None]:
+    """The version the env resolved for each package it declares.
+
+    The goldens follow unpinned upstream packages, so a score that moves with a
+    release must be traceable to the versions it ran against.
+    """
+    if julia_project is None:
+        return {}
+    import tomllib
+
+    from makker.workspace import resolved_package_version
+
+    try:
+        project = tomllib.loads((julia_project / "Project.toml").read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+    return {
+        name: resolved_package_version(julia_project, name)
+        for name in sorted(project.get("deps") or {})
+    }
+
+
 def build_runconfig(adapter: Any, *, julia_project: Path | None = None) -> dict[str, Any]:
     """The attribution record for one eval run (JSON-serializable)."""
     from makker import __version__
@@ -69,6 +96,7 @@ def build_runconfig(adapter: Any, *, julia_project: Path | None = None) -> dict[
 
     manifest = (julia_project / "Manifest.toml") if julia_project else None
     return {
+        "eval_version": EVAL_VERSION,
         "makker": {
             "version": __version__,
             "commit": _git(["rev-parse", "HEAD"]),
@@ -81,6 +109,7 @@ def build_runconfig(adapter: Any, *, julia_project: Path | None = None) -> dict[
         "manifest_sha256": (
             _sha256_file(manifest) if manifest is not None and manifest.exists() else None
         ),
+        "julia_packages": _julia_packages(julia_project),
         "deps": {
             name: _dist_version(name)
             for name in ("deepagents", "langchain", "langgraph", "inspect-ai")

@@ -125,12 +125,13 @@ def filesystem_nested() -> Task:
             "`m = sum([2, 4, 6, 8, 10]) / 5`. Load it into the Julia session "
             "with `include` and reply with the value of `m`."
         ),
+        metadata={"answer": {"m": "the value of m"}},
     )
     return Task(
         dataset=[sample],
         solver=makker_solver(),
         scorer=[
-            numeric_close(6.0, 0.01),
+            numeric_close(6.0, 0.01, key="m"),
             used_tools(["write_file", "run_julia"]),
             workspace_file_exists("scripts/stats.jl"),
             no_unresolvable_path_in_julia(),
@@ -159,13 +160,16 @@ def filesystem_edit() -> Task:
             "report the value it prints."
         ),
         target="100",
-        metadata={"fixtures": {"solve.jl": _BUGGY_SOLVE}},
+        metadata={
+            "answer": {"printed": "the value it prints"},
+            "fixtures": {"solve.jl": _BUGGY_SOLVE},
+        },
     )
     return Task(
         dataset=[sample],
         solver=makker_solver(),
         scorer=[
-            numeric_close(100.0, 0.5),
+            numeric_close(100.0, 0.5, key="printed"),
             used_tools(["edit_file", "run_julia"]),
             no_repeated_identical_calls(),
             no_unresolvable_path_in_julia(),
@@ -192,13 +196,14 @@ def filesystem_save() -> Task:
             "them one per line to a file `results/cubes.txt` in the workspace. "
             "Reply with the largest cube."
         ),
+        metadata={"answer": {"largest_cube": "the largest cube"}},
         target="125",
     )
     return Task(
         dataset=[sample],
         solver=makker_solver(),
         scorer=[
-            numeric_close(125.0, 0.5),
+            numeric_close(125.0, 0.5, key="largest_cube"),
             workspace_file_exists("results/cubes.txt"),
             used_any_tool(["write_file", "run_julia"]),
             no_unresolvable_path_in_julia(),
@@ -227,13 +232,14 @@ def filesystem_project() -> Task:
             "digits=4)`. Run `main.jl` in the Julia session with `include` and "
             "report the printed value."
         ),
+        metadata={"answer": {"printed": "the value it prints"}},
         target="78.5398",
     )
     return Task(
         dataset=[sample],
         solver=makker_solver(),
         scorer=[
-            numeric_close(78.5398, 0.01),
+            numeric_close(78.5398, 0.01, key="printed"),
             used_tools(["write_file", "run_julia"]),
             workspace_file_exists("src/geom.jl"),
             workspace_file_exists("main.jl"),
@@ -263,13 +269,13 @@ def filesystem_transform() -> Task:
             "workspace, and report the total."
         ),
         target="180",
-        metadata={"fixtures": {"data/raw.txt": _RAW_NUMBERS}},
+        metadata={"answer": {"total": "the total"}, "fixtures": {"data/raw.txt": _RAW_NUMBERS}},
     )
     return Task(
         dataset=[sample],
         solver=makker_solver(),
         scorer=[
-            numeric_close(180.0, 0.5),
+            numeric_close(180.0, 0.5, key="total"),
             workspace_file_exists("data/total.txt"),
             used_any_tool(["read_file", "run_julia"]),
             no_unresolvable_path_in_julia(),
