@@ -69,7 +69,7 @@ whichever interface you use:
 - **Terminal UI:** `/key` shows the same status; `/key <provider>` opens a
   prompt to set or replace one.
 - **Web UI:** if the selected model has no key, a dialog asks for it before the
-  session starts; the top-bar **Keys** button opens the same dialog any time.
+  session starts; **API keys…** in the model menu opens the same dialog any time.
 
 Because the process environment and a project `.env` take precedence over the
 saved file, a key set there shadows the saved one. The status views flag this

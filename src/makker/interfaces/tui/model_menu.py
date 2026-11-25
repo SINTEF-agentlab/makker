@@ -45,21 +45,14 @@ def _matches(model: ModelInfo, needle: str) -> bool:
 
 
 def _render_model(model: ModelInfo, *, current: str | None) -> Text:
-    """One row: the model's name, then its window, whether it runs here, and any
-    note (``not pulled``, ``deprecated``)."""
-    from makker.context_panel import format_tokens
-
+    """One row: the model's name, and its note if it has one (``not pulled``,
+    ``deprecated``)."""
     text = Text()
     marker = "● " if model.id == current else "  "
     text.append(marker, style="cyan" if model.id == current else "")
     text.append(model.label)
-    details = [
-        format_tokens(model.window) if model.window else "",
-        "local" if model.local else "",
-        model.note,
-    ]
-    if detail := " · ".join(d for d in details if d):
-        text.append(f"  {detail}", style="dim")
+    if model.note:
+        text.append(f"  {model.note}", style="dim")
     return text
 
 

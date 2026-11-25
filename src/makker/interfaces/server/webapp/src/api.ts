@@ -19,8 +19,6 @@ export interface ModelInfo {
 /** The model menu's short list, from `GET /models/menu`. */
 export interface ModelMenu {
   sections: { title: string; models: ModelInfo[] }[];
-  /** Cloud providers without a key, offered as "Add key" rows. */
-  add_key: { provider: string; label: string }[];
   pinned: string[];
 }
 
@@ -199,7 +197,7 @@ export const api = {
   modelMenu: (current: string | null) =>
     getJSON<ModelMenu>(
       current ? `/models/menu?current=${encodeURIComponent(current)}` : "/models/menu",
-      { sections: [], add_key: [], pinned: [] },
+      { sections: [], pinned: [] },
     ),
 
   pinModel: (model: string, pinned: boolean) =>

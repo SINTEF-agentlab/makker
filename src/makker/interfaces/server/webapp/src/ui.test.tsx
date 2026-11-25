@@ -27,7 +27,6 @@ describe("model control", () => {
       { title: "Recent", models: [luna, qwen] },
       { title: "OpenAI", models: [sol] },
     ],
-    add_key: [{ provider: "anthropic", label: "Anthropic" }],
     pinned: [],
   };
 
@@ -40,12 +39,22 @@ describe("model control", () => {
     fireEvent.click(screen.getByRole("button", { name: "GPT-6 Luna" }));
     const current = await screen.findByRole("menuitemradio", { name: /GPT-6 Luna/ });
     expect(current).toHaveAttribute("aria-checked", "true");
-    expect(current).toHaveTextContent("1.1M");
-    expect(screen.getByRole("menuitemradio", { name: /qwen3.8:27b/ })).toHaveTextContent("local");
-    expect(screen.getByRole("menuitem", { name: /Anthropic/ })).toHaveTextContent("Add key");
+    expect(current).toHaveTextContent(/^GPT-6 Luna$/); // the name alone, no window
+
 
     fireEvent.click(screen.getByRole("menuitemradio", { name: /GPT-6.2 Sol/ }));
     expect(setModel).toHaveBeenCalledWith(sol.id);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("opens the API keys from the menu", async () => {
+    vi.spyOn(api, "modelMenu").mockResolvedValue(menu);
+    const { store } = renderWithStore(<Composer />);
+    act(() => store.setState({ models: [luna], model: luna.id }));
+
+    fireEvent.click(screen.getByRole("button", { name: "GPT-6 Luna" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "API keys…" }));
+    expect(store.getState().apiKeys).toEqual({ open: true, required: null });
     expect(screen.queryByRole("menu")).toBeNull();
   });
 

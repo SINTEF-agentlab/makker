@@ -1,6 +1,6 @@
 // The API-keys modal. It opens on its own when the chosen model needs a provider
 // key the server doesn't have (blocking the session or a model switch), and from
-// the top bar's "Keys" button to change a key at any time. Keys are saved to the
+// the model menu's "API keys…" row to change a key at any time. Keys are saved to the
 // server's global .env via POST /credentials; only masked previews are shown.
 
 import { useEffect, useRef, useState } from "react";

@@ -7,7 +7,6 @@ from pathlib import Path
 from makker.model_choices import (
     NEWEST_PER_PROVIDER,
     load_pinned,
-    missing_keys,
     remember_model,
     set_pinned,
     short_list,
@@ -73,11 +72,6 @@ def test_pins_recents_and_the_current_model_come_first_and_only_once() -> None:
 def test_a_recent_model_missing_from_the_catalog_keeps_its_id() -> None:
     (_, rows), *_ = short_list([], recent=["custom:typed-in"], keyed=_keyed())
     assert rows[0].id == rows[0].label == "custom:typed-in"
-
-
-def test_providers_without_a_key_are_offered_as_add_key_rows() -> None:
-    names = [p.name for p in missing_keys(_keyed("openai"))]
-    assert names == ["anthropic", "google_genai", "openrouter"]
 
 
 def test_pins_are_saved_in_the_user_config_in_order() -> None:
