@@ -628,11 +628,14 @@ class TUIApp(App[None]):
         return self._host.approval
 
     async def action_cycle_approval_mode(self) -> None:
+        # Cycling never answers the card on screen: going from "accept edits" back
+        # to "default" passes through "auto", which would approve it. The new mode
+        # applies from the next tool call; `/approval-mode` resolves a pending card.
         self._approval.mode = self._approval.mode.cycle_next()
         label = self._approval.mode.display_label()
-        await self._note(f"Permission mode: {label}")
+        pending = " (from the next tool call; answer the card above)"
+        await self._note(f"Permission mode: {label}{pending if self._pending_interrupts else ''}")
         self._refresh_prompt_guide()
-        await self._auto_approve_pending_if_allowed()
 
     async def action_interrupt(self) -> None:
         """Ctrl+C: interrupt → copy → double-press to exit.
@@ -680,21 +683,15 @@ class TUIApp(App[None]):
             self._quit_timer = None
 
     async def _auto_approve_pending_if_allowed(self) -> None:
-        """Resume an already-shown approval once a mode change clears it.
+        """Resume an already-shown approval once `/approval-mode` sets a mode that allows it.
 
-        Mirrors the menu-driven path: hide the menu and drop the transient
-        approval cards before resuming so nothing stale lingers in the log.
+        Drops the transient approval cards first so nothing stale lingers in the log.
         """
         if not (self._pending_interrupts and self._should_auto_approve_pending()):
             return
-        self._hide_approval_menu()
         await self._clear_approval_blocks()
-        resume_payload = self._build_resume_payload({"type": "approve"})
-        # Decided: the interrupts are consumed by the payload. Clearing now
-        # keeps the status bar and activity label from reporting an approval
-        # as pending for the whole resumed turn.
-        self._pending_interrupts = []
-        await self._resume_turn(resume_payload)
+        # On the turn worker, like a menu choice, so Ctrl+C can cancel the turn.
+        await self._resume_pending({"type": "approve"})
 
     async def on_approval_menu_selected(self, event: ApprovalMenu.Selected) -> None:
         if not self._pending_interrupts or self._busy:

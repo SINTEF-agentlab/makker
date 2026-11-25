@@ -7,6 +7,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SLASH_COMMANDS, type SlashCommand } from "../controller";
 import { useController, useSel } from "../context";
 import { AttachIcon, SendIcon } from "../icons";
+import { replyDecision } from "../store";
 
 export function Composer() {
   const controller = useController();
@@ -34,8 +35,8 @@ export function Composer() {
   );
   const slashOpen = slashItems.length > 0;
 
-  const placeholder = pending?.allowed.includes("respond")
-    ? "Reply to the agent…"
+  const placeholder = pending && replyDecision(pending.allowed)
+    ? "Tell the agent what to do instead…"
     : "Message Makker…";
 
   // Auto-grow the textarea up to a cap.

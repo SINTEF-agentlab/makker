@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from textual.content import Content
 from textual.widgets import Footer
@@ -39,6 +40,12 @@ _TRICKY_OUTPUT = (
     f"tool_call_id='{_TRICKY_TOOL_ID}', additional_kwargs={{}})]"
 )
 _TRICKY_ARGS = {"code": "[1, 2, 3] .+ 1"}
+
+
+@pytest.fixture(autouse=True)
+def _no_confirm_grace(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Scripted key presses land at once; the grace test below turns it back on.
+    monkeypatch.setattr(ApprovalMenu, "confirm_grace_seconds", 0.0)
 
 
 def _async_return(value):
@@ -201,6 +208,36 @@ async def test_chat_app_approves_pending_interrupt(session: Session) -> None:
         assert "Assistant" in titles
 
     assert len(agent.resume_inputs) == 1
+    assert agent.resume_inputs[0].resume == {"interrupt-1": {"decisions": [{"type": "approve"}]}}
+
+
+async def test_an_enter_as_the_card_appears_answers_nothing(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ApprovalMenu, "confirm_grace_seconds", 60.0)
+    agent = interrupt_agent()
+    app = TUIApp(agent=agent, session=session)
+    async with app.run_test() as pilot:
+        await submit_prompt(pilot, "approve")
+        await pilot.press("enter")
+        assert agent.resume_inputs == []
+        assert app.query_one("#approval-menu", ApprovalMenu).visible
+
+
+async def test_cycling_modes_leaves_the_card_for_the_user(session: Session) -> None:
+    # From "accept edits" back to "default" the cycle passes "auto", which must not
+    # approve the shell command on screen. `/approval-mode auto` is the explicit way.
+    agent = interrupt_agent()
+    app = TUIApp(agent=agent, session=session)
+    async with app.run_test() as pilot:
+        await submit_prompt(pilot, "approve")
+        await pilot.press("shift+tab", "shift+tab")
+        assert app._host.approval_mode == "auto"
+        assert agent.resume_inputs == []
+        assert app.query_one("#approval-menu", ApprovalMenu).visible
+        await submit_prompt(pilot, "/approval-mode auto")
+        await wait_until_ready(app)
+
     assert agent.resume_inputs[0].resume == {"interrupt-1": {"decisions": [{"type": "approve"}]}}
 
 
