@@ -6,6 +6,7 @@ import { registerPanel } from "./canvas/registry";
 import { Canvas } from "./components/Canvas";
 import { Composer } from "./components/Composer";
 import { ContextView } from "./components/Context";
+import { MoreModels } from "./components/Models";
 import { Sidebar } from "./components/Sidebar";
 import { Thread } from "./components/Thread";
 import type { ServerMessage } from "./protocol";
@@ -17,25 +18,68 @@ function drive(store: { getState: () => { handle: (m: ServerMessage) => void } }
   });
 }
 
-describe("model picker", () => {
-  it("retries a failed live refresh without reloading the chat", async () => {
-    const staticModel = { id: "openai:gpt-5.4-mini", label: "gpt-5.4-mini", provider: "openai" };
-    const newModel = { id: "openai:gpt-6-luna", label: "gpt-6-luna", provider: "openai" };
-    const live = vi.spyOn(api, "liveModels")
-      .mockResolvedValueOnce({ models: [] })
-      .mockResolvedValueOnce({ models: [staticModel, newModel] });
+describe("model control", () => {
+  const luna = { id: "openai:gpt-6-luna", label: "GPT-6 Luna", provider: "openai", window: 1_050_000 };
+  const sol = { id: "openai:gpt-6.2-sol", label: "GPT-6.2 Sol", provider: "openai", window: 1_050_000 };
+  const qwen = { id: "ollama:qwen3.8:27b", label: "qwen3.8:27b", provider: "ollama", local: true };
+  const menu = {
+    sections: [
+      { title: "Recent", models: [luna, qwen] },
+      { title: "OpenAI", models: [sol] },
+    ],
+    add_key: [{ provider: "anthropic", label: "Anthropic" }],
+    pinned: [],
+  };
+
+  it("shows the current model and switches from the short list", async () => {
+    vi.spyOn(api, "modelMenu").mockResolvedValue(menu);
+    const { store, controller } = renderWithStore(<Composer />);
+    const setModel = vi.spyOn(controller, "setModel");
+    act(() => store.setState({ models: [luna, sol, qwen], model: luna.id }));
+
+    fireEvent.click(screen.getByRole("button", { name: "GPT-6 Luna" }));
+    const current = await screen.findByRole("menuitemradio", { name: /GPT-6 Luna/ });
+    expect(current).toHaveAttribute("aria-checked", "true");
+    expect(current).toHaveTextContent("1.1M");
+    expect(screen.getByRole("menuitemradio", { name: /qwen3.8:27b/ })).toHaveTextContent("local");
+    expect(screen.getByRole("menuitem", { name: /Anthropic/ })).toHaveTextContent("Add key");
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /GPT-6.2 Sol/ }));
+    expect(setModel).toHaveBeenCalledWith(sol.id);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("opens the menu from /model", async () => {
+    vi.spyOn(api, "modelMenu").mockResolvedValue(menu);
     const { store } = renderWithStore(<Composer />);
-    act(() => store.setState({ models: [staticModel], model: staticModel.id }));
+    act(() => store.setState({ models: [luna], model: luna.id }));
 
     const composer = screen.getByPlaceholderText("Message Makker…");
     fireEvent.change(composer, { target: { value: "/model" } });
     fireEvent.keyDown(composer, { key: "Enter" });
-    await waitFor(() => expect(live).toHaveBeenCalledTimes(1));
-    expect(screen.queryByText("gpt-6-luna")).toBeNull();
+    expect(await screen.findByRole("menu", { name: "Model" })).toBeInTheDocument();
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh list" }));
-    await waitFor(() => expect(screen.getByText("gpt-6-luna")).toBeInTheDocument());
-    live.mockRestore();
+  it("searches the full list, pins, and takes a typed provider:model", async () => {
+    vi.spyOn(api, "liveModels").mockResolvedValue({ models: [luna, sol, qwen] });
+    const pin = vi.spyOn(api, "pinModel").mockResolvedValue({ pinned: [sol.id] });
+    const { store, controller } = renderWithStore(<MoreModels />);
+    const setModel = vi.spyOn(controller, "setModel");
+    act(() => {
+      store.setState({ models: [luna, sol, qwen], model: luna.id });
+      controller.openMoreModels();
+    });
+
+    const search = screen.getByRole("searchbox", { name: "Search models" });
+    fireEvent.change(search, { target: { value: "sol" } });
+    expect(screen.queryByText("GPT-6 Luna")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Pin GPT-6.2 Sol" }));
+    await waitFor(() => expect(pin).toHaveBeenCalledWith(sol.id, true));
+    expect(screen.getByRole("button", { name: "Pin GPT-6.2 Sol" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.change(search, { target: { value: "openrouter:some/model" } });
+    fireEvent.click(screen.getByRole("button", { name: "Use openrouter:some/model" }));
+    expect(setModel).toHaveBeenCalledWith("openrouter:some/model");
   });
 });
 

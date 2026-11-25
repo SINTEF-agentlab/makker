@@ -77,7 +77,8 @@ session can be reopened by id, because conversation state is kept per session.
 If the session is still live on the server (its kernel is
 up), resume reattaches to it with the Julia REPL state intact; if it has since
 been reclaimed, resume restarts the kernel from disk (the conversation and files
-return, in-memory REPL state does not). The response's `kernel_restarted` flag
+return, in-memory REPL state does not) on the model the session last ran, unless
+the request names one. The response's `kernel_restarted` flag
 says which happened. Each session is named from its first prompt and, once the
 first turn finishes, upgraded to a short content-aware title (best-effort; the
 first-prompt name stands if a model call is unavailable). The bundled UI lists
@@ -113,8 +114,10 @@ second is refused while the first is open.
 | `GET` | `/sessions/{id}/memory` | The session's workspace memory, as a page |
 | `POST` | `/sessions/{id}/upload` | Add a file to the session workspace (`uploads/<name>`) |
 | `GET` | `/sessions/{id}/context` | The context view as data: the meter (as in the `context` message), what fills the context part by part, the largest tool results, and how many tool results and compactions were moved out. The TUI's `/context` renders the same report |
-| `GET` | `/models` | List the models that can be selected; also carries `protocol`, the wire-contract version |
-| `GET` | `/models/live` | Refresh the model list from configured provider APIs (best effort; API-listed tool support is unverified) |
+| `GET` | `/models` | List the models that can be selected, newest first per provider, each with `label`, `window` and `local`; also carries `protocol`, the wire-contract version |
+| `GET` | `/models/live` | The same list refreshed from configured provider APIs and the Ollama daemon (best effort; API-listed tool support is unverified) |
+| `GET` | `/models/menu?current=` | The model menu's short list: `sections` (pinned, recent, the newest per provider with a key, installed local models), `add_key` (providers without a key) and `pinned` |
+| `POST` | `/models/pinned` | Pin a model to the top of the menu, or unpin it: `{"model", "pinned"}` |
 | `GET` | `/models/window` | A model's context window: `window`, `window_source` (`provider`, `ollama` or `assumed`) and `compact_at` |
 | `GET` | `/credentials` | Which providers have keys, and whether a shell variable shadows a saved one |
 | `POST` | `/credentials` | Save a provider API key (used by the missing-key prompt) |

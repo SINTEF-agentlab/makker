@@ -668,8 +668,95 @@ details.block .body {
   max-width: var(--maxw);
   margin: 0.3rem auto 0;
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   min-height: 1.5rem;
+}
+
+/* The model control: the current model, and its menu opening upwards. */
+.model-control {
+  position: relative;
+}
+.model-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.45rem;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.model-btn:hover,
+.model-btn:focus-visible,
+.model-btn[aria-expanded="true"] {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.model-menu {
+  position: absolute;
+  bottom: calc(100% + 0.4rem);
+  left: 0;
+  z-index: 20;
+  width: min(22rem, 90vw);
+  max-height: min(60vh, 30rem);
+  overflow-y: auto;
+  padding: 0.3rem 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+.model-menu-title {
+  padding: 0.45rem 0.8rem 0.15rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.35rem 0.8rem 0.35rem 0.5rem;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+.model-row:hover,
+.model-row:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}
+.model-check {
+  display: inline-grid;
+  place-items: center;
+  width: 1rem;
+  flex: none;
+  color: var(--accent);
+}
+.model-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-detail {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.model-more {
+  margin-top: 0.3rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
 }
 
 /* How full the context is, as a ring; amber, then red, as compaction nears. */
@@ -745,31 +832,3 @@ details.block .body {
   padding: 0.45rem 0.8rem 0.2rem;
 }
 /* The model picker can be long, so let it scroll. */
-.model-menu {
-  max-height: min(60vh, 28rem);
-  overflow-y: auto;
-}
-.model-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.model-head button {
-  color: var(--accent);
-  background: none;
-  border: 0;
-  cursor: pointer;
-  font: inherit;
-  text-transform: none;
-}
-.model-head button:disabled {
-  color: var(--muted);
-  cursor: default;
-}
-.model-provider {
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  color: var(--muted);
-  padding: 0.35rem 0.8rem 0.1rem;
-  text-transform: capitalize;
-}

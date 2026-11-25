@@ -865,3 +865,80 @@ body.canvas-resizing iframe {
   overflow: auto;
   margin: 0;
 }
+
+/* The full model list: a search over the catalog, with pins. */
+.more-models {
+  display: flex;
+  flex-direction: column;
+  height: min(80vh, 40rem);
+  overflow: hidden;
+}
+.more-search {
+  margin: 0.2rem 0 0.6rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+.more-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.more-list {
+  flex: 1;
+  overflow-y: auto;
+  margin: 0 -0.5rem;
+}
+.more-row {
+  display: flex;
+  align-items: center;
+  border-radius: 6px;
+}
+.more-row:hover {
+  background: var(--surface-2);
+}
+.more-row.current .model-name {
+  color: var(--accent);
+}
+.more-pick {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+.more-pin {
+  display: inline-grid;
+  place-items: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+}
+.more-row:hover .more-pin,
+.more-pin:focus-visible,
+.more-pin.on {
+  opacity: 1;
+}
+.more-pin.on {
+  color: var(--accent);
+}
+.more-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 0.5rem;
+}

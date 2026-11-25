@@ -254,16 +254,17 @@ Model ids are `provider:model` strings. Resolution precedence: `--model`
 flag, workspace config, user config (`Ctrl+A` in the selector), the
 `MAKKER_MODEL` environment variable, then the default.
 
-`/model` opens the selector: bundled OpenAI, Anthropic, Google, OpenRouter, and Ollama
-models, plus anything `init_chat_model` supports typed as `provider:model`.
-Switching mid-session keeps the conversation. Missing API keys are prompted
+`/model` opens the selector on a short list: pinned and recent models, the
+newest of each provider you have a key for, and installed local models. Typing
+searches every model, and anything `init_chat_model` supports can be typed as
+`provider:model`. Switching mid-session keeps the conversation. Missing API keys are prompted
 for and saved to a user-global `.env` (never to config files).
 
 ### Local models (Ollama)
 
-Pick an `ollama:` model in the selector. No key is needed. The list shows
-recommended models, your installed ones, and Ollama Cloud models, and pulls
-anything missing. Requirements and caveats:
+Pick an `ollama:` model in the selector. No key is needed. Your installed
+models are on the short list; searching finds the recommended ones and Ollama
+Cloud models, and the selector pulls anything missing. Requirements and caveats:
 
 - The model must support tool calling (`ollama show <model>` lists `tools`
   under Capabilities). Keep Ollama itself current: an outdated Ollama can

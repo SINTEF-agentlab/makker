@@ -1,7 +1,8 @@
 """Modal dialogs for selecting a model, entering an API key, and pulling a model.
 
-``ModelMenu`` lists discovered models grouped by provider; plus a "Recent"
-section; and accepts any ``provider:model`` typed in; it returns
+``ModelMenu`` opens on the short list the web's model menu shows too (pinned,
+recent, the newest per provider, installed local models); typing searches the
+whole catalog, and any ``provider:model`` typed in is accepted. It returns
 ``(model_id, scope)``. ``ApiKeyModal`` collects a provider key when one is
 missing. ``OllamaPullModal`` pulls a local model. The caller (``app.TUIApp``)
 applies the resulting switch.
@@ -20,29 +21,19 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, ProgressBar, Static
 from textual.widgets.option_list import Option, OptionDoesNotExist
 
+from makker.model_choices import load_pinned, short_list
 from makker.models import (
-    OLLAMA_CLOUD,
     PROVIDERS,
-    RECOMMENDED_OLLAMA_LOCAL,
     ModelInfo,
     discover_available_models,
     discover_models,
+    discover_ollama_models,
     provider_of,
 )
 from makker.ollama_client import PullProgress
 from makker.recent_models import load_recent_models
 
 ModelChoice = tuple[str, str]
-
-# Recent rows duplicate a model that also appears in its provider section, so
-# their OptionList ids are namespaced to stay unique; ``_model_id`` undoes it.
-_RECENT_PREFIX = "recent::"
-
-
-def _model_id(option_id: str | None) -> str | None:
-    if option_id is None:
-        return None
-    return option_id.removeprefix(_RECENT_PREFIX)
 
 
 def _matches(model: ModelInfo, needle: str) -> bool:
@@ -53,16 +44,22 @@ def _matches(model: ModelInfo, needle: str) -> bool:
     )
 
 
-def _render_model(model: ModelInfo, *, current: str | None, full_id: bool = False) -> Text:
-    """One catalog row. ``full_id`` shows ``provider:model`` (for cross-provider
-    rows like Recent); otherwise just the model name, since the provider header
-    already gives the context."""
+def _render_model(model: ModelInfo, *, current: str | None) -> Text:
+    """One row: the model's name, then its window, whether it runs here, and any
+    note (``not pulled``, ``deprecated``)."""
+    from makker.context_panel import format_tokens
+
     text = Text()
     marker = "● " if model.id == current else "  "
     text.append(marker, style="cyan" if model.id == current else "")
-    text.append(model.id if full_id else model.label)
-    if model.note:
-        text.append(f"  — {model.note}", style="dim italic")
+    text.append(model.label)
+    details = [
+        format_tokens(model.window) if model.window else "",
+        "local" if model.local else "",
+        model.note,
+    ]
+    if detail := " · ".join(d for d in details if d):
+        text.append(f"  {detail}", style="dim")
     return text
 
 
@@ -116,6 +113,7 @@ class ModelMenu(ModalScreen[ModelChoice | None]):
         super().__init__()
         self._current = current
         self._recent: list[str] = load_recent_models()
+        self._pinned: list[str] = load_pinned()
         self._catalog = discover_models()
         # Ollama ships no static profiles, so its models are discovered from the
         # daemon by a worker after mount; empty until (and unless) it answers.
@@ -125,7 +123,7 @@ class ModelMenu(ModalScreen[ModelChoice | None]):
         with Vertical(id="model-menu"):
             yield Static("Select a model", id="model-menu-title")
             yield Input(
-                placeholder="Filter, or type any provider:model and press Enter",
+                placeholder="Search all models, or type provider:model",
                 id="model-filter",
             )
             yield OptionList(id="model-options")
@@ -149,47 +147,28 @@ class ModelMenu(ModalScreen[ModelChoice | None]):
             self._populate(self.query_one("#model-filter", Input).value, keep_highlight=True)
 
     async def _discover_ollama(self) -> None:
-        """Merge locally-installed Ollama models into the catalog, best-effort."""
-        from makker import ollama_client
-
+        """Merge Ollama's models into the catalog, best-effort."""
         try:
-            names = await ollama_client.installed_models()
+            self._ollama = await discover_ollama_models()
         except Exception:  # daemon down or unreachable; leave Ollama out
             return
-        if not names:
-            return
-        self._ollama = [ModelInfo(f"ollama:{name}", name) for name in names]
-        if self.is_mounted:
+        if self._ollama and self.is_mounted:
             self._populate(self.query_one("#model-filter", Input).value, keep_highlight=True)
 
-    def _sections(self) -> list[tuple[str, list[ModelInfo]]]:
-        """``(header, models)`` sections in display order: Recent, cloud providers,
-        then Ollama local (installed + recommended-to-pull) and Ollama cloud."""
+    def _sections(self, needle: str) -> list[tuple[str, list[ModelInfo]]]:
+        """``(header, models)`` in display order: the short list, or with a search,
+        every matching model by provider."""
+        if not needle:
+            models = [m for group in self._catalog.values() for m in group] + self._ollama
+            return short_list(
+                models, current=self._current, pinned=self._pinned, recent=self._recent
+            )
         sections: list[tuple[str, list[ModelInfo]]] = []
-        if self._recent:
-            sections.append(("Recent", [ModelInfo(mid, mid) for mid in self._recent]))
-        catalog = self._catalog
         for provider, info in PROVIDERS.items():
-            if info.local:
-                continue  # Ollama handled below as local + cloud
-            if models := list(catalog.get(provider, ())):
-                sections.append((info.label, models))
-        if local := self._ollama_local_models():
-            sections.append(("Ollama (local)", local))
-        sections.append(
-            ("Ollama (cloud)", [ModelInfo(f"ollama:{tag}", tag) for tag in OLLAMA_CLOUD])
-        )
+            models = self._ollama if info.local else self._catalog.get(provider, [])
+            if visible := [m for m in models if _matches(m, needle)]:
+                sections.append(("Ollama" if info.local else info.label, visible))
         return sections
-
-    def _ollama_local_models(self) -> list[ModelInfo]:
-        """Installed local models (daemon-discovered) plus recommended ones not yet
-        pulled, marked so Enter triggers an in-app pull."""
-        models = list(self._ollama)
-        installed_bases = {m.label.split(":", 1)[0] for m in self._ollama}
-        for tag in RECOMMENDED_OLLAMA_LOCAL:
-            if tag.split(":", 1)[0] not in installed_bases:
-                models.append(ModelInfo(f"ollama:{tag}", tag, "not pulled · Enter to pull"))
-        return models
 
     def _populate(self, filter_text: str, *, keep_highlight: bool = False) -> None:
         """List the models matching ``filter_text``, highlighting the first.
@@ -201,34 +180,22 @@ class ModelMenu(ModalScreen[ModelChoice | None]):
         previous = options.highlighted_option.id if options.highlighted_option else None
         options.clear_options()
         raw = filter_text.strip()
-        needle = raw.lower()
-        sections = self._sections()
+        sections = self._sections(raw.lower())
 
         # Free-text row: any provider:model not already listed (ids must be unique).
-        listed = {model.id for header, models in sections if header != "Recent" for model in models}
+        listed = {model.id for _, models in sections for model in models}
         first_enabled: int | None = None
         if ":" in raw and raw not in listed:
             options.add_option(Option(Text.assemble(("Use ", "bold"), (raw, "bold cyan")), id=raw))
             first_enabled = 0
 
-        added: set[str] = set()
         for header, models in sections:
-            is_recent = header == "Recent"
-            rows = []
-            for model in models:
-                option_id = f"{_RECENT_PREFIX}{model.id}" if is_recent else model.id
-                # A used Ollama cloud model is also installed locally: list it once.
-                if option_id in added or not _matches(model, needle):
-                    continue
-                added.add(option_id)
-                row = _render_model(model, current=self._current, full_id=is_recent)
-                rows.append(Option(row, id=option_id))
-            if not rows:
-                continue
             options.add_option(Option(Text(header, style="bold"), disabled=True))
             if first_enabled is None:
                 first_enabled = options.option_count
-            options.add_options(rows)
+            options.add_options(
+                Option(_render_model(model, current=self._current), id=model.id) for model in models
+            )
 
         highlight = first_enabled
         if keep_highlight and previous is not None:
@@ -245,9 +212,8 @@ class ModelMenu(ModalScreen[ModelChoice | None]):
         self._confirm("workspace")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        model_id = _model_id(event.option.id)
-        if model_id:
-            self._select(model_id, "workspace")
+        if event.option.id:
+            self._select(event.option.id, "workspace")
 
     def on_key(self, event) -> None:
         # While the filter input holds focus, ↑/↓ still drive the option list.
@@ -275,7 +241,7 @@ class ModelMenu(ModalScreen[ModelChoice | None]):
         options = self.query_one("#model-options", OptionList)
         if options.highlighted is None:
             return None
-        return _model_id(options.get_option_at_index(options.highlighted).id)
+        return options.get_option_at_index(options.highlighted).id
 
     def _select(self, model_id: str, scope: str) -> None:
         self.dismiss((model_id, scope))

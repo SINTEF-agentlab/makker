@@ -7,12 +7,19 @@ code change.
 ## Selection
 
 Precedence, highest first: the `--model` flag, the workspace config, the
-user config, `$MAKKER_MODEL`, the built-in default.
+user config, `$MAKKER_MODEL`, the built-in default. A resumed session runs
+the model it last ran.
 
-In the web UI, `/model` opens the model picker with OpenAI, Anthropic, Google,
-OpenRouter, and Ollama entries. You can also type `/model provider:model` to
-use another model ID. Switching mid-session keeps the conversation (see
-[context handling](context.md)).
+In the web UI the current model is shown under the message box. Its menu
+lists your pinned and recent models, the three newest models of each provider
+you have a key for, and your installed local models. **More models…** searches
+everything, pins a model to the top of the menu, and takes any
+`provider:model` typed in. `/model` opens the same menu, and
+`/model provider:model` switches directly. In the terminal, `/model` opens the
+same short list, and typing searches everything.
+
+A switch keeps the conversation (see [context handling](context.md)) and is
+saved for the workspace, so the next session there starts on it.
 
 Providers beyond the bundled five work once their LangChain package is
 installed, and Makker names the exact package when it is missing.

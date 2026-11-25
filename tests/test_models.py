@@ -73,8 +73,25 @@ def test_discovery_groups_real_models_by_provider() -> None:
         for model in models:
             assert model.provider == provider
             assert model.id.startswith(f"{provider}:")
-            # The label is the bare model name (no provider prefix).
-            assert model.label == model.id.partition(":")[2]
+        # Newest first: release dates never increase down the list.
+        dates = [model.released for model in models if model.released]
+        assert dates == sorted(dates, reverse=True), provider
+
+
+def test_discovery_reads_names_windows_and_status_from_the_data() -> None:
+    from makker import models
+
+    profiles = models._load_profiles(PROVIDERS["openai"].package)
+    name, profile = next(
+        (n, p)
+        for n, p in profiles.items()
+        if p.get("name") and p.get("max_input_tokens") and p.get("tool_calling")
+    )
+    info = next(m for m in discover_models()["openai"] if m.id == f"openai:{name}")
+    assert info.label == profile["name"]
+    assert info.window == profile["max_input_tokens"]
+    assert info.released == profile.get("release_date")
+    assert info.deprecated == (profile.get("status") == "deprecated")
 
 
 def test_discovery_includes_the_default_model() -> None:
@@ -87,13 +104,14 @@ def test_openrouter_profile_uses_installed_provider_data(monkeypatch) -> None:
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "router-key")
     profiles = models._load_profiles(PROVIDERS["openrouter"].package)
-    info = next(
-        info
+    name = next(
+        info.id.partition(":")[2]
         for info in discover_models()["openrouter"]
-        if profiles[info.label].get("max_input_tokens")
+        if profiles[info.id.partition(":")[2]].get("max_input_tokens")
     )
-    assert models.model_profile(info.id)["tool_calling"] is True
-    assert models.context_window(info.id) == profiles[info.label]["max_input_tokens"]
+    model_id = f"openrouter:{name}"
+    assert models.model_profile(model_id)["tool_calling"] is True
+    assert models.context_window(model_id) == profiles[name]["max_input_tokens"]
 
 
 def test_live_discovery_adds_new_ids_without_replacing_profiles(monkeypatch) -> None:

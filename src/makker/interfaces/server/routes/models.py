@@ -46,21 +46,21 @@ def _installed_branding() -> dict[str, Any] | None:
     }
 
 
+class PinRequest(BaseModel):
+    model: str
+    pinned: bool
+
+
 @router.get("/models")
 def list_models(defaults: DefaultsDep) -> dict[str, Any]:
     from makker.models import DEFAULT_MODEL, PROVIDERS, discover_models
 
-    # The selectable models for the UI's model picker (provider profile data,
-    # no model instantiation), grouped flat with their provider.
-    models = [
-        {"id": info.id, "label": info.label, "provider": provider, "note": info.note}
-        for provider, infos in discover_models().items()
-        for info in infos
-    ]
+    # Every model the provider data lists, newest first per provider. Read from
+    # the bundled data with no model instantiation, so it is fast at page load.
+    models = [info.to_wire() for infos in discover_models().values() for info in infos]
     # Report the server's actual default: the launch ``--model`` if one was given,
     # else the catalog default. The UI seeds its model from this, so it must match
-    # what new sessions use, or the UI would show the wrong model, query the wrong
-    # context window, and resume a from-disk session onto the catalog default.
+    # what new sessions use.
     return {
         "default": defaults.model or DEFAULT_MODEL,
         "providers": sorted(PROVIDERS),
@@ -72,17 +72,49 @@ def list_models(defaults: DefaultsDep) -> dict[str, Any]:
 
 
 @router.get("/models/live")
-def list_live_models() -> dict[str, Any]:
-    """Refresh the selector from provider APIs without delaying page startup."""
-    from makker.models import discover_available_models
+async def list_live_models() -> dict[str, Any]:
+    """The full catalog refreshed from provider APIs and the Ollama daemon, for
+    the "More models" list. Slower than ``/models``, so the page asks lazily."""
+    import asyncio
 
+    from makker.models import discover_available_models, discover_ollama_models
+
+    cloud = await asyncio.to_thread(discover_available_models)
+    local = await discover_ollama_models()
+    models = [info for infos in cloud.values() for info in infos] + local
+    return {"models": [info.to_wire() for info in models]}
+
+
+@router.get("/models/menu")
+async def model_menu(current: str | None = None) -> dict[str, Any]:
+    """The model menu's short list: pinned, recent, the newest per provider with
+    a key, installed local models, and the providers that still need a key."""
+    from makker.credentials import load_user_credentials
+    from makker.model_choices import load_pinned, missing_keys, short_list
+    from makker.models import discover_models, discover_ollama_models
+    from makker.recent_models import load_recent_models
+
+    load_user_credentials()
+    models = [info for infos in discover_models().values() for info in infos]
+    models += await discover_ollama_models()
+    sections = short_list(
+        models, current=current, pinned=load_pinned(), recent=load_recent_models()
+    )
     return {
-        "models": [
-            {"id": info.id, "label": info.label, "provider": provider, "note": info.note}
-            for provider, infos in discover_available_models().items()
-            for info in infos
-        ]
+        "sections": [
+            {"title": title, "models": [m.to_wire() for m in rows]} for title, rows in sections
+        ],
+        "add_key": [{"provider": p.name, "label": p.label} for p in missing_keys()],
+        "pinned": load_pinned(),
     }
+
+
+@router.post("/models/pinned")
+def pin_model(req: PinRequest) -> dict[str, Any]:
+    """Pin a model to the top of the menu, or unpin it."""
+    from makker.model_choices import set_pinned
+
+    return {"pinned": set_pinned(req.model, req.pinned)}
 
 
 @router.get("/models/window")

@@ -514,8 +514,13 @@ class SessionHost:
         all_extensions = [*discover_extensions(), *extensions] if discover else list(extensions)
         dependency_paths = collect_dependency_paths(all_extensions)
         workspace_config = load_workspace_config(ws)
-        # Model precedence is resolved here, once, for every front end:
-        # explicit request > workspace config > user config > env > default.
+        # Model precedence is resolved here, once, for every front end: explicit
+        # request > the model a resumed session last ran > workspace config >
+        # user config > env > default.
+        if model is None and resume and session_id:
+            from makker.session import recorded_model
+
+            model = recorded_model(session_dir(session_id, state_root=state_root))
         resolved_model = resolve_model(
             model,
             workspace_model=workspace_config.model,

@@ -20,6 +20,8 @@ class UserConfig:
     """Contents of the user-global ``config.toml``. Empty is fine."""
 
     model: str | None = None
+    # Models pinned to the top of the model menu, in the order pinned.
+    pinned_models: tuple[str, ...] = ()
 
 
 def load_user_config() -> UserConfig:
@@ -31,7 +33,13 @@ def load_user_config() -> UserConfig:
 
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     model = data.get("model")
-    return UserConfig(model=model if isinstance(model, str) else None)
+    pinned = data.get("pinned_models")
+    return UserConfig(
+        model=model if isinstance(model, str) else None,
+        pinned_models=tuple(m for m in pinned if isinstance(m, str))
+        if isinstance(pinned, list)
+        else (),
+    )
 
 
 def write_user_config(config: UserConfig) -> Path:
@@ -40,11 +48,14 @@ def write_user_config(config: UserConfig) -> Path:
     path = user_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    from makker.workspace import toml_basic_string
+
     lines: list[str] = []
     if config.model:
-        from makker.workspace import toml_basic_string
-
         lines.append(f"model = {toml_basic_string(config.model)}")
+    if config.pinned_models:
+        pinned = ", ".join(toml_basic_string(m) for m in config.pinned_models)
+        lines.append(f"pinned_models = [{pinned}]")
 
     body = "\n".join(lines)
     path.write_text(body + "\n" if body else "", encoding="utf-8")

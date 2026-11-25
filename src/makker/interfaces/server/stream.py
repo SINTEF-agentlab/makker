@@ -292,6 +292,11 @@ class _SessionStream:
                     await self._send(protocol.error_to_wire(problem))
                     return
                 self._host.reconfigure(model=arg)
+                from makker.model_choices import remember_model
+                from makker.paths import workspace_root
+
+                # Saved like the terminal's switch: the next session here starts on it.
+                remember_model(arg, workspace=self._host.workspace or workspace_root())
                 # The page shows the switch only once it has taken effect.
                 await self._send(protocol.model_to_wire(self._host.model))
                 await self._send_context()

@@ -174,6 +174,9 @@ export interface SessionState {
   versions: VersionInfo | null;
   model: string | null;
   models: ModelInfo[];
+  // the model menu under the message box, or the full list it opens
+  modelMenu: "closed" | "menu" | "more";
+  pinned: string[];
   meta: string;
   // status
   busy: boolean;
@@ -213,6 +216,7 @@ export interface SessionActions {
   setConfig: (patch: Partial<SessionState>) => void;
   setSession: (id: string, meta: string) => void;
   setModel: (model: string) => void;
+  setModelMenu: (state: SessionState["modelMenu"]) => void;
   setContextView: (patch: Partial<SessionState["contextView"]>) => void;
   setHistory: (history: HistoryEntry[]) => void;
   setWarming: (on: boolean) => void;
@@ -252,6 +256,8 @@ const initialState: SessionState = {
   versions: null,
   model: null,
   models: [],
+  modelMenu: "closed",
+  pinned: [],
   meta: "",
   busy: false,
   warming: false,
@@ -648,6 +654,7 @@ export function createSessionStore() {
       setConfig: (patch) => set(patch),
       setSession: (id, meta) => set({ sessionId: id, meta }),
       setModel: (model) => set({ model }),
+      setModelMenu: (modelMenu) => set({ modelMenu }),
       setContextView: (patch) => set((s) => ({ contextView: { ...s.contextView, ...patch } })),
       setHistory: (history) => set({ history }),
       setWarming: (on) => set({ warming: on }),
@@ -666,6 +673,7 @@ export function createSessionStore() {
           versions: s.versions,
           model: s.model,
           models: s.models,
+          pinned: s.pinned,
           history: s.history,
           // key status is account-wide, not per-session; keep it across a reset
           credentials: s.credentials,

@@ -10,6 +10,18 @@ export interface ModelInfo {
   label: string;
   provider: string;
   note?: string | null;
+  /** Input context in tokens, when the provider data reports it. */
+  window?: number | null;
+  /** Runs on this machine. */
+  local?: boolean;
+}
+
+/** The model menu's short list, from `GET /models/menu`. */
+export interface ModelMenu {
+  sections: { title: string; models: ModelInfo[] }[];
+  /** Cloud providers without a key, offered as "Add key" rows. */
+  add_key: { provider: string; label: string }[];
+  pinned: string[];
 }
 
 export interface SimDetails {
@@ -183,6 +195,15 @@ export const api = {
     getJSON<ModelsResponse>("/models", { default: null, providers: [], models: [] }),
 
   liveModels: () => getJSON<{ models: ModelInfo[] }>("/models/live", { models: [] }),
+
+  modelMenu: (current: string | null) =>
+    getJSON<ModelMenu>(
+      current ? `/models/menu?current=${encodeURIComponent(current)}` : "/models/menu",
+      { sections: [], add_key: [], pinned: [] },
+    ),
+
+  pinModel: (model: string, pinned: boolean) =>
+    postJSON<{ pinned: string[] }>("/models/pinned", { model, pinned }),
 
   credentials: async (): Promise<CredentialInfo[]> => {
     const data = await getJSON<{ path: string; providers: CredentialInfo[] }>(

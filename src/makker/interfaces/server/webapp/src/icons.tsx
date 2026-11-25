@@ -144,3 +144,28 @@ export function RegenerateIcon() {
     </svg>
   );
 }
+
+export function ChevronDown() {
+  return (
+    <svg viewBox="0 0 24 24" width="12" height="12" {...stroke}>
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
+export function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" {...stroke}>
+      <path d="M5 12l5 5 9-10" />
+    </svg>
+  );
+}
+
+/** Filled when the model is pinned to the top of the model menu. */
+export function StarIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" {...stroke} fill={filled ? "currentColor" : "none"}>
+      <path d="M12 3l2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 16.8 6.6 19.7l1.1-6.1-4.5-4.2 6.1-.8z" />
+    </svg>
+  );
+}
