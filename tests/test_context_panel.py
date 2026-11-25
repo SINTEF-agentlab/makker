@@ -47,6 +47,11 @@ def test_format_tokens_scales() -> None:
     assert format_tokens(1_400) == "1.4k"
     assert format_tokens(29_400) == "29k"
     assert format_tokens(1_200_000) == "1.2M"
+    # A window keeps the size it is known by, and is not rounded up.
+    assert format_tokens(65_536) == "64k"
+    assert format_tokens(1_048_576) == "1M"
+    assert format_tokens(1_050_000) == "1.05M"
+    assert format_tokens(2_000_000) == "2M"
 
 
 def test_a_request_is_measured_part_by_part() -> None:

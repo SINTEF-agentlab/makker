@@ -9,6 +9,15 @@ describe("formatTokens", () => {
     expect(formatTokens(10000)).toBe("10k");
     expect(formatTokens(24000)).toBe("24k");
   });
+
+  it("names a size in units of 1024 as it is known, and keeps two decimals of millions", () => {
+    expect(formatTokens(65_536)).toBe("64k");
+    expect(formatTokens(262_144)).toBe("256k");
+    expect(formatTokens(1_048_576)).toBe("1M");
+    expect(formatTokens(1_050_000)).toBe("1.05M");
+    expect(formatTokens(1_200_000)).toBe("1.2M");
+    expect(formatTokens(65_500)).toBe("66k");
+  });
 });
 
 describe("fmtNum", () => {
