@@ -437,4 +437,5 @@ def _quote_block(text: str) -> str:
 
 
 def _prefer_fenced_preview(tool_name: str) -> bool:
-    return tool_name in {"run_julia", "read_file"}
+    # Program output is literal text: as Markdown, `__init__.py` turns bold.
+    return tool_name in {"run_julia", "read_file", "execute"}

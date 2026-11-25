@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import os
+import signal
 import sys
 from typing import TYPE_CHECKING
 
@@ -306,6 +307,10 @@ def run(args: argparse.Namespace) -> int:
         uvicorn.Config(app, host=args.host, port=args.port, timeout_graceful_shutdown=5)
     )
     updater.bind_server(lambda: setattr(server, "should_exit", True))
+    if hasattr(signal, "SIGHUP"):
+        # A closed terminal shuts down like SIGTERM (which uvicorn handles), so
+        # every session's kernel and Xvfb are stopped rather than left running.
+        signal.signal(signal.SIGHUP, lambda *_: setattr(server, "should_exit", True))
     try:
         server.run()
     except KeyboardInterrupt:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
+import signal
 import sys
 from typing import Any
 
@@ -125,6 +127,8 @@ def dispatch(args: argparse.Namespace) -> int:
         # dumping a traceback.
         print("\nStartup interrupted.", file=sys.stderr)
         return 130
+    except asyncio.CancelledError:  # SIGTERM or SIGHUP; the session is closed
+        return 1
 
 
 class _ResumeError(Exception):
@@ -189,6 +193,22 @@ def _pick_session(limit: int = 15) -> str:
     return sessions[index - 1].session_id
 
 
+def _cancel_on_hangup() -> None:
+    """Cancel the running task on SIGTERM or SIGHUP (its terminal closed, say).
+
+    Either signal otherwise ends the process on the spot, skipping the cleanup
+    that stops the Julia kernel and the session's Xvfb, which outlives us: an X
+    server resets on SIGHUP rather than exiting. Cancelling runs that cleanup.
+    """
+    loop = asyncio.get_running_loop()
+    task = asyncio.current_task()
+    for name in ("SIGTERM", "SIGHUP"):
+        sig = getattr(signal, name, None)
+        if sig is not None and task is not None:
+            with contextlib.suppress(NotImplementedError, RuntimeError):  # Windows
+                loop.add_signal_handler(sig, task.cancel)
+
+
 async def _run_session(
     args: argparse.Namespace,
     adapter: Any,
@@ -196,6 +216,7 @@ async def _run_session(
     *,
     resume_id: str | None = None,
 ) -> int:
+    _cancel_on_hangup()
     from makker.agent.approval import parse_approval_mode
     from makker.credentials import missing_credential
     from makker.display import can_open_windows

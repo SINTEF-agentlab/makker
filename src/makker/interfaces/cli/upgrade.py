@@ -96,7 +96,7 @@ def run(args: argparse.Namespace) -> int:
         code = _run_uv_tool_upgrade()
         if code != 0 or os.name == "nt":
             return code
-        return _env_step_with_new_install(ws)
+        return _env_step_with_new_install(ws, args)
 
     if newer and info.method == "editable":
         where = f" (in {info.location})" if info.location else ""
@@ -298,8 +298,9 @@ def upgrade_workspace(adapter, ws: Path, project: Path, sim: str, *, sysimage: b
     return not sysimage or _build_sysimage(adapter, ws, project, load_workspace_config(ws))
 
 
-def _env_step_with_new_install(ws: Path) -> int:
-    """Run the environment update with the newly installed Makker."""
+def _env_step_with_new_install(ws: Path, args: argparse.Namespace) -> int:
+    """Run the environment update with the newly installed Makker, passing on
+    the flags that step reads."""
 
     # The launcher this process started from: uv has just upgraded it in place.
     # Looking it up on PATH instead could find another install entirely, so when
@@ -310,10 +311,13 @@ def _env_step_with_new_install(ws: Path) -> int:
         command = [str(launcher)]
     else:
         command = [sys.executable, "-m", "makker"]
+    flags = ["--workspace", str(ws)]
+    if args.state_home is not None:
+        flags += ["--state-home", str(args.state_home.resolve())]
+    if args.sysimage is not None:
+        flags += ["--sysimage", args.sysimage]
     print("\n$ makker upgrade --env-only", flush=True)
-    return subprocess.run(
-        [*command, "upgrade", "--env-only", "--workspace", str(ws)], check=False
-    ).returncode
+    return subprocess.run([*command, "upgrade", "--env-only", *flags], check=False).returncode
 
 
 def _run_uv_tool_upgrade() -> int:

@@ -249,3 +249,14 @@ def test_empty_ls_and_glob_report_no_entries() -> None:
     assert compact_tool_summary("glob", {"pattern": "*.jl"}, empty, is_error=False).endswith(
         "0 matches"
     )
+
+
+def test_shell_output_is_shown_as_typed() -> None:
+    # Program output is not Markdown: `__init__.py` used to show as bold "init.py".
+    from makker.preview import fenced_block
+
+    output = "__init__.py\nsetup.py"
+    body = display_tool_body(
+        "execute", {"command": "ls"}, output=output, expanded=False, is_error=False
+    )
+    assert fenced_block(output, language="sh") in body

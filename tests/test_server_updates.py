@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import sys
 import threading
 from pathlib import Path
@@ -471,7 +472,13 @@ def web_run(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     calls = SimpleNamespace(
-        checks=[], restarted=False, updater=None, ask_restart=False, hand_off=False, ctrl_c=False
+        checks=[],
+        restarted=False,
+        updater=None,
+        ask_restart=False,
+        hand_off=False,
+        ctrl_c=False,
+        hang_up=False,
     )
 
     class FakeServer:
@@ -482,6 +489,9 @@ def web_run(tmp_path, monkeypatch):
             calls.app = config.app
 
         def run(self) -> None:
+            if calls.hang_up:  # the terminal closes
+                signal.getsignal(signal.SIGHUP)(signal.SIGHUP, None)
+                calls.stopping = self.should_exit
             calls.updater.restart_requested = calls.ask_restart
             calls.updater.handed_off = calls.hand_off
             if calls.ctrl_c:  # as uvicorn re-raises it once it has shut down
@@ -495,7 +505,10 @@ def web_run(tmp_path, monkeypatch):
     monkeypatch.setattr(web, "_sysimage_ready", check("image"))
     monkeypatch.setattr(updates, "restart_server", lambda: setattr(calls, "restarted", True))
     monkeypatch.setattr("makker.update_check.notify_at_launch", lambda: None)
-    return web, calls
+    hangup = signal.getsignal(signal.SIGHUP) if hasattr(signal, "SIGHUP") else None
+    yield web, calls
+    if hangup is not None:  # web.run handles it in this process
+        signal.signal(signal.SIGHUP, hangup)
 
 
 def test_the_server_restarts_after_an_update(web_run) -> None:
@@ -525,6 +538,15 @@ def test_ctrl_c_stops_the_server_cleanly(web_run) -> None:
     # stopping, even with a restart pending.
     assert code == 0
     assert not calls.restarted
+
+
+@pytest.mark.skipif(not hasattr(signal, "SIGHUP"), reason="POSIX signals")
+def test_a_closed_terminal_stops_the_server(web_run) -> None:
+    # Like SIGTERM, so the sessions (and their Xvfb) are shut down, not orphaned.
+    web, calls = web_run
+    calls.hang_up = True
+    assert web.run(_web_args()) == 0
+    assert calls.stopping
 
 
 def test_a_restarted_server_starts_even_if_something_needs_fixing(web_run, monkeypatch) -> None:
