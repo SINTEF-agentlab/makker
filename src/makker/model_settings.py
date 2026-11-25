@@ -101,8 +101,8 @@ def options(model_id: str, *, measure: bool = False) -> dict[str, Any]:
     for the front ends. A setting the model does not support is ``None``.
 
     A local model's context sizes carry the memory each takes on this machine
-    when it has been measured; ``measure`` measures it (loading the model a few
-    times, so seconds to a minute, once per model version).
+    once it has been measured; ``measure`` measures it (loading the model at each
+    size, so seconds to a minute, once per model and Ollama version).
     """
     from makker.models import bundled_profile, is_ollama_cloud, provider_of
 
@@ -149,22 +149,30 @@ def _local_context_options(model_id: str, *, measure: bool) -> dict[str, Any] | 
     maximum = ollama_client.context_window(name)
     if not maximum:
         return None
-    found = ollama_client.calibration(name, maximum=maximum, measure=measure)
-    choices = [
-        {
-            "tokens": tokens,
-            "memory": found.memory(tokens) if found else None,
-            "on_gpu": tokens <= found.fits if found and found.points else None,
-        }
-        for tokens in _sizes(maximum)
-    ]
+    sizes = tuple(_sizes(maximum))
+    found = ollama_client.calibration(name, maximum=maximum, sizes=sizes, measure=measure)
+    loads = found.loads if found else {}
+    choices = []
+    for tokens in sizes:
+        load = loads.get(tokens)
+        choices.append(
+            {
+                "tokens": tokens,
+                # What the load took in all; past what fits on the GPU, that
+                # includes the part running on the CPU.
+                "memory": load[0] if load else None,
+                "on_gpu": (0 < load[0] <= load[1]) if load else None,
+                # Ollama refused the load: more than this machine has.
+                "too_large": tokens in loads and load is None,
+            }
+        )
     return {
         "local": True,
         "choices": choices,
         "auto": ollama_client.num_ctx(name, measure=False),
         "min": MIN_CONTEXT,
         "max": maximum,
-        "measured": bool(found and len(found.points) > 1),
+        "measured": all(tokens in loads for tokens in sizes),
     }
 
 
@@ -177,7 +185,9 @@ def _cloud_context_options(model_id: str) -> dict[str, Any] | None:
     maximum = context_window(model_id)
     if not maximum:
         return None
-    choices = [{"tokens": t, "memory": None, "on_gpu": None} for t in _sizes(maximum)]
+    choices = [
+        {"tokens": t, "memory": None, "on_gpu": None, "too_large": False} for t in _sizes(maximum)
+    ]
     return {
         "local": False,
         "choices": choices,

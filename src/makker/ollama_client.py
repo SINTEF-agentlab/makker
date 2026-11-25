@@ -179,68 +179,85 @@ def num_ctx(name: str, *, measure: bool = True) -> int | None:
     configured = _modelfile_num_ctx(name)
     if configured:
         return min(configured, maximum)
-    # What is remembered answers first, even from before the memory figures were
-    # kept; only a model never measured is loaded.
-    found = calibration(name, maximum=maximum, measure=False)
-    if found is None and measure:
-        found = calibration(name, maximum=maximum)
-    if found is None:
-        # The daemon stopped answering mid-way: use the floor for now and
-        # measure again next time.
+    found = calibration(name, maximum=maximum, measure=measure)
+    if found is None or found.fits is None:
+        # Not measured, or the daemon stopped answering mid-way: use the floor
+        # for now and measure again next time.
         return min(maximum, MIN_NUM_CTX) if measure else None
     return found.fits
 
 
 @dataclass(frozen=True)
 class Calibration:
-    """How much memory a local model takes on this machine as its context grows.
+    """What loading a local model takes on this machine, by context size.
 
-    ``fits`` is the largest context measured to stay entirely on the GPU, and
-    ``points`` the (context, bytes) of the loads that did. Memory grows in a
-    straight line with the context above ``MIN_NUM_CTX`` (below it, it does not),
-    so two loads there give every other size.
+    ``fits`` is the largest context measured to stay entirely on the GPU. ``loads``
+    holds each context size the model was loaded with: the bytes it took in all
+    and the part on the GPU, as Ollama reports them, or ``None`` when Ollama
+    refused the load as too large for the machine. Nothing is estimated: a size
+    not loaded has no figure.
     """
 
-    fits: int
-    points: tuple[tuple[int, int], ...] = ()
-
-    def memory(self, num_ctx: int) -> int | None:
-        """Bytes the model takes when loaded with ``num_ctx``, or None if unknown."""
-        points = sorted(set(self.points))
-        if len(points) < 2:
-            return points[0][1] if points and points[0][0] == num_ctx else None
-        (c0, m0), (c1, m1) = points[0], points[-1]
-        return round(m0 + (m1 - m0) * (num_ctx - c0) / (c1 - c0))
+    fits: int | None
+    loads: dict[int, tuple[int, int] | None]
 
 
 def calibration(
-    name: str, *, maximum: int | None = None, measure: bool = True
+    name: str, *, maximum: int | None = None, sizes: tuple[int, ...] = (), measure: bool = True
 ) -> Calibration | None:
-    """The model's measured memory use, remembered per model version and machine.
+    """The model's measured loads, remembered per machine, Ollama version and model
+    version, so an Ollama upgrade or a new version of the model is measured again.
 
-    Measured by loading the model when nothing is remembered (or what is
-    remembered predates the memory figures) and ``measure`` is set; ``None`` when
-    it is not, or the daemon stops answering.
+    With ``measure``, finds ``fits`` if it is not known yet and loads each of
+    ``sizes`` not loaded before (seconds per load). Without it, only what is
+    remembered; ``None`` when nothing is, or the daemon cannot be asked.
     """
     maximum = maximum or context_window(name)
     if maximum is None:
         return None
-    digest = _digest(name)
-    key = f"{platform.node()} {host()} {digest}"
-    remembered = _measured().get(key)
-    if isinstance(remembered, dict):
-        points = tuple((int(c), int(b)) for c, b in remembered.get("points", []))
-        return Calibration(int(remembered["fits"]), points)
-    if not measure:
-        # A context measured before the memory figures were kept still answers.
-        return Calibration(remembered) if isinstance(remembered, int) else None
+    key = _key(name)
+    stored = _measured().get(key) if key else None
+    found = _parse(stored) if isinstance(stored, dict) else None
+    wanted = [n for n in sizes if found is None or n not in found.loads]
+    if not measure or (found is not None and found.fits is not None and not wanted):
+        return found
+    loads = dict(found.loads) if found else {}
+    fits = found.fits if found else None
     try:
-        found = _calibrate(name, maximum)
+        if fits is None:
+            fits = _largest_on_gpu(name, maximum, loads)
+        for size in wanted:
+            _record(name, size, loads)
     except Exception:
-        return None
-    if digest:
-        _remember(key, {"fits": found.fits, "points": [list(p) for p in found.points]})
-    return found
+        return found  # the daemon stopped answering: keep what is known
+    result = Calibration(fits, loads)
+    if key:
+        loaded = {str(n): list(v) if v else None for n, v in sorted(loads.items())}
+        _remember(key, {"fits": fits, "loads": loaded})
+    return result
+
+
+def _parse(stored: dict) -> Calibration:
+    saved = stored.get("loads") or {}
+    loads = {int(n): (int(v[0]), int(v[1])) if v else None for n, v in saved.items()}
+    fits = stored.get("fits")
+    return Calibration(fits if isinstance(fits, int) else None, loads)
+
+
+def _key(name: str) -> str | None:
+    """What a measurement holds for: this machine, the Ollama server and its
+    version, and the model's digest. ``None`` when the daemon can't say."""
+    digest, running = _digest(name), version()
+    return f"{platform.node()} {host()} {running} {digest}" if digest and running else None
+
+
+def version() -> str | None:
+    """The Ollama server's version, or None when it cannot be asked."""
+    with contextlib.suppress(Exception):
+        import httpx
+
+        return httpx.get(f"{host()}/api/version", timeout=2.0).json().get("version")
+    return None
 
 
 def _modelfile_num_ctx(name: str) -> int | None:
@@ -300,44 +317,42 @@ def _load(name: str, num_ctx: int) -> _Load | None:
     return None
 
 
-def _calibrate(name: str, maximum: int) -> Calibration:
-    """The largest context, up to ``maximum``, that Ollama keeps entirely on the GPU,
-    and the memory of the loads that stayed there.
+def _record(name: str, num_ctx: int, loads: dict[int, tuple[int, int] | None]) -> _Load | None:
+    """Load ``name`` with ``num_ctx`` and note what it took in ``loads``."""
+    found = _load(name, num_ctx)
+    loads[num_ctx] = (found.size, found.vram) if found else None
+    return found
+
+
+def _largest_on_gpu(name: str, maximum: int, loads: dict[int, tuple[int, int] | None]) -> int:
+    """The largest context, up to ``maximum``, that Ollama keeps entirely on the GPU.
 
     Ollama places each load itself and reports where it went, so it decides,
     not an estimate (memory per token differs between models and between small
     and large contexts, and a load that spills reports sizes unlike one that
-    fits). One load at the maximum settles it when the GPU has room, and one at
-    ``MIN_NUM_CTX`` then gives the memory slope. Otherwise the answer lies
-    between a load that fits and one that spills, and halving the gap narrows it
-    to within an eighth. Below ``MIN_NUM_CTX`` it does not look.
+    fits). One load at the maximum settles it when the GPU has room. Otherwise
+    the answer lies between a load that fits and one that spills, and halving
+    the gap narrows it to within an eighth. Below ``MIN_NUM_CTX`` it does not
+    look. Every load is noted in ``loads``.
     """
-    points: list[tuple[int, int]] = []
-
-    def load(num_ctx: int) -> _Load | None:
-        found = _load(name, num_ctx)
-        if found is not None and found.fits:
-            points.append((found.num_ctx, found.size))
-        return found
-
-    top = load(maximum)
-    low = load(MIN_NUM_CTX) if maximum > MIN_NUM_CTX else None
+    top = _record(name, maximum, loads)
     if top is not None and top.fits:
-        return Calibration(top.num_ctx, tuple(points))
+        return top.num_ctx
+    low = _record(name, MIN_NUM_CTX, loads) if maximum > MIN_NUM_CTX else None
     if low is None or not low.fits:
         # Too large for the GPU at any useful size: part of it runs on the CPU.
-        return Calibration(min(maximum, MIN_NUM_CTX), tuple(points))
+        return min(maximum, MIN_NUM_CTX)
     fits, spills = low.num_ctx, maximum
     for _ in range(_MAX_PROBES):
         if spills - fits <= fits // 8:
             break
         guess = (fits + spills) // 2 // 1024 * 1024
-        probe = load(guess)
+        probe = _record(name, guess, loads)
         if probe is not None and probe.fits:
             fits = probe.num_ctx
         else:
             spills = guess
-    return Calibration(fits, tuple(points))
+    return fits
 
 
 def _measured_path():
@@ -347,7 +362,7 @@ def _measured_path():
 
 
 def _measured() -> dict:
-    """Measured contexts and memory, keyed by machine, Ollama host and model digest."""
+    """Measured loads, keyed by machine, Ollama host and version, and model digest."""
     with contextlib.suppress(OSError, ValueError):
         data = json.loads(_measured_path().read_text(encoding="utf-8"))
         if isinstance(data, dict):

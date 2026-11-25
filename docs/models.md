@@ -135,15 +135,18 @@ you:
   its maximum, that Ollama keeps entirely on the GPU. Memory per token
   differs widely between models, so this is measured, not estimated: the
   first time a model is used on a machine, Makker loads it at its maximum
-  and at 32K (which gives the memory each size takes), and, if the maximum
-  spills to the CPU, a few more times to narrow it down (seconds per load). The answer is remembered per model version and
-  machine in `ollama-context.json` in the state home; delete it to measure
-  again. A model that spills even at 32K tokens is loaded at 32K, partly on
-  the CPU, since the agent's own prompt needs that much. A model whose
-  Modelfile sets `num_ctx` (such as a `-64k` variant) is loaded at that
-  size instead. To choose a size, use the context size in the model's
-  [settings](#settings), which shows what each size costs in memory.
-  Hosted `:cloud` models run at their full window.
+  and, only if that spills to the CPU, a few more times to narrow it down
+  (seconds per load). A model that spills even at 32K tokens is loaded at
+  32K, partly on the CPU, since the agent's own prompt needs that much. A
+  model whose Modelfile sets `num_ctx` (such as a `-64k` variant) is loaded
+  at that size instead. Hosted `:cloud` models run at their full window.
+- Memory per size: the context sizes in the model's [settings](#settings)
+  show what the model takes at each, read from Ollama after loading it at
+  that size (the first time you open them), and whether it still fits on the
+  GPU; nothing is estimated. Every measurement is remembered per machine,
+  Ollama version and model version in `ollama-context.json` in the state home,
+  so an Ollama upgrade or a new version of the model is measured again;
+  delete the file to measure again yourself.
 - Malformed tool calls: a weaker model occasionally serializes a tool
   call with unparseable arguments (e.g. two parallel calls merged into
   one). Such a reply would otherwise end the turn silently; instead the

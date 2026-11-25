@@ -140,11 +140,19 @@ def test_context_window_none_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     assert ollama_client.context_window("x") is None
 
 
-def _local_model(monkeypatch: pytest.MonkeyPatch, *, maximum=262_144, configured=None, digest="d1"):
+def _local_model(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    maximum=262_144,
+    configured=None,
+    digest="d1",
+    version="0.40.18",
+):
     """A pulled model the daemon reports, with ``_load`` left for the test to set."""
     monkeypatch.setattr(ollama_client, "context_window", lambda name: maximum)
     monkeypatch.setattr(ollama_client, "_modelfile_num_ctx", lambda name: configured)
     monkeypatch.setattr(ollama_client, "_digest", lambda name: digest)
+    monkeypatch.setattr(ollama_client, "version", lambda: version)
 
 
 def _gpu_holding(largest: int, loads: list[int]):
@@ -175,42 +183,47 @@ def test_num_ctx_is_the_maximum_when_it_fits_and_is_remembered(
     monkeypatch.setattr(ollama_client, "_load", _gpu_holding(10**9, loads))
     assert ollama_client.num_ctx("qwen3.8:27b") == 262_144
     assert ollama_client.num_ctx("qwen3.8:27b") == 262_144
-    # Two loads (the second gives the memory slope), then the remembered answer.
-    assert loads == [262_144, ollama_client.MIN_NUM_CTX]
-    # A new version of the model (another digest) is measured again.
+    assert loads == [262_144]  # one load, then the remembered answer
+    # A new version of the model is measured again, and so is a model after an
+    # Ollama upgrade, which can change what a load takes.
     _local_model(monkeypatch, digest="d2")
     ollama_client.num_ctx("qwen3.8:27b")
-    assert loads == [262_144, ollama_client.MIN_NUM_CTX] * 2
+    _local_model(monkeypatch, digest="d2", version="0.41.0")
+    ollama_client.num_ctx("qwen3.8:27b")
+    assert loads == [262_144] * 3
 
 
-def test_calibration_gives_the_memory_of_every_context_size(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_every_context_size_is_measured_not_estimated(monkeypatch: pytest.MonkeyPatch) -> None:
     _local_model(monkeypatch)
-    monkeypatch.setattr(ollama_client, "_load", _gpu_holding(111_000, []))
-    found = ollama_client.calibration("qwen3.8:27b")
+    loads: list[int] = []
+    monkeypatch.setattr(ollama_client, "_load", _gpu_holding(111_000, loads))
+    sizes = (32_768, 65_536, 131_072, 262_144)
+    found = ollama_client.calibration("qwen3.8:27b", sizes=sizes)
     assert found is not None and found.fits <= 111_000
-    # Memory grows in a line through the loads that stayed on the GPU.
-    assert found.memory(65_536) == 16 * 2**30 + 65_536 * 9_000
-    assert found.memory(262_144) == 16 * 2**30 + 262_144 * 9_000
+    # Each size has what its own load took, the part on the GPU included.
+    total = 16 * 2**30 + 65_536 * 9_000
+    assert found.loads[65_536] == (total, total)
+    spilled = 16 * 2**30 + 131_072 * 9_000
+    assert found.loads[131_072] == (spilled, spilled // 2)
+    assert all(size in loads for size in sizes)
     # Remembered, so asking again (even without measuring) loads nothing.
     monkeypatch.setattr(ollama_client, "_load", lambda *a: pytest.fail("loaded a model"))
+    assert ollama_client.calibration("qwen3.8:27b", sizes=sizes) == found
     assert ollama_client.calibration("qwen3.8:27b", measure=False) == found
 
 
-def test_a_context_remembered_without_memory_still_answers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _local_model(monkeypatch)
-    key = f"{ollama_client.platform.node()} {ollama_client.host()} d1"
-    ollama_client._remember(key, 131_072)  # what an earlier version kept
-    monkeypatch.setattr(ollama_client, "_load", lambda *a: pytest.fail("loaded a model"))
-    assert ollama_client.num_ctx("qwen3.8:27b") == 131_072
-    found = ollama_client.calibration("qwen3.8:27b", measure=False)
-    assert found is not None and found.memory(65_536) is None
+def test_a_load_ollama_refuses_is_noted_as_too_large(monkeypatch: pytest.MonkeyPatch) -> None:
+    _local_model(monkeypatch, maximum=1_048_576)
+    fits = _gpu_holding(200_000, [])
+    monkeypatch.setattr(
+        ollama_client, "_load", lambda name, n: None if n > 500_000 else fits(name, n)
+    )
+    found = ollama_client.calibration("long-model", sizes=(65_536, 1_048_576))
+    assert found is not None and found.loads[1_048_576] is None
+    assert found.loads[65_536] is not None
     # Not measured at all: nothing to report, and nothing loaded.
     _local_model(monkeypatch, digest="d2")
-    assert ollama_client.num_ctx("qwen3.8:27b", measure=False) is None
+    assert ollama_client.num_ctx("long-model", measure=False) is None
 
 
 def test_thinking_levels_read_the_daemon(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -32,7 +32,9 @@ export interface ModelSettings {
    *  For a hosted model a size only caps the window Makker compacts against. */
   context: {
     local: boolean;
-    choices: { tokens: number; memory: number | null; on_gpu: boolean | null }[];
+    /** `memory` is what the model took when loaded at that size (all of it, the
+     *  part on the CPU included); `too_large` when Ollama refused the load. */
+    choices: { tokens: number; memory: number | null; on_gpu: boolean | null; too_large?: boolean }[];
     auto: number | null;
     min: number;
     max: number;

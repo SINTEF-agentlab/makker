@@ -69,13 +69,24 @@ def test_a_local_model_offers_context_sizes_with_their_memory(
     monkeypatch.setattr(ollama_client, "thinking_levels", lambda name: ([], None))
     monkeypatch.setattr(ollama_client, "context_window", lambda name: 262_144)
     monkeypatch.setattr(ollama_client, "num_ctx", lambda name, **kw: 131_072)
-    found = ollama_client.Calibration(131_072, ((32_768, 16 * 10**9), (131_072, 17 * 10**9)))
+    found = ollama_client.Calibration(
+        131_072,
+        {
+            32_768: (16 * 10**9, 16 * 10**9),
+            65_536: (16 * 10**9 + 3 * 10**8, 16 * 10**9 + 3 * 10**8),
+            131_072: (17 * 10**9, 17 * 10**9),
+            262_144: (30 * 10**9, 9 * 10**9),
+        },
+    )
     monkeypatch.setattr(ollama_client, "calibration", lambda name, **kw: found)
     context = options("ollama:qwen3.8:27b")["context"]
     assert [c["tokens"] for c in context["choices"]] == [32_768, 65_536, 131_072, 262_144]
-    assert context["choices"][1]["memory"] == round(16 * 10**9 + 10**9 / 3)
-    # Past what stays on the GPU, part of the model runs on the CPU.
+    # Each size shows what its own load took, nothing in between estimated.
+    assert context["choices"][1]["memory"] == 16 * 10**9 + 3 * 10**8
+    # Past what stays on the GPU, part of the model runs on the CPU, and the
+    # figure is what that load took in all.
     assert [c["on_gpu"] for c in context["choices"]] == [True, True, True, False]
+    assert context["choices"][3]["memory"] == 30 * 10**9
     assert context["auto"] == 131_072 and context["measured"]
     # A hosted model's sizes carry no memory: they only cap the window.
     hosted = options("ollama:glm-5.1:cloud")["context"]
