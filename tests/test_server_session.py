@@ -515,6 +515,75 @@ async def test_start_wires_surface_and_capability_dependencies(
         await host.aclose()
 
 
+async def test_a_session_that_fails_to_start_leaves_nothing_to_resume(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import makker.juliakernel as juliakernel_mod
+    from makker.agent import builder as builder_mod
+    from makker.julia import requirements as requirements_mod
+    from makker.session import list_sessions
+    from makker.simulators import env_setup as env_setup_mod
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    monkeypatch.setattr(requirements_mod, "require_julia", lambda *a, **kw: None)
+    monkeypatch.setattr(juliakernel_mod, "JuliaKernel", lambda config: FakeJulia())
+    monkeypatch.setattr(builder_mod, "resolve_package_sources", lambda project: [])
+    monkeypatch.setattr(env_setup_mod, "prepare_workspace_env", lambda *a, **kw: None)
+
+    def _broken_build(session, **kwargs):
+        raise RuntimeError("the model could not be built")
+
+    monkeypatch.setattr(builder_mod, "build_agent", _broken_build)
+
+    with pytest.raises(RuntimeError, match="could not be built"):
+        await SessionHost.start(
+            simulator=make_fake_adapter(tmp_path),
+            workspace=workspace,
+            state_root=tmp_path,
+            surface="tui",
+            warmup=False,
+        )
+    assert list_sessions(tmp_path) == []
+    assert not any((workspace / "makker-output" / "sessions").glob("*"))
+
+
+async def test_session_start_checks_julia_and_the_image_off_the_event_loop(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # The server runs every session on one event loop; a blocking `julia --version`
+    # (juliaup can stall it) or source hashing there froze all of them.
+    import threading
+
+    from makker import sysimage as sysimage_mod
+    from makker.julia import requirements as requirements_mod
+
+    on_loop: list[bool] = []
+
+    def _check(*args: Any, **kwargs: Any) -> None:
+        on_loop.append(threading.current_thread() is threading.main_thread())
+
+    def _decide(*args: Any, **kwargs: Any) -> None:
+        _check()
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(requirements_mod, "require_julia", _check)
+    monkeypatch.setattr(sysimage_mod, "decide", _decide)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+
+    with pytest.raises(RuntimeError, match="stop here"):
+        await SessionHost.start(
+            simulator=make_fake_adapter(tmp_path),
+            workspace=workspace,
+            state_root=tmp_path,
+            surface="web",
+            prepare_env=False,
+            warmup=False,
+        )
+    assert on_loop == [False, False]
+
+
 def test_unbound_server_requires_a_simulator(tmp_path: Path) -> None:
     # No bound simulator (tests / a future multi-folder launcher): the caller must
     # name one, and an omitted simulator is a clear 400 rather than a crash.

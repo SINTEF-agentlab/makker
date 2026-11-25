@@ -108,6 +108,19 @@ def test_depot_readonly_roots_guard_the_packages_dir(tmp_path: Path) -> None:
     assert _depot_readonly_roots(None) == ()
 
 
+def test_the_depot_guard_holds_for_another_spelling_of_the_same_folder(tmp_path: Path) -> None:
+    depot = tmp_path / "depot" / "packages"
+    (depot / "Jutul").mkdir(parents=True)
+    if not Path(str(depot).upper()).exists():
+        pytest.skip("needs a case-insensitive filesystem (the macOS and Windows default)")
+    backend = WorkspaceShellBackend(
+        root_dir=tmp_path, virtual_mode=False, inherit_env=True, readonly_roots=(depot,)
+    )
+    other_case = tmp_path / "depot" / "Packages" / "Jutul" / "src.jl"
+    assert backend.write(str(other_case), "x = 1").error
+    assert not (depot / "Jutul" / "src.jl").exists()
+
+
 def test_grep_with_extension_filter_recurses_into_subdirs(tmp_path: Path, source_dir: Path) -> None:
     # A type-filtered grep (glob="*.jl") must find matches in subdirectories. The
     # upstream backend now handles bare globs recursively; this guards package

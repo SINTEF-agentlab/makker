@@ -600,6 +600,10 @@ def make_plot_julia_tool(session: Session, *, surface: str | None = None):
         Returns:
             A confirmation string, or, when `view`, a text+image content list.
         """
+        if size is not None and (len(size) != 2 or not all(int(n) > 0 for n in size)):
+            # A bad size used to raise IndexError further down, which ended the turn.
+            return f"ERROR: size must be [width, height] in pixels, got {size!r}."
+
         err = await ensure_ready()
         if err is not None:
             return err

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import shutil
 import sys
 from collections.abc import Awaitable, Callable, Sequence
 from functools import partial
@@ -510,8 +511,9 @@ class SessionHost:
         )
 
         # Asked afresh for each session: a long-running server can outlive a Julia update.
+        # Blocking work here runs off the event loop, which serves every session.
         check_julia.cache_clear()
-        require_julia()
+        await asyncio.to_thread(require_julia)
         ws = workspace or workspace_root()
         project = julia_project or resolve_julia_project(ws)
         # Capabilities are composed before the env is prepared, because their Julia
@@ -538,9 +540,7 @@ class SessionHost:
         # would stop loading. Threaded, the server stays responsive while the
         # creating request waits.
         if prepare_env:
-            import asyncio as _asyncio
-
-            await _asyncio.to_thread(
+            await asyncio.to_thread(
                 prepare_workspace_env,
                 simulator,
                 workspace=ws,
@@ -553,7 +553,8 @@ class SessionHost:
         # in-env Makker runtime after an upgrade and installs anything a
         # capability added, so asking earlier would compare the image against an
         # environment that is about to change.
-        sysimage_decision = sysimage_mod.decide(
+        sysimage_decision = await asyncio.to_thread(
+            sysimage_mod.decide,
             ws,
             project,
             enabled=sysimage_mod.resolve_enabled(
@@ -579,6 +580,7 @@ class SessionHost:
         }
 
         stack = AsyncExitStack()
+        session: Session | None = None
         try:
             # On a headless box GLMakie needs a virtual display just to load, on
             # every surface (the TUI renders PNGs, the web serves WGLMakie, and
@@ -587,7 +589,7 @@ class SessionHost:
             # Bonito need nothing further here; they are ordinary deps of the
             # workspace env, resolved together with the simulator's own.
             if virtual_display:
-                _add_headless_display(stack, env)
+                await asyncio.to_thread(_add_headless_display, stack, env)
 
             kernel_config = KernelConfig(
                 julia_project=project,
@@ -662,6 +664,14 @@ class SessionHost:
                 )
         except BaseException:
             await stack.aclose()
+            if session is not None:
+                session.finalize()
+            if not resume:
+                # A new session that never started holds nothing of the user's; left
+                # on disk it would be listed as an empty session to resume.
+                shutil.rmtree(sdir, ignore_errors=True)
+                if session is not None:
+                    shutil.rmtree(session.output_dir, ignore_errors=True)
             raise
 
         host = cls(

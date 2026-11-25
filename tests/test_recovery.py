@@ -68,6 +68,32 @@ def test_recover_gives_up_after_consecutive_failures() -> None:
     assert _recover({"messages": [*messages, HumanMessage(content="again"), _invalid_message()]})
 
 
+def test_recovery_budget_resets_once_the_model_works_on() -> None:
+    # A long autonomous turn: two slips recovered, real tool work in between. The
+    # third slip is only the first since the work, so it is recovered too.
+    recovery_result = ToolMessage(
+        content="x",
+        tool_call_id="call_bad_1",
+        status="error",
+        additional_kwargs={"invalid_tool_call_recovery": True},
+    )
+    worked = [
+        AIMessage(content="", tool_calls=[{"name": "ls", "args": {}, "id": "ok"}]),
+        ToolMessage(content="a.txt", tool_call_id="ok"),
+    ]
+    messages = [
+        HumanMessage(content="go"),
+        _invalid_message(),
+        recovery_result,
+        *worked,
+        _invalid_message(),
+        recovery_result,
+        *worked,
+        _invalid_message(),
+    ]
+    assert _recover({"messages": messages}) is not None
+
+
 def test_recover_nudges_empty_and_reasoning_only_turns() -> None:
     # A blank reply with no tool call: the model fell silent after thinking.
     update = _recover({"messages": [HumanMessage(content="go"), AIMessage(content="")]})

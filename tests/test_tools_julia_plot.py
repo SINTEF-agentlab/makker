@@ -119,6 +119,15 @@ def _session(tmp_path: Path, julia: FakeJulia, *, open_windows: bool = False) ->
     )
 
 
+async def test_a_size_without_two_positive_numbers_is_refused(tmp_path: Path) -> None:
+    julia = FakeJulia()
+    tool = make_plot_julia_tool(_session(tmp_path, julia))
+    for size in ([800], [800, 600, 1], [800, 0]):
+        reply = await _plot_call(tool, {"code": "lines(1:3)", "size": size}, tool_call_id="c")
+        assert reply.startswith("ERROR: size must be [width, height]"), reply
+    assert julia.calls == []  # refused before anything runs
+
+
 async def test_plot_julia_records_artifact_and_writes_file(tmp_path: Path) -> None:
     written: list[str] = []
     julia = FakeJulia(eval_handler=_make_plot_eval_handler(written))

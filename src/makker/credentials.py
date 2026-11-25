@@ -87,13 +87,12 @@ def provider_by_name(name: str) -> ProviderInfo | None:
     (``OpenAI``, ``Google``), or the bare env-var prefix (``google``), so a user
     can name a provider the obvious way.
     """
+    # Exact matches only: a prefix match took "open" for OpenAI, so a key meant for
+    # OpenRouter went to the wrong provider.
     needle = name.strip().lower()
     for info in PROVIDERS.values():
-        if needle in {info.name.lower(), info.label.lower()}:
-            return info
-    # Fall back to a prefix match on the name, so "google" finds "google_genai".
-    for info in PROVIDERS.values():
-        if info.key_env_var is not None and info.name.lower().startswith(needle):
+        env_prefix = (info.key_env_var or "").lower().removesuffix("_api_key")
+        if needle in {info.name.lower(), info.label.lower(), env_prefix} - {""}:
             return info
     return None
 
