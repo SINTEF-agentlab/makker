@@ -86,8 +86,9 @@ model (a `model` event). The window comes from:
 - the provider package's bundled model data, read directly (no key, no model
   build), with the Gemini API asked for Gemini models newer than that data;
 - Ollama: a hosted (`:cloud`) model's maximum, which it runs at; a local
-  model's `num_ctx`, the size it was actually loaded with (its reported
-  maximum capped at the memory budget), not the daemon's theoretical maximum;
+  model's `num_ctx`, the size it was actually loaded with (the largest that
+  stays on the GPU, see [Models](models.md#local-models-ollama)), not the
+  daemon's theoretical maximum;
 - otherwise an assumed 200K tokens, which `/context` says. If the real window
   is smaller, the provider rejects a long request, and the summarizer then
   compacts and retries, so the turn carries on.

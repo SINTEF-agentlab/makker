@@ -268,9 +268,11 @@ anything missing. Requirements and caveats:
 - The model must support tool calling (`ollama show <model>` lists `tools`
   under Capabilities). Keep Ollama itself current: an outdated Ollama can
   fail to parse a new model's template and silently lose tool support.
-- The agent's prompt is large. Local models load with a context window sized
-  to what the model supports, capped by a memory budget (64K by default,
-  lowered with `MAKKER_OLLAMA_NUM_CTX` on tight hardware).
+- The agent's prompt is large. A local model loads with the largest context
+  that stays on your GPU, up to what the model supports. Makker measures it
+  the first time you use the model on a machine, which makes that start a
+  few seconds longer. A model whose Modelfile sets `num_ctx` loads at that
+  size instead (see [models](models.md#local-models-ollama)).
 
 ### Other providers
 
