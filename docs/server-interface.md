@@ -145,6 +145,7 @@ Messages from the server to the front end:
 | `reasoning` | A piece of the assistant's reasoning |
 | `tool` | A step in a tool call: requested, started, finished, or failed |
 | `interrupt` | A request for approval: the actions, the decisions allowed, and per action a markdown `body` with the same detail the terminal shows (the command, a content preview, or the on-disk diff) |
+| `interrupt_resolved` | The pending approval was resolved without a decision from this client (a change of mode now allows it): drop its card, the turn is running again |
 | `artifact` | A file the session produced, given as a URL |
 | `viz` | An interactive view to pin in the side panel: a plot or a report, given as a URL |
 | `popout_ready` | The answer to a popout `replot`: the popup's independent live view URL, or why there is none |

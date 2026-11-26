@@ -263,6 +263,13 @@ def refit_done_to_wire(record: str, width: int, height: int) -> dict[str, Any]:
     return {"type": "refit_done", "record": record, "width": width, "height": height}
 
 
+def interrupt_resolved_to_wire() -> dict[str, Any]:
+    """The pending approval was resolved without a decision from the client (a
+    change of mode now allows it): its card goes, and the turn is running again."""
+
+    return {"type": "interrupt_resolved"}
+
+
 def error_to_wire(message: str) -> dict[str, Any]:
     """A surfaced failure that keeps the session alive (bad command, failed turn)."""
 

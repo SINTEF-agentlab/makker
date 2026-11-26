@@ -164,6 +164,21 @@ describe("interrupts", () => {
     expect(state().pending).toBeNull();
   });
 
+  it("drops the card and shows the turn running when the server resolves it itself", () => {
+    // /approval-mode auto with a card on screen: the server resumes the turn.
+    state().handle({
+      type: "interrupt",
+      interrupt_id: "x",
+      actions: [{ name: "execute" }],
+      allowed_decisions: ["approve", "reject"],
+      allowlist: [],
+    });
+    state().handle({ type: "interrupt_resolved" });
+    expect(state().pending).toBeNull();
+    expect(state().busy).toBe(true);
+    expect(state().working).toBe(true);
+  });
+
   it("shows every pending interrupt on one card, offering what all of them allow", () => {
     // The server applies one decision to all of them.
     const card = (id: string, name: string, allowed: string[], allowlist: string[]) => ({
