@@ -268,24 +268,33 @@ const StepRow = memo(function StepRow({ step }: { step: Step }) {
       </div>
     );
   }
-  const took = step.startedAt != null && step.endedAt != null ? step.endedAt - step.startedAt : 0;
-  const word = STATUS_WORD[step.status];
-  const path = step.args?.file_path ?? step.args?.path;
   return (
     <div className="step">
       <Line className="step-line" open={open} onToggle={toggle}>
-        <span className="step-label">{step.label || step.name}</span>
-        <span className="step-what" title={path ? String(path) : undefined}>
-          {argPreview(step.args)}
-        </span>
-        {word && <span className={`step-status ${step.status}`}>{word}</span>}
-        {step.note && <span className="step-note">{step.note}</span>}
-        {took >= WORTH_TIMING && <span className="step-note elapsed">{formatElapsed(took)}</span>}
+        <ToolSummary step={step} />
       </Line>
       {open && <StepDetail step={step} />}
     </div>
   );
 });
+
+/** A call's line: its label, what it acted on, and how it went. */
+function ToolSummary({ step }: { step: ToolStep }) {
+  const took = step.startedAt != null && step.endedAt != null ? step.endedAt - step.startedAt : 0;
+  const word = STATUS_WORD[step.status];
+  const path = step.args?.file_path ?? step.args?.path;
+  return (
+    <>
+      <span className="step-label">{step.label || step.name}</span>
+      <span className="step-what" title={path ? String(path) : undefined}>
+        {argPreview(step.args)}
+      </span>
+      {word && <span className={`step-status ${step.status}`}>{word}</span>}
+      {step.note && <span className="step-note">{step.note}</span>}
+      {took >= WORTH_TIMING && <span className="step-note elapsed">{formatElapsed(took)}</span>}
+    </>
+  );
+}
 
 const sameSteps = (a: Step[], b: Step[]) => a.length === b.length && a.every((s, i) => s === b[i]);
 
@@ -298,12 +307,20 @@ export const StepGroup = memo(
     if (steps.length === 1) return <div className="step-group lone">{rows}</div>;
     const failed = failedCount(steps);
     const took = groupDuration(steps);
+    const tools = steps.filter((step): step is ToolStep => step.kind === "tool");
     return (
       <div className="step-group">
         <Line className="group-line" open={open} onToggle={() => setOpen((o) => !o)}>
-          <span className="group-what">{groupSummary(steps)}</span>
-          {failed > 0 && <span className="step-status error">{failed} failed</span>}
-          {took != null && took >= WORTH_TIMING && <span className="step-note elapsed">{formatElapsed(took)}</span>}
+          {tools.length === 1 ? (
+            // One call and the thinking around it: the call's own line says more.
+            <ToolSummary step={tools[0]} />
+          ) : (
+            <>
+              <span className="group-what">{groupSummary(steps)}</span>
+              {failed > 0 && <span className="step-status error">{failed} failed</span>}
+              {took != null && took >= WORTH_TIMING && <span className="step-note elapsed">{formatElapsed(took)}</span>}
+            </>
+          )}
         </Line>
         {open && <div className="steps">{rows}</div>}
       </div>
