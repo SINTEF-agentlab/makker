@@ -512,7 +512,7 @@ class SessionHost:
         from makker import sysimage as sysimage_mod
         from makker.agent.builder import build_agent
         from makker.agent.capabilities import collect_dependency_paths, discover_extensions
-        from makker.credentials import missing_credential
+        from makker.credentials import missing_credential, withheld_env_vars
         from makker.julia.requirements import check_julia, require_julia
         from makker.julia.threads import (
             HYPRE_THREADS_ENV_VAR,
@@ -521,7 +521,7 @@ class SessionHost:
             resolve_hypre_threads,
         )
         from makker.juliakernel import JuliaKernel, KernelConfig
-        from makker.models import provider_key_vars, resolve_model
+        from makker.models import resolve_model
         from makker.paths import workspace_root
         from makker.session import Session, default_session_id, session_dir
         from makker.simulators.env_setup import note_warm_load_failure, prepare_workspace_env
@@ -624,7 +624,7 @@ class SessionHost:
                 stderr_file=sdir / "julia-startup.log",
                 cwd=ws,
                 env=env,
-                env_remove=tuple(sorted(provider_key_vars())),
+                env_remove=withheld_env_vars(),
                 threads=str(compute_threads),
             )
             kernel = await stack.enter_async_context(JuliaKernel(kernel_config))

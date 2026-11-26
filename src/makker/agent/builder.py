@@ -57,8 +57,9 @@ from makker.agent.recovery import InvalidToolCallRecoveryMiddleware
 from makker.agent.skills import skill_sources
 from makker.agent.tools import session_tools
 from makker.context_budget import ContextBudget, context_budget
+from makker.credentials import is_secret_env_var
 from makker.model_settings import DEFAULT_OUTPUT, chosen_effort, effort, load_settings
-from makker.models import PROVIDERS, is_ollama_cloud, provider_key_vars, provider_of
+from makker.models import PROVIDERS, is_ollama_cloud, provider_of
 from makker.paths import workspace_memory_dir, workspace_root
 from makker.session import Session
 from makker.simulators.base import SimulatorAdapter
@@ -479,9 +480,9 @@ def build_backend(
         default=WorkspaceShellBackend(
             root_dir=ws,
             virtual_mode=False,
-            # The user's environment, minus the model provider keys: a command
-            # like `env` would otherwise print them into the trace.
-            env={k: v for k, v in os.environ.items() if k not in provider_key_vars()},
+            # The user's environment, minus its credentials: a command like
+            # `env` would otherwise print them into the trace.
+            env={k: v for k, v in os.environ.items() if not is_secret_env_var(k)},
             readonly_roots=_depot_readonly_roots(package_sources),
         ),
         routes={},
