@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from makker.interfaces.cli import main
+from makker.interfaces.cli.main import main
 from makker.workspace import workspace_config_path, workspace_julia_env
 
 

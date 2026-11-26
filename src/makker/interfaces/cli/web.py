@@ -8,7 +8,6 @@ install, so there is nothing extra to add.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import os
 import signal
 import sys
@@ -146,20 +145,12 @@ def _resolve_simulator(args: argparse.Namespace) -> str | None:
     deliberately does not switch simulators in place — a different simulator means
     a different folder, each with its own Julia environment.
     """
-    from dataclasses import replace as dc_replace
-
-    from makker.interfaces.cli._helpers import known_packages_map
+    from makker.interfaces.cli._helpers import folder_simulator, remember_simulator
     from makker.paths import workspace_root
     from makker.simulators import registry
-    from makker.workspace import (
-        auto_detect_simulator,
-        load_workspace_config,
-        write_workspace_config,
-    )
 
     ws = workspace_root()
-    config = load_workspace_config(ws)
-    sim = args.sim or config.simulator or auto_detect_simulator(known_packages_map(), ws)
+    sim = folder_simulator(args.sim, ws)
     if sim is None:
         print(
             "error: no simulator for this folder. Pass --sim <name>, or run "
@@ -172,9 +163,7 @@ def _resolve_simulator(args: argparse.Namespace) -> str | None:
     except KeyError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return None
-    if config.simulator != sim:  # remember the folder's simulator for next time
-        with contextlib.suppress(OSError):
-            write_workspace_config(dc_replace(config, simulator=sim), workspace=ws)
+    remember_simulator(sim, ws)
     return sim
 
 

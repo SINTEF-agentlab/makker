@@ -14,7 +14,8 @@ from pathlib import Path
 import pytest
 
 from makker.agent.plot_julia import make_plot_julia_tool
-from makker.interfaces.cli import doctor, main
+from makker.interfaces.cli import doctor
+from makker.interfaces.cli.main import main
 from makker.julia import requirements
 from makker.julia.session import EvalResult
 from makker.lab.fakes import make_fake_adapter

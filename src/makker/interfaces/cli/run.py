@@ -14,7 +14,7 @@ from makker.interfaces.cli._helpers import (
     add_session_flags,
     add_workspace_flags,
     env_versions_ok,
-    known_packages_map,
+    folder_simulator,
     resolve_add_dirs,
 )
 from makker.paths import workspace_root
@@ -27,7 +27,6 @@ from makker.session import (
 )
 from makker.simulators import registry
 from makker.workspace import (
-    auto_detect_simulator,
     load_workspace_config,
     resolve_julia_project,
 )
@@ -96,7 +95,7 @@ def dispatch(args: argparse.Namespace) -> int:
 
     ws = workspace_root()
     config = load_workspace_config(ws)
-    sim_name = args.sim or config.simulator or auto_detect_simulator(known_packages_map(), ws)
+    sim_name = folder_simulator(args.sim, ws)
     if sim_name is None:
         print(
             "error: --sim is required (or set [workspace].simulator in "

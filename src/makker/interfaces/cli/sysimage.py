@@ -15,11 +15,10 @@ import sys
 from dataclasses import replace as dc_replace
 from pathlib import Path
 
-from makker.interfaces.cli._helpers import add_workspace_flags, known_packages_map
+from makker.interfaces.cli._helpers import add_workspace_flags, folder_simulator
 from makker.paths import workspace_root
 from makker.simulators import registry
 from makker.workspace import (
-    auto_detect_simulator,
     load_workspace_config,
     resolve_julia_project,
     write_workspace_config,
@@ -100,7 +99,7 @@ def _build(args: argparse.Namespace, ws: Path, project: Path, config) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    sim_name = args.sim or config.simulator or auto_detect_simulator(known_packages_map(), ws)
+    sim_name = folder_simulator(args.sim, ws)
     if sim_name is None:
         print(
             "error: no simulator for this folder. Pass --sim <name>, or run "

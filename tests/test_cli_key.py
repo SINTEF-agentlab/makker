@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from makker.interfaces.cli import main
+from makker.interfaces.cli.main import main
 
 # The autouse ``_reset_workspace_overrides`` fixture points the workspace and
 # state_home at fresh tmp dirs, so the .env files these tests read are empty

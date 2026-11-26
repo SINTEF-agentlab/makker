@@ -21,7 +21,6 @@ def add_session_flags(parser: argparse.ArgumentParser) -> None:
     The simulator, resume/continue, and approval flags are command-specific and
     stay with their parsers.
     """
-    from makker.julia.threads import THREADS_ENV_VAR
     from makker.models import DEFAULT_MODEL, MODEL_ENV_VAR
 
     parser.add_argument(
@@ -30,22 +29,6 @@ def add_session_flags(parser: argparse.ArgumentParser) -> None:
         help=(
             "LLM identifier (provider:model). Precedence: --model > workspace config "
             f"> user config > ${MODEL_ENV_VAR} > {DEFAULT_MODEL}."
-        ),
-    )
-    parser.add_argument(
-        "--julia-project",
-        type=Path,
-        default=None,
-        help="Override the resolved workspace Julia project.",
-    )
-    parser.add_argument(
-        "--threads",
-        default=None,
-        metavar="N",
-        help=(
-            "Julia compute threads: an integer, or 'auto' for all logical cores. "
-            f"Precedence: --threads > ${THREADS_ENV_VAR} > default (physical cores "
-            "minus one). The kernel adds one interactive thread on top."
         ),
     )
     parser.add_argument(
@@ -65,6 +48,29 @@ def add_session_flags(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help=(
             "Use a throwaway memory directory: nothing is persisted to workspace memory on disk."
+        ),
+    )
+    add_julia_flags(parser)
+
+
+def add_julia_flags(parser: argparse.ArgumentParser) -> None:
+    """Add the flags that set up a session's Julia: its project, threads and image."""
+    from makker.julia.threads import THREADS_ENV_VAR
+
+    parser.add_argument(
+        "--julia-project",
+        type=Path,
+        default=None,
+        help="Override the resolved workspace Julia project.",
+    )
+    parser.add_argument(
+        "--threads",
+        default=None,
+        metavar="N",
+        help=(
+            "Julia compute threads: an integer, or 'auto' for all logical cores. "
+            f"Precedence: --threads > ${THREADS_ENV_VAR} > default (physical cores "
+            "minus one). The kernel adds one interactive thread on top."
         ),
     )
     add_sysimage_flags(parser)
@@ -160,6 +166,31 @@ def apply_workspace_flags(args: argparse.Namespace) -> None:
 
 def known_packages_map() -> dict[str, str]:
     return {registry.get(name).primary_package: name for name in registry.names()}
+
+
+def folder_simulator(name: str | None, ws: Path) -> str | None:
+    """The simulator for folder ``ws``: ``name`` if one is asked for, else the
+    folder's saved choice, else the one whose package its ``Project.toml`` uses."""
+    from makker.workspace import auto_detect_simulator, load_workspace_config
+
+    return (
+        name
+        or load_workspace_config(ws).simulator
+        or auto_detect_simulator(known_packages_map(), ws)
+    )
+
+
+def remember_simulator(name: str, ws: Path) -> None:
+    """Save ``name`` as folder ``ws``'s simulator, so a later launch there needs no flag."""
+    import contextlib
+    from dataclasses import replace
+
+    from makker.workspace import load_workspace_config, write_workspace_config
+
+    config = load_workspace_config(ws)
+    if config.simulator != name:
+        with contextlib.suppress(OSError):
+            write_workspace_config(replace(config, simulator=name), workspace=ws)
 
 
 def env_versions_ok(adapter: Any, ws: Path, julia_project: Path | None, sim: str) -> bool:
