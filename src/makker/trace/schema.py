@@ -157,6 +157,18 @@ def compaction_payload(
     }
 
 
+def tool_call_payload(*, id: str | None, name: str | None, args: Any) -> dict[str, Any]:
+    """Payload for a ``TOOL_CALL`` event: the call as it was made."""
+    return {"id": id, "name": name, "args": args}
+
+
+def tool_result_payload(
+    *, tool_call_id: str | None, name: str | None, content: str, status: str | None
+) -> dict[str, Any]:
+    """Payload for a ``TOOL_RESULT`` event: the result text and its status."""
+    return {"tool_call_id": tool_call_id, "name": name, "content": content, "status": status}
+
+
 def artifact_payload(
     *,
     path: str,
