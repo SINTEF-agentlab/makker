@@ -229,6 +229,15 @@ def start_warmup(
     return asyncio.create_task(_run(), name="julia-warmup")
 
 
+async def past_loading(warmup: asyncio.Task[Any], abandonable: asyncio.Event) -> None:
+    """Return once ``warmup`` is past loading, or has ended without getting there."""
+    loaded = asyncio.ensure_future(abandonable.wait())
+    try:
+        await asyncio.wait((warmup, loaded), return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        loaded.cancel()
+
+
 async def _shielded(step: Any) -> None:
     """Await ``step`` so a cancel of the warm-up leaves it running, and quietly."""
 

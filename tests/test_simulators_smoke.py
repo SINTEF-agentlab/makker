@@ -124,3 +124,64 @@ async def test_simulator_warm_workload_runs(adapter: SimulatorAdapter, warm_disp
         assert result.error is None, f"{adapter.name}: {result.error}"
         ran = await julia.eval(f"{adapter.warm_package}._warm()")
         assert ran.error is None, f"{adapter.name}: warm workload failed: {ran.error}"
+
+
+# HYPRE's OpenMP thread count, or 0 where the simulator doesn't load HYPRE.
+_HYPRE_THREADS = """let hypre = get(Base.loaded_modules,
+        Base.PkgId(Base.UUID("b5ffcf37-a2bd-41ab-a3da-4bd9bc8ad771"), "HYPRE"), nothing)
+    hypre === nothing ? 0 : hypre.NumThreads()
+end"""
+
+
+@pytest.mark.parametrize(
+    "adapter",
+    [a for a in _ADAPTERS if a.warm_package],
+    ids=[a.name for a in _ADAPTERS if a.warm_package],
+)
+async def test_a_reset_comes_back_warm(adapter: SimulatorAdapter, tmp_path, monkeypatch) -> None:
+    """A reset returns the session to how it started, not to a bare Julia.
+
+    The warm-up binds GLMakie into ``Main``, which plotting code calls ``Figure``
+    and ``lines`` through, and pins HYPRE's threads where the simulator loads it.
+    A fresh process has neither until the warm-up runs on it too: plots fail with
+    an ``UndefVarError`` and every solve runs HYPRE on one thread, unannounced.
+    """
+    from makker import models
+    from makker.agent import builder
+    from makker.display import has_display, xvfb_available
+    from makker.julia.threads import HYPRE_THREADS_ENV_VAR
+    from makker.session_host import SessionHost
+
+    env = adapter.julia_env_template_path
+    if not _env_ready(adapter):
+        pytest.skip(f"{adapter.name} env not instantiated (run `Pkg.instantiate()` on {env})")
+    if not (has_display() or xvfb_available()):
+        pytest.skip("no display and Xvfb is not available")
+    monkeypatch.setenv(HYPRE_THREADS_ENV_VAR, "2")  # not HYPRE's own default of one
+    # The kernel and its warm-up are real; the agent on top is not needed.
+    monkeypatch.setattr(builder, "build_agent", lambda session, **kw: (object(), object()))
+    monkeypatch.setattr(models, "measure_local_context", lambda model_id: None)
+    host = await SessionHost.start(
+        simulator=adapter,
+        surface="tui",
+        workspace=tmp_path,
+        state_root=tmp_path,
+        julia_project=env,
+        prepare_env=False,
+        discover=False,
+        sysimage=False,
+    )
+
+    async def warm_state() -> tuple[str, str]:
+        await host.warmup_task
+        figure = await host.session.julia.eval("isdefined(Main, :Figure)")
+        threads = await host.session.julia.eval(_HYPRE_THREADS)
+        return figure.output, threads.output
+
+    try:
+        started = await warm_state()
+        assert started[0] == "true", f"{adapter.name}: the warm-up did not bind GLMakie"
+        await host.session.julia.reset()
+        assert await warm_state() == started
+    finally:
+        await host.aclose()

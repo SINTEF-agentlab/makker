@@ -635,6 +635,44 @@ async def test_start_wires_surface_and_capability_dependencies(
         await host.aclose()
 
 
+async def test_teardown_stops_the_warmup_a_restart_started(monkeypatch, tmp_path: Path) -> None:
+    """A restart warms the fresh process again, so the warm-up the host reports, and
+    stops before the kernel closes, is whichever is current, not the first."""
+    import makker.juliakernel as juliakernel_mod
+    from makker.agent import builder as builder_mod
+    from makker.agent import capabilities as capabilities_mod
+    from makker.julia import requirements as requirements_mod
+    from makker.simulators import warmup as warmup_mod
+
+    kernel = FakeJulia()
+    warmups: list[asyncio.Task[None]] = []
+
+    def _start_warmup(*_args: Any, **_kwargs: Any) -> asyncio.Task[None]:
+        warmups.append(asyncio.create_task(asyncio.sleep(3600)))
+        return warmups[-1]
+
+    monkeypatch.setattr(requirements_mod, "require_julia", lambda *a, **kw: None)
+    monkeypatch.setattr(juliakernel_mod, "JuliaKernel", lambda config: kernel)
+    monkeypatch.setattr(warmup_mod, "start_warmup", _start_warmup)
+    monkeypatch.setattr(builder_mod, "resolve_package_sources", lambda project: [])
+    monkeypatch.setattr(capabilities_mod, "discover_extensions", lambda: [])
+    monkeypatch.setattr(builder_mod, "build_agent", lambda session, **kw: (object(), object()))
+
+    host = await SessionHost.start(
+        simulator=make_fake_adapter(tmp_path),
+        workspace=tmp_path,
+        state_root=tmp_path,
+        surface="web",
+        prepare_env=False,
+    )
+    assert host.warmup_task is warmups[0]
+    await host.session.julia.reset()
+    assert host.warmup_task is warmups[1]
+    assert warmups[0].cancelled() or warmups[0].cancelling()
+    await host.aclose()
+    assert warmups[1].cancelled()
+
+
 async def test_a_session_that_fails_to_start_leaves_nothing_to_resume(
     monkeypatch, tmp_path: Path
 ) -> None:
