@@ -255,6 +255,10 @@ makker transcript --format markdown
 makker transcript --bundle          # zip with artifacts included
 ```
 
+In the HTML transcript the agent's work between two things it says folds into
+one line, as in the web UI and the TUI; open it for each call with its arguments
+and output.
+
 ## Models
 
 Model ids are `provider:model` strings. Resolution precedence: `--model`

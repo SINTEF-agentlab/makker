@@ -394,3 +394,90 @@ def test_report_does_not_inline_files_outside_the_artifact_dirs(tmp_path) -> Non
     )
     html = out.read_text(encoding="utf-8")
     assert base64.standard_b64encode(b"TOP SECRET").decode() not in html
+
+
+def test_steps_between_two_messages_fold_into_one_line() -> None:
+    """The agent's work between two things it says is one line saying what it
+    did, how many steps failed and how long it took, with each step inside."""
+    events = [
+        make_event(1, "message_user", {"content": "go"}),
+        make_event(2, "message_reasoning", {"content": "Check the **example** first."}),
+        make_event(
+            3,
+            "tool_call",
+            {"id": "r", "name": "read_file", "args": {"file_path": "/a/b/c/wells.jl"}},
+        ),
+        make_event(4, "tool_result", {"tool_call_id": "r", "name": "read_file", "content": "x"}),
+        make_event(5, "tool_call", {"id": "p", "name": "write_todos", "args": {"todos": []}}),
+        make_event(
+            6,
+            "tool_call",
+            {"id": "j", "name": "run_julia", "args": {"code": "boom", "description": "Run it"}},
+        ),
+        make_event(
+            9,
+            "tool_result",
+            {"tool_call_id": "j", "name": "run_julia", "content": "ERROR: boom", "status": "error"},
+        ),
+        make_event(10, "message_assistant", {"content": "It failed."}),
+        make_event(11, "tool_call", {"id": "l", "name": "ls", "args": {"path": "/w"}}),
+        make_event(12, "tool_result", {"tool_call_id": "l", "name": "ls", "content": "[]"}),
+    ]
+    html = render_html(events)
+    timeline = html.split('<div class="timeline">', 1)[1]
+    group, rest = timeline.split("It failed.", 1)
+
+    # One line for the stretch: the plan is not work, and the failure and the
+    # time (first call to last result) show on it.
+    assert '<span class="steps-what">Read a file, ran Julia</span>' in group
+    assert '<span class="step-failed">1 failed</span><span class="step-took">6s</span>' in group
+    # Inside, a row per step: the thought, the file by its last segments, the
+    # run by what it says it does.
+    assert '<span class="event-kind thought">Thought</span>' in group
+    assert '<span class="tool-peek">Check the example first.</span>' in group
+    assert '<span class="tool-peek">c/wells.jl</span>' in group
+    assert '<span class="tool-peek">Run it</span><span class="step-failed">failed</span>' in group
+    # A lone step after what the agent said is its own row, not a group.
+    assert "steps-what" not in rest and '<span class="tool-peek">/w</span>' in rest
+
+
+def test_a_stretch_of_one_call_and_its_thinking_names_the_call() -> None:
+    events = [
+        make_event(1, "message_reasoning", {"content": "Look first."}),
+        make_event(2, "tool_call", {"id": "g", "name": "grep", "args": {"pattern": "setup_well"}}),
+        make_event(3, "tool_result", {"tool_call_id": "g", "name": "grep", "content": "a.jl"}),
+    ]
+    assert '<span class="steps-what">Search setup_well</span>' in render_html(events)
+
+
+def test_the_panel_size_reports_are_not_part_of_the_transcript() -> None:
+    events = [make_event(1, "ui_event", {"payload": {"kind": "canvas_size", "width": 600}})]
+    assert "canvas_size" not in render_html(events)
+
+
+def test_a_call_that_was_stopped_is_not_counted_as_work_done() -> None:
+    """A call cancelled mid-run has no result: the line counts what ran, as the
+    terminal and the browser do."""
+    events = [
+        make_event(1, "tool_call", {"id": "a", "name": "run_julia", "args": {"code": "1"}}),
+        make_event(2, "tool_result", {"tool_call_id": "a", "name": "run_julia", "content": "1"}),
+        make_event(3, "tool_call", {"id": "b", "name": "run_julia", "args": {"code": "sim()"}}),
+        make_event(4, "tool_call", {"id": "c", "name": "execute", "args": {"command": "ls"}}),
+    ]
+    assert '<span class="steps-what">Ran Julia</span>' in render_html(events)
+    stopped = events[2:]
+    assert '<span class="steps-what">Nothing ran</span>' in render_html(stopped)
+
+
+def test_a_stretch_of_steps_hides_only_when_every_kind_in_it_is_filtered_out() -> None:
+    """Unticking Tools leaves the thoughts in a stretch of work readable."""
+    events = [
+        make_event(1, "message_reasoning", {"content": "Look first."}),
+        make_event(2, "tool_call", {"id": "g", "name": "grep", "args": {"pattern": "x"}}),
+        make_event(3, "tool_call", {"id": "h", "name": "grep", "args": {"pattern": "y"}}),
+    ]
+    html = render_html(events)
+    assert '<article class="event tool-event steps" data-filter="reasoning tools">' in html
+    assert "kinds.every((kind) => hidden.has(kind))" in html
+    thoughts = [events[0], make_event(4, "message_reasoning", {"content": "Then this."})]
+    assert 'class="event tool-event steps" data-filter="reasoning"' in render_html(thoughts)

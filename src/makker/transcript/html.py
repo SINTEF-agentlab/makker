@@ -7,10 +7,13 @@ import hashlib
 import html
 import json
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from makker.tool_labels import tool_label
+from makker.preview import WORTH_TIMING, format_seconds, step_what
+from makker.tool_labels import activity_summary, tool_label
 from makker.trace import Event, schema
 from makker.transcript.embed import image_data_uri
 from makker.transcript.events import ArtifactPayload, model_line, offload_line
@@ -290,6 +293,26 @@ details[open] > .tool-summary::before { content: "\\25BE"; }
 }
 .tool-summary time { flex: 0 0 auto; }
 .tool-body { margin-top: 0.5rem; }
+.event-kind.thought { color: var(--reasoning); }
+.event-kind.thought + .tool-peek { font-family: inherit; font-size: 0.85rem; font-style: italic; }
+.step-failed { color: var(--approval); flex: 0 0 auto; }
+.step-took { color: var(--muted); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+/* The agent's work between two things it says: one line, its steps inside. */
+.steps-what {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.steps-body { margin-top: 0.4rem; display: flex; flex-direction: column; }
+.steps-body > .event {
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: none;
+  padding: 0.3rem 0 0.3rem 0.75rem;
+}
 .event.approval { border-left: 3px solid var(--approval); }
 .approval-actions { margin: 0; padding-left: 1.2rem; }
 .approval-actions li { margin: 0.1rem 0; }
@@ -331,7 +354,8 @@ _SCRIPT = """
       [...checkboxes].filter((cb) => !cb.checked).map((cb) => cb.dataset.filter)
     );
     events.forEach((el) => {
-      el.style.display = hidden.has(el.dataset.filter) ? "none" : "";
+      const kinds = el.dataset.filter.split(" ");
+      el.style.display = kinds.every((kind) => hidden.has(kind)) ? "none" : "";
     });
   }
   checkboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
@@ -400,7 +424,7 @@ _SESSION_MARKER_KINDS = frozenset(
 # Internal telemetry the trace keeps for cost/efficiency analysis and eval grading,
 # but which is not part of the conversation: dropped entirely from the human
 # transcript (no card, no filter chip).
-_INTERNAL_KINDS = frozenset({schema.MODEL_USAGE, schema.EVAL_TARGET})
+_INTERNAL_KINDS = frozenset({schema.MODEL_USAGE, schema.EVAL_TARGET, schema.UI_EVENT})
 
 _KIND_LABELS: dict[str, str] = {
     **{kind: "Session" for kind in _SESSION_MARKER_KINDS},
@@ -610,38 +634,112 @@ def _short_time(ts: str) -> str:
 
 
 def _tool_summary(args: Any) -> str:
-    """A one-line peek at what a tool call did, for the collapsed summary.
-
-    Shows the argument that carries the intent (the command, the code, the path
-    it touched), so a reader can scan the run without expanding every call.
-    """
+    """A one-line peek at what a tool call did, for the collapsed summary: what
+    the call says it does, else what it acts on (its code, command, pattern or
+    file), as a step's line says it in the terminal."""
     if not isinstance(args, dict) or not args:
         return ""
-    for key in ("command", "code", "file_path", "path", "pattern", "query"):
-        value = args.get(key)
-        if isinstance(value, str) and value.strip():
-            return _first_line(value, 80)
+    what = step_what(args)
+    if what:
+        return _first_line(what, 80)
     todos = args.get("todos")
     if isinstance(todos, list):
-        return f"{len(todos)} item(s)"
-    for key, value in args.items():
-        if isinstance(value, str | int | float | bool):
-            return _first_line(f"{key}={value}", 80)
+        done = sum(1 for t in todos if isinstance(t, dict) and t.get("status") == "completed")
+        return f"{done} of {len(todos)} done"
     return ""
 
 
-def _tool_event(*, label: str, peek: str, detail: str, ts: str, kind: str) -> str:
-    """A collapsed tool row: the tool, a one-line peek, and the timestamp, with
-    the full args/result tucked inside the disclosure."""
+def _tool_event(
+    *,
+    label: str,
+    peek: str,
+    detail: str,
+    ts: str,
+    kind: str,
+    css_kind: str = "tool",
+    how: str = "",
+) -> str:
+    """A collapsed step row: the tool (or "Thought"), a one-line peek, how it
+    went, and the timestamp, with the full args/result tucked inside."""
     peek_html = f'<span class="tool-peek">{_esc(peek)}</span>' if peek else ""
     return (
         f'<article class="event tool-event" {_event_attrs(kind)}>'
         f'<details><summary class="tool-summary">'
-        f'<span class="event-kind tool">{_esc(label)}</span>'
-        f"{peek_html}"
+        f'<span class="event-kind {css_kind}">{_esc(label)}</span>'
+        f"{peek_html}{how}"
         f'<time datetime="{_esc_attr(ts)}">{_esc(_short_time(ts))}</time>'
         f"</summary>"
         f'<div class="tool-body">{detail}</div>'
+        f"</details></article>"
+    )
+
+
+@dataclass(frozen=True)
+class _Step:
+    """One step of the agent's work, rendered, with what its group line needs."""
+
+    html: str
+    ts: str
+    tool: str | None = None  # None for a thought
+    peek: str = ""
+    ran: bool = True  # a call with a result; one cancelled has none
+    failed: bool = False
+    start: float | None = None  # epoch seconds
+    seconds: float | None = None
+
+
+def _epoch(ts: str) -> float | None:
+    try:
+        return datetime.fromisoformat(ts).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def _how_html(*, failed: str, seconds: float | None) -> str:
+    """How a step or a group went: a failure, and a duration worth showing."""
+    out = f'<span class="step-failed">{_esc(failed)}</span>' if failed else ""
+    if seconds is not None and seconds >= WORTH_TIMING:
+        out += f'<span class="step-took">{format_seconds(seconds)}</span>'
+    return out
+
+
+def _steps_html(steps: list[_Step]) -> str:
+    """A run of steps between two things the agent says or shows: one line saying
+    what they did, the steps inside. A lone step is just its own row."""
+    if len(steps) == 1:
+        return steps[0].html
+    tools = [step for step in steps if step.tool is not None]
+    # Updating the plan is not work done: the summary leaves it out.
+    calls = [step for step in tools if step.tool != "write_todos"]
+    ran = [step.tool or "" for step in calls if step.ran]
+    if len(calls) == 1:
+        # One call and the thinking around it: the call's own line says more.
+        what = f"{tool_label(calls[0].tool or '')} {calls[0].peek}".strip()
+    elif ran:
+        what = activity_summary(ran)
+    elif calls:
+        what = "Nothing ran"
+    else:
+        what = "Updated the plan" if tools else "Thought"
+    starts = [step.start for step in tools if step.start is not None]
+    ends = [
+        step.start + step.seconds
+        for step in tools
+        if step.start is not None and step.seconds is not None
+    ]
+    seconds = max(ends) - min(starts) if starts and ends else None
+    failed = sum(step.failed for step in tools)
+    how = _how_html(failed=f"{failed} failed" if failed else "", seconds=seconds)
+    ts = steps[0].ts
+    # It hides only when every kind of step in it is filtered out.
+    filters = " ".join(sorted({"tools" if step.tool else "reasoning" for step in steps}))
+    return (
+        f'<article class="event tool-event steps" data-filter="{filters}">'
+        f'<details><summary class="tool-summary">'
+        f'<span class="steps-what">{_esc(what)}</span>{how}'
+        f'<time datetime="{_esc_attr(ts)}">{_esc(_short_time(ts))}</time>'
+        f"</summary>"
+        f'<div class="steps-body">{"".join(step.html for step in steps)}</div>'
         f"</details></article>"
     )
 
@@ -668,14 +766,14 @@ def _event_attrs(kind: str) -> str:
     return f'data-kind="{_esc_attr(kind)}" data-filter="{_esc_attr(group)}"'
 
 
-def _index_tool_results(events: list[Event]) -> dict[str, dict[str, Any]]:
-    indexed: dict[str, dict[str, Any]] = {}
+def _index_tool_results(events: list[Event]) -> dict[str, Event]:
+    indexed: dict[str, Event] = {}
     for ev in events:
         if ev.kind != schema.TOOL_RESULT:
             continue
         tool_call_id = ev.payload.get("tool_call_id")
         if tool_call_id is not None:
-            indexed[str(tool_call_id)] = ev.payload
+            indexed[str(tool_call_id)] = ev
     return indexed
 
 
@@ -744,7 +842,8 @@ def _render_body(
     hitl_responses = _index_hitl_responses(event_list)
     consumed_results: set[str] = set()
     consumed_responses: set[str] = set()
-    parts: list[str] = []
+    # Rendered items in order; consecutive steps are folded into one group below.
+    parts: list[str | _Step] = []
     kind_counts: dict[str, int] = {}
 
     session_id: str | None = None
@@ -823,15 +922,15 @@ def _render_body(
             content = str(payload.get("content", ""))
             if not content.strip():
                 continue
-            parts.append(
-                f'<article class="event" {_event_attrs(kind)}>'
-                f"{_event_header(kind, 'Reasoning', ts, 'reasoning')}"
-                f"<details>"
-                f"<summary>{_esc(_first_line(content))}</summary>"
-                f"{_render_prose(content)}"
-                f"</details>"
-                f"</article>"
+            row = _tool_event(
+                label="Thought",
+                peek=_first_line(content).replace("**", ""),
+                detail=_render_prose(content),
+                ts=ts,
+                kind=kind,
+                css_kind="thought",
             )
+            parts.append(_Step(html=row, ts=ts))
             continue
 
         if kind == schema.MESSAGE_ASSISTANT:
@@ -849,11 +948,14 @@ def _render_body(
         if kind == schema.TOOL_CALL:
             name = payload.get("name", "?")
             tool_call_id = payload.get("id")
-            result_payload = None
-            if tool_call_id is not None:
-                result_payload = tool_results.get(str(tool_call_id))
-                if result_payload is not None:
-                    consumed_results.add(str(tool_call_id))
+            result = tool_results.get(str(tool_call_id)) if tool_call_id is not None else None
+            if result is not None:
+                consumed_results.add(str(tool_call_id))
+            result_payload = result.payload if result is not None else None
+            failed = result_payload is not None and schema.result_failed(result_payload)
+            start = _epoch(ts)
+            end = _epoch(result.timestamp) if result is not None else None
+            seconds = end - start if start is not None and end is not None else None
 
             detail = _fmt_args(payload.get("args"))
             if result_payload is not None:
@@ -865,13 +967,25 @@ def _render_body(
                 )
                 if preview:
                     detail += preview
+            peek = _tool_summary(payload.get("args"))
+            row = _tool_event(
+                label=tool_label(str(name)),
+                peek=peek,
+                detail=detail,
+                ts=ts,
+                kind=kind,
+                how=_how_html(failed="failed" if failed else "", seconds=seconds),
+            )
             parts.append(
-                _tool_event(
-                    label=tool_label(str(name)),
-                    peek=_tool_summary(payload.get("args")),
-                    detail=detail,
+                _Step(
+                    html=row,
                     ts=ts,
-                    kind=kind,
+                    tool=str(name),
+                    peek=peek,
+                    ran=result is not None,
+                    failed=failed,
+                    start=start,
+                    seconds=seconds,
                 )
             )
             continue
@@ -958,6 +1072,18 @@ def _render_body(
             f"</article>"
         )
 
+    timeline: list[str] = []
+    run: list[_Step] = []
+    for part in [*parts, ""]:
+        if isinstance(part, _Step):
+            run.append(part)
+            continue
+        if run:
+            timeline.append(_steps_html(run))
+            run = []
+        if part:
+            timeline.append(part)
+
     # One compact meta line; the date rides on `started` and the session-end
     # marker at the foot carries the end time, so neither needs its own row.
     header_meta = ""
@@ -1012,7 +1138,7 @@ def _render_body(
         f'<button type="button" id="collapse-all">Collapse all</button>'
         f'<button type="button" id="expand-all">Expand all</button>'
         f"</div>"
-        f'<div class="timeline">{"".join(parts)}</div>'
+        f'<div class="timeline">{"".join(timeline)}</div>'
         f'<p class="share-note">To share this transcript, distribute the session folder '
         f"(<code>transcript.html</code> plus any <code>artifacts/</code>) or run "
         f"<code>makker transcript --bundle</code> to create a zip.</p>"

@@ -5,7 +5,7 @@
   <html lang="en">
   <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-sreTR58h4qE3whOOwCSsypJc/Hift8fm3aUiQH3WFrM='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Q89SdMj6J2KtSpViKiDhz5GMjvbvMwVSKVGGBfuTWHc='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Makker transcript</title>
   <style>
@@ -268,6 +268,26 @@
   }
   .tool-summary time { flex: 0 0 auto; }
   .tool-body { margin-top: 0.5rem; }
+  .event-kind.thought { color: var(--reasoning); }
+  .event-kind.thought + .tool-peek { font-family: inherit; font-size: 0.85rem; font-style: italic; }
+  .step-failed { color: var(--approval); flex: 0 0 auto; }
+  .step-took { color: var(--muted); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  /* The agent's work between two things it says: one line, its steps inside. */
+  .steps-what {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .steps-body { margin-top: 0.4rem; display: flex; flex-direction: column; }
+  .steps-body > .event {
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: none;
+    padding: 0.3rem 0 0.3rem 0.75rem;
+  }
   .event.approval { border-left: 3px solid var(--approval); }
   .approval-actions { margin: 0; padding-left: 1.2rem; }
   .approval-actions li { margin: 0.1rem 0; }
@@ -493,7 +513,8 @@
         [...checkboxes].filter((cb) => !cb.checked).map((cb) => cb.dataset.filter)
       );
       events.forEach((el) => {
-        el.style.display = hidden.has(el.dataset.filter) ? "none" : "";
+        const kinds = el.dataset.filter.split(" ");
+        el.style.display = kinds.every((kind) => hidden.has(kind)) ? "none" : "";
       });
     }
     checkboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
@@ -516,7 +537,7 @@
   <html lang="en">
   <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-sreTR58h4qE3whOOwCSsypJc/Hift8fm3aUiQH3WFrM='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Q89SdMj6J2KtSpViKiDhz5GMjvbvMwVSKVGGBfuTWHc='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Makker transcript</title>
   <style>
@@ -779,6 +800,26 @@
   }
   .tool-summary time { flex: 0 0 auto; }
   .tool-body { margin-top: 0.5rem; }
+  .event-kind.thought { color: var(--reasoning); }
+  .event-kind.thought + .tool-peek { font-family: inherit; font-size: 0.85rem; font-style: italic; }
+  .step-failed { color: var(--approval); flex: 0 0 auto; }
+  .step-took { color: var(--muted); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  /* The agent's work between two things it says: one line, its steps inside. */
+  .steps-what {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .steps-body { margin-top: 0.4rem; display: flex; flex-direction: column; }
+  .steps-body > .event {
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: none;
+    padding: 0.3rem 0 0.3rem 0.75rem;
+  }
   .event.approval { border-left: 3px solid var(--approval); }
   .approval-actions { margin: 0; padding-left: 1.2rem; }
   .approval-actions li { margin: 0.1rem 0; }
@@ -1002,7 +1043,8 @@
         [...checkboxes].filter((cb) => !cb.checked).map((cb) => cb.dataset.filter)
       );
       events.forEach((el) => {
-        el.style.display = hidden.has(el.dataset.filter) ? "none" : "";
+        const kinds = el.dataset.filter.split(" ");
+        el.style.display = kinds.every((kind) => hidden.has(kind)) ? "none" : "";
       });
     }
     checkboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
@@ -1025,7 +1067,7 @@
   <html lang="en">
   <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-sreTR58h4qE3whOOwCSsypJc/Hift8fm3aUiQH3WFrM='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Q89SdMj6J2KtSpViKiDhz5GMjvbvMwVSKVGGBfuTWHc='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Makker transcript</title>
   <style>
@@ -1288,6 +1330,26 @@
   }
   .tool-summary time { flex: 0 0 auto; }
   .tool-body { margin-top: 0.5rem; }
+  .event-kind.thought { color: var(--reasoning); }
+  .event-kind.thought + .tool-peek { font-family: inherit; font-size: 0.85rem; font-style: italic; }
+  .step-failed { color: var(--approval); flex: 0 0 auto; }
+  .step-took { color: var(--muted); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  /* The agent's work between two things it says: one line, its steps inside. */
+  .steps-what {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .steps-body { margin-top: 0.4rem; display: flex; flex-direction: column; }
+  .steps-body > .event {
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: none;
+    padding: 0.3rem 0 0.3rem 0.75rem;
+  }
   .event.approval { border-left: 3px solid var(--approval); }
   .approval-actions { margin: 0; padding-left: 1.2rem; }
   .approval-actions li { margin: 0.1rem 0; }
@@ -1513,7 +1575,8 @@
         [...checkboxes].filter((cb) => !cb.checked).map((cb) => cb.dataset.filter)
       );
       events.forEach((el) => {
-        el.style.display = hidden.has(el.dataset.filter) ? "none" : "";
+        const kinds = el.dataset.filter.split(" ");
+        el.style.display = kinds.every((kind) => hidden.has(kind)) ? "none" : "";
       });
     }
     checkboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
@@ -1536,7 +1599,7 @@
   <html lang="en">
   <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-sreTR58h4qE3whOOwCSsypJc/Hift8fm3aUiQH3WFrM='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Q89SdMj6J2KtSpViKiDhz5GMjvbvMwVSKVGGBfuTWHc='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Makker transcript</title>
   <style>
@@ -1799,6 +1862,26 @@
   }
   .tool-summary time { flex: 0 0 auto; }
   .tool-body { margin-top: 0.5rem; }
+  .event-kind.thought { color: var(--reasoning); }
+  .event-kind.thought + .tool-peek { font-family: inherit; font-size: 0.85rem; font-style: italic; }
+  .step-failed { color: var(--approval); flex: 0 0 auto; }
+  .step-took { color: var(--muted); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  /* The agent's work between two things it says: one line, its steps inside. */
+  .steps-what {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .steps-body { margin-top: 0.4rem; display: flex; flex-direction: column; }
+  .steps-body > .event {
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: none;
+    padding: 0.3rem 0 0.3rem 0.75rem;
+  }
   .event.approval { border-left: 3px solid var(--approval); }
   .approval-actions { margin: 0; padding-left: 1.2rem; }
   .approval-actions li { margin: 0.1rem 0; }
@@ -2029,7 +2112,8 @@
         [...checkboxes].filter((cb) => !cb.checked).map((cb) => cb.dataset.filter)
       );
       events.forEach((el) => {
-        el.style.display = hidden.has(el.dataset.filter) ? "none" : "";
+        const kinds = el.dataset.filter.split(" ");
+        el.style.display = kinds.every((kind) => hidden.has(kind)) ? "none" : "";
       });
     }
     checkboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
@@ -2052,7 +2136,7 @@
   <html lang="en">
   <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-sreTR58h4qE3whOOwCSsypJc/Hift8fm3aUiQH3WFrM='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Q89SdMj6J2KtSpViKiDhz5GMjvbvMwVSKVGGBfuTWHc='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Makker transcript</title>
   <style>
@@ -2315,6 +2399,26 @@
   }
   .tool-summary time { flex: 0 0 auto; }
   .tool-body { margin-top: 0.5rem; }
+  .event-kind.thought { color: var(--reasoning); }
+  .event-kind.thought + .tool-peek { font-family: inherit; font-size: 0.85rem; font-style: italic; }
+  .step-failed { color: var(--approval); flex: 0 0 auto; }
+  .step-took { color: var(--muted); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  /* The agent's work between two things it says: one line, its steps inside. */
+  .steps-what {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .steps-body { margin-top: 0.4rem; display: flex; flex-direction: column; }
+  .steps-body > .event {
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: none;
+    padding: 0.3rem 0 0.3rem 0.75rem;
+  }
   .event.approval { border-left: 3px solid var(--approval); }
   .approval-actions { margin: 0; padding-left: 1.2rem; }
   .approval-actions li { margin: 0.1rem 0; }
@@ -2538,7 +2642,8 @@
         [...checkboxes].filter((cb) => !cb.checked).map((cb) => cb.dataset.filter)
       );
       events.forEach((el) => {
-        el.style.display = hidden.has(el.dataset.filter) ? "none" : "";
+        const kinds = el.dataset.filter.split(" ");
+        el.style.display = kinds.every((kind) => hidden.has(kind)) ? "none" : "";
       });
     }
     checkboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
@@ -2561,7 +2666,7 @@
   <html lang="en">
   <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-sreTR58h4qE3whOOwCSsypJc/Hift8fm3aUiQH3WFrM='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Q89SdMj6J2KtSpViKiDhz5GMjvbvMwVSKVGGBfuTWHc='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Makker transcript</title>
   <style>
@@ -2824,6 +2929,26 @@
   }
   .tool-summary time { flex: 0 0 auto; }
   .tool-body { margin-top: 0.5rem; }
+  .event-kind.thought { color: var(--reasoning); }
+  .event-kind.thought + .tool-peek { font-family: inherit; font-size: 0.85rem; font-style: italic; }
+  .step-failed { color: var(--approval); flex: 0 0 auto; }
+  .step-took { color: var(--muted); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  /* The agent's work between two things it says: one line, its steps inside. */
+  .steps-what {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .steps-body { margin-top: 0.4rem; display: flex; flex-direction: column; }
+  .steps-body > .event {
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: none;
+    padding: 0.3rem 0 0.3rem 0.75rem;
+  }
   .event.approval { border-left: 3px solid var(--approval); }
   .approval-actions { margin: 0; padding-left: 1.2rem; }
   .approval-actions li { margin: 0.1rem 0; }
@@ -3051,7 +3176,8 @@
         [...checkboxes].filter((cb) => !cb.checked).map((cb) => cb.dataset.filter)
       );
       events.forEach((el) => {
-        el.style.display = hidden.has(el.dataset.filter) ? "none" : "";
+        const kinds = el.dataset.filter.split(" ");
+        el.style.display = kinds.every((kind) => hidden.has(kind)) ? "none" : "";
       });
     }
     checkboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
@@ -3074,7 +3200,7 @@
   <html lang="en">
   <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-sreTR58h4qE3whOOwCSsypJc/Hift8fm3aUiQH3WFrM='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Q89SdMj6J2KtSpViKiDhz5GMjvbvMwVSKVGGBfuTWHc='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Makker transcript</title>
   <style>
@@ -3337,6 +3463,26 @@
   }
   .tool-summary time { flex: 0 0 auto; }
   .tool-body { margin-top: 0.5rem; }
+  .event-kind.thought { color: var(--reasoning); }
+  .event-kind.thought + .tool-peek { font-family: inherit; font-size: 0.85rem; font-style: italic; }
+  .step-failed { color: var(--approval); flex: 0 0 auto; }
+  .step-took { color: var(--muted); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  /* The agent's work between two things it says: one line, its steps inside. */
+  .steps-what {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .steps-body { margin-top: 0.4rem; display: flex; flex-direction: column; }
+  .steps-body > .event {
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: none;
+    padding: 0.3rem 0 0.3rem 0.75rem;
+  }
   .event.approval { border-left: 3px solid var(--approval); }
   .approval-actions { margin: 0; padding-left: 1.2rem; }
   .approval-actions li { margin: 0.1rem 0; }
@@ -3560,7 +3706,8 @@
         [...checkboxes].filter((cb) => !cb.checked).map((cb) => cb.dataset.filter)
       );
       events.forEach((el) => {
-        el.style.display = hidden.has(el.dataset.filter) ? "none" : "";
+        const kinds = el.dataset.filter.split(" ");
+        el.style.display = kinds.every((kind) => hidden.has(kind)) ? "none" : "";
       });
     }
     checkboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
@@ -3583,7 +3730,7 @@
   <html lang="en">
   <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-sreTR58h4qE3whOOwCSsypJc/Hift8fm3aUiQH3WFrM='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Q89SdMj6J2KtSpViKiDhz5GMjvbvMwVSKVGGBfuTWHc='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Makker transcript</title>
   <style>
@@ -3846,6 +3993,26 @@
   }
   .tool-summary time { flex: 0 0 auto; }
   .tool-body { margin-top: 0.5rem; }
+  .event-kind.thought { color: var(--reasoning); }
+  .event-kind.thought + .tool-peek { font-family: inherit; font-size: 0.85rem; font-style: italic; }
+  .step-failed { color: var(--approval); flex: 0 0 auto; }
+  .step-took { color: var(--muted); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  /* The agent's work between two things it says: one line, its steps inside. */
+  .steps-what {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .steps-body { margin-top: 0.4rem; display: flex; flex-direction: column; }
+  .steps-body > .event {
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: none;
+    padding: 0.3rem 0 0.3rem 0.75rem;
+  }
   .event.approval { border-left: 3px solid var(--approval); }
   .approval-actions { margin: 0; padding-left: 1.2rem; }
   .approval-actions li { margin: 0.1rem 0; }
@@ -4069,7 +4236,8 @@
         [...checkboxes].filter((cb) => !cb.checked).map((cb) => cb.dataset.filter)
       );
       events.forEach((el) => {
-        el.style.display = hidden.has(el.dataset.filter) ? "none" : "";
+        const kinds = el.dataset.filter.split(" ");
+        el.style.display = kinds.every((kind) => hidden.has(kind)) ? "none" : "";
       });
     }
     checkboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
@@ -4092,7 +4260,7 @@
   <html lang="en">
   <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-sreTR58h4qE3whOOwCSsypJc/Hift8fm3aUiQH3WFrM='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Q89SdMj6J2KtSpViKiDhz5GMjvbvMwVSKVGGBfuTWHc='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Makker transcript</title>
   <style>
@@ -4355,6 +4523,26 @@
   }
   .tool-summary time { flex: 0 0 auto; }
   .tool-body { margin-top: 0.5rem; }
+  .event-kind.thought { color: var(--reasoning); }
+  .event-kind.thought + .tool-peek { font-family: inherit; font-size: 0.85rem; font-style: italic; }
+  .step-failed { color: var(--approval); flex: 0 0 auto; }
+  .step-took { color: var(--muted); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  /* The agent's work between two things it says: one line, its steps inside. */
+  .steps-what {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .steps-body { margin-top: 0.4rem; display: flex; flex-direction: column; }
+  .steps-body > .event {
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: none;
+    padding: 0.3rem 0 0.3rem 0.75rem;
+  }
   .event.approval { border-left: 3px solid var(--approval); }
   .approval-actions { margin: 0; padding-left: 1.2rem; }
   .approval-actions li { margin: 0.1rem 0; }
@@ -4582,7 +4770,8 @@
         [...checkboxes].filter((cb) => !cb.checked).map((cb) => cb.dataset.filter)
       );
       events.forEach((el) => {
-        el.style.display = hidden.has(el.dataset.filter) ? "none" : "";
+        const kinds = el.dataset.filter.split(" ");
+        el.style.display = kinds.every((kind) => hidden.has(kind)) ? "none" : "";
       });
     }
     checkboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
@@ -4605,7 +4794,7 @@
   <html lang="en">
   <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-sreTR58h4qE3whOOwCSsypJc/Hift8fm3aUiQH3WFrM='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Q89SdMj6J2KtSpViKiDhz5GMjvbvMwVSKVGGBfuTWHc='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Makker transcript</title>
   <style>
@@ -4868,6 +5057,26 @@
   }
   .tool-summary time { flex: 0 0 auto; }
   .tool-body { margin-top: 0.5rem; }
+  .event-kind.thought { color: var(--reasoning); }
+  .event-kind.thought + .tool-peek { font-family: inherit; font-size: 0.85rem; font-style: italic; }
+  .step-failed { color: var(--approval); flex: 0 0 auto; }
+  .step-took { color: var(--muted); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  /* The agent's work between two things it says: one line, its steps inside. */
+  .steps-what {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .steps-body { margin-top: 0.4rem; display: flex; flex-direction: column; }
+  .steps-body > .event {
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: none;
+    padding: 0.3rem 0 0.3rem 0.75rem;
+  }
   .event.approval { border-left: 3px solid var(--approval); }
   .approval-actions { margin: 0; padding-left: 1.2rem; }
   .approval-actions li { margin: 0.1rem 0; }
@@ -5081,7 +5290,7 @@
   </style>
   </head>
   <body>
-  <div class="wrap"><header><h1>Makker transcript</h1></header><div class="controls"><fieldset><legend>Filter</legend><label><input type="checkbox" class="kind-filter" data-filter="reasoning" checked> Reasoning <span class="count">1</span></label></fieldset><button type="button" id="collapse-all">Collapse all</button><button type="button" id="expand-all">Expand all</button></div><div class="timeline"><article class="event" data-kind="message_reasoning" data-filter="reasoning"><div class="event-header"><span class="event-kind reasoning">Reasoning</span><time datetime="2026-05-19T10:00:01+00:00">10:00:01</time></div><details><summary>thinking step by step</summary><div class="prose-plain">thinking step by step</div></details></article></div><p class="share-note">To share this transcript, distribute the session folder (<code>transcript.html</code> plus any <code>artifacts/</code>) or run <code>makker transcript --bundle</code> to create a zip.</p></div>
+  <div class="wrap"><header><h1>Makker transcript</h1></header><div class="controls"><fieldset><legend>Filter</legend><label><input type="checkbox" class="kind-filter" data-filter="reasoning" checked> Reasoning <span class="count">1</span></label></fieldset><button type="button" id="collapse-all">Collapse all</button><button type="button" id="expand-all">Expand all</button></div><div class="timeline"><article class="event tool-event" data-kind="message_reasoning" data-filter="reasoning"><details><summary class="tool-summary"><span class="event-kind thought">Thought</span><span class="tool-peek">thinking step by step</span><time datetime="2026-05-19T10:00:01+00:00">10:00:01</time></summary><div class="tool-body"><div class="prose-plain">thinking step by step</div></div></details></article></div><p class="share-note">To share this transcript, distribute the session folder (<code>transcript.html</code> plus any <code>artifacts/</code>) or run <code>makker transcript --bundle</code> to create a zip.</p></div>
   <script>
   (function () {
     const events = document.querySelectorAll(".event[data-filter]");
@@ -5091,7 +5300,8 @@
         [...checkboxes].filter((cb) => !cb.checked).map((cb) => cb.dataset.filter)
       );
       events.forEach((el) => {
-        el.style.display = hidden.has(el.dataset.filter) ? "none" : "";
+        const kinds = el.dataset.filter.split(" ");
+        el.style.display = kinds.every((kind) => hidden.has(kind)) ? "none" : "";
       });
     }
     checkboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
@@ -5114,7 +5324,7 @@
   <html lang="en">
   <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-sreTR58h4qE3whOOwCSsypJc/Hift8fm3aUiQH3WFrM='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Q89SdMj6J2KtSpViKiDhz5GMjvbvMwVSKVGGBfuTWHc='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Makker transcript</title>
   <style>
@@ -5377,6 +5587,26 @@
   }
   .tool-summary time { flex: 0 0 auto; }
   .tool-body { margin-top: 0.5rem; }
+  .event-kind.thought { color: var(--reasoning); }
+  .event-kind.thought + .tool-peek { font-family: inherit; font-size: 0.85rem; font-style: italic; }
+  .step-failed { color: var(--approval); flex: 0 0 auto; }
+  .step-took { color: var(--muted); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  /* The agent's work between two things it says: one line, its steps inside. */
+  .steps-what {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .steps-body { margin-top: 0.4rem; display: flex; flex-direction: column; }
+  .steps-body > .event {
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: none;
+    padding: 0.3rem 0 0.3rem 0.75rem;
+  }
   .event.approval { border-left: 3px solid var(--approval); }
   .approval-actions { margin: 0; padding-left: 1.2rem; }
   .approval-actions li { margin: 0.1rem 0; }
@@ -5600,7 +5830,8 @@
         [...checkboxes].filter((cb) => !cb.checked).map((cb) => cb.dataset.filter)
       );
       events.forEach((el) => {
-        el.style.display = hidden.has(el.dataset.filter) ? "none" : "";
+        const kinds = el.dataset.filter.split(" ");
+        el.style.display = kinds.every((kind) => hidden.has(kind)) ? "none" : "";
       });
     }
     checkboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
@@ -5623,7 +5854,7 @@
   <html lang="en">
   <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-sreTR58h4qE3whOOwCSsypJc/Hift8fm3aUiQH3WFrM='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Q89SdMj6J2KtSpViKiDhz5GMjvbvMwVSKVGGBfuTWHc='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Makker transcript</title>
   <style>
@@ -5886,6 +6117,26 @@
   }
   .tool-summary time { flex: 0 0 auto; }
   .tool-body { margin-top: 0.5rem; }
+  .event-kind.thought { color: var(--reasoning); }
+  .event-kind.thought + .tool-peek { font-family: inherit; font-size: 0.85rem; font-style: italic; }
+  .step-failed { color: var(--approval); flex: 0 0 auto; }
+  .step-took { color: var(--muted); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  /* The agent's work between two things it says: one line, its steps inside. */
+  .steps-what {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .steps-body { margin-top: 0.4rem; display: flex; flex-direction: column; }
+  .steps-body > .event {
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: none;
+    padding: 0.3rem 0 0.3rem 0.75rem;
+  }
   .event.approval { border-left: 3px solid var(--approval); }
   .approval-actions { margin: 0; padding-left: 1.2rem; }
   .approval-actions li { margin: 0.1rem 0; }
@@ -6099,7 +6350,7 @@
   </style>
   </head>
   <body>
-  <div class="wrap"><header><h1>Makker transcript</h1></header><div class="controls"><fieldset><legend>Filter</legend><label><input type="checkbox" class="kind-filter" data-filter="tools" checked> Tools <span class="count">1</span></label></fieldset><button type="button" id="collapse-all">Collapse all</button><button type="button" id="expand-all">Expand all</button></div><div class="timeline"><article class="event tool-event" data-kind="tool_call" data-filter="tools"><details><summary class="tool-summary"><span class="event-kind tool">Plan</span><span class="tool-peek">2 item(s)</span><time datetime="2026-05-19T10:00:01+00:00">10:00:01</time></summary><div class="tool-body"><dl><dt>todos</dt><dd><ul class="todo-list"><li class="todo-item"><span class="todo-status completed">completed</span><span class="todo-text">Inspect docs</span></li><li class="todo-item"><span class="todo-status in_progress">in progress</span><span class="todo-text">Explain pattern</span></li></ul></dd></dl></div></details></article></div><p class="share-note">To share this transcript, distribute the session folder (<code>transcript.html</code> plus any <code>artifacts/</code>) or run <code>makker transcript --bundle</code> to create a zip.</p></div>
+  <div class="wrap"><header><h1>Makker transcript</h1></header><div class="controls"><fieldset><legend>Filter</legend><label><input type="checkbox" class="kind-filter" data-filter="tools" checked> Tools <span class="count">1</span></label></fieldset><button type="button" id="collapse-all">Collapse all</button><button type="button" id="expand-all">Expand all</button></div><div class="timeline"><article class="event tool-event" data-kind="tool_call" data-filter="tools"><details><summary class="tool-summary"><span class="event-kind tool">Plan</span><span class="tool-peek">1 of 2 done</span><time datetime="2026-05-19T10:00:01+00:00">10:00:01</time></summary><div class="tool-body"><dl><dt>todos</dt><dd><ul class="todo-list"><li class="todo-item"><span class="todo-status completed">completed</span><span class="todo-text">Inspect docs</span></li><li class="todo-item"><span class="todo-status in_progress">in progress</span><span class="todo-text">Explain pattern</span></li></ul></dd></dl></div></details></article></div><p class="share-note">To share this transcript, distribute the session folder (<code>transcript.html</code> plus any <code>artifacts/</code>) or run <code>makker transcript --bundle</code> to create a zip.</p></div>
   <script>
   (function () {
     const events = document.querySelectorAll(".event[data-filter]");
@@ -6109,7 +6360,8 @@
         [...checkboxes].filter((cb) => !cb.checked).map((cb) => cb.dataset.filter)
       );
       events.forEach((el) => {
-        el.style.display = hidden.has(el.dataset.filter) ? "none" : "";
+        const kinds = el.dataset.filter.split(" ");
+        el.style.display = kinds.every((kind) => hidden.has(kind)) ? "none" : "";
       });
     }
     checkboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
@@ -6132,7 +6384,7 @@
   <html lang="en">
   <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-sreTR58h4qE3whOOwCSsypJc/Hift8fm3aUiQH3WFrM='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Q89SdMj6J2KtSpViKiDhz5GMjvbvMwVSKVGGBfuTWHc='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Makker transcript</title>
   <style>
@@ -6395,6 +6647,26 @@
   }
   .tool-summary time { flex: 0 0 auto; }
   .tool-body { margin-top: 0.5rem; }
+  .event-kind.thought { color: var(--reasoning); }
+  .event-kind.thought + .tool-peek { font-family: inherit; font-size: 0.85rem; font-style: italic; }
+  .step-failed { color: var(--approval); flex: 0 0 auto; }
+  .step-took { color: var(--muted); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  /* The agent's work between two things it says: one line, its steps inside. */
+  .steps-what {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .steps-body { margin-top: 0.4rem; display: flex; flex-direction: column; }
+  .steps-body > .event {
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: none;
+    padding: 0.3rem 0 0.3rem 0.75rem;
+  }
   .event.approval { border-left: 3px solid var(--approval); }
   .approval-actions { margin: 0; padding-left: 1.2rem; }
   .approval-actions li { margin: 0.1rem 0; }
@@ -6621,7 +6893,8 @@
         [...checkboxes].filter((cb) => !cb.checked).map((cb) => cb.dataset.filter)
       );
       events.forEach((el) => {
-        el.style.display = hidden.has(el.dataset.filter) ? "none" : "";
+        const kinds = el.dataset.filter.split(" ");
+        el.style.display = kinds.every((kind) => hidden.has(kind)) ? "none" : "";
       });
     }
     checkboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
@@ -6644,7 +6917,7 @@
   <html lang="en">
   <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-sreTR58h4qE3whOOwCSsypJc/Hift8fm3aUiQH3WFrM='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Q89SdMj6J2KtSpViKiDhz5GMjvbvMwVSKVGGBfuTWHc='; img-src 'self' data: file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Makker transcript</title>
   <style>
@@ -6907,6 +7180,26 @@
   }
   .tool-summary time { flex: 0 0 auto; }
   .tool-body { margin-top: 0.5rem; }
+  .event-kind.thought { color: var(--reasoning); }
+  .event-kind.thought + .tool-peek { font-family: inherit; font-size: 0.85rem; font-style: italic; }
+  .step-failed { color: var(--approval); flex: 0 0 auto; }
+  .step-took { color: var(--muted); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  /* The agent's work between two things it says: one line, its steps inside. */
+  .steps-what {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .steps-body { margin-top: 0.4rem; display: flex; flex-direction: column; }
+  .steps-body > .event {
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: none;
+    padding: 0.3rem 0 0.3rem 0.75rem;
+  }
   .event.approval { border-left: 3px solid var(--approval); }
   .approval-actions { margin: 0; padding-left: 1.2rem; }
   .approval-actions li { margin: 0.1rem 0; }
@@ -7130,7 +7423,8 @@
         [...checkboxes].filter((cb) => !cb.checked).map((cb) => cb.dataset.filter)
       );
       events.forEach((el) => {
-        el.style.display = hidden.has(el.dataset.filter) ? "none" : "";
+        const kinds = el.dataset.filter.split(" ");
+        el.style.display = kinds.every((kind) => hidden.has(kind)) ? "none" : "";
       });
     }
     checkboxes.forEach((cb) => cb.addEventListener("change", applyFilters));
