@@ -89,6 +89,12 @@ Runs one headless turn and exits — same options as `tui` (headless runs need
 `--approval-mode auto`). Exit codes: 0 on success, 3 when the turn needed an
 approval that headless mode cannot ask for.
 
+### makker mcp
+
+Serves the folder's session to another agent over the Model Context Protocol,
+on stdin and stdout. That agent's MCP settings start it; it is not run by hand. See
+[Use Makker from another agent](mcp.md) for setup and options.
+
 ## makker init (alias: setup)
 
 Bootstrap the workspace: write `.makker/config.toml`, copy the simulator's

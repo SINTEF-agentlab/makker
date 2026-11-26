@@ -7,6 +7,8 @@ web UI, the normal way to work:
   ``makker web`` is the same command.
 - ``makker tui [--sim <name>]``         terminal UI.
 - ``makker run "<prompt>" [--sim …]``   one headless turn, then print the result.
+- ``makker mcp [--sim <name>]``         serve the session to another agent over MCP
+  (``makker.__main__`` dispatches it before this module loads; see there).
 
 Setup and utilities:
 
@@ -62,6 +64,8 @@ with interactive plots and reports, in the browser at the link it prints.
   makker                  Web UI (`makker web` is the same).
   makker tui              Terminal UI.
   makker run "<prompt>"   Run a single turn headlessly and print the result.
+  makker mcp              Serve this folder to another agent over MCP; that
+                          agent's MCP settings start it.
 
 The web UI's options (--sim, --port, --model, ...) work with or without `web`;
 `makker web -h` lists them.
@@ -76,6 +80,7 @@ COMMANDS = (
     "web",
     "tui",
     "run",
+    "mcp",
     *sorted(init_cmd.INIT_COMMANDS),
     "key",
     "keys",

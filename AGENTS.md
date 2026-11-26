@@ -127,6 +127,13 @@ and check on staged `.py` files. To verify the whole tree like CI:
   `server/updates.py`
   runs an update started from the browser: `uv tool upgrade`, the env step of
   `makker upgrade`, then a restart of the server into the new version.
+- `src/makker/interfaces/mcp/`: `makker mcp`, the session's tools for another
+  agent over MCP. `server.py` is the protocol side; `runtime.py` the session,
+  and the calls that outlast a client's time limit; `pages.py` the port behind
+  the live-figure links; `specs.py` the tool list. A client gives a server
+  seconds to answer, so the server starts without LangChain (`__main__.py`
+  dispatches `mcp` before the CLI's commands load) and loads only the tools,
+  not the agent stack, to list them.
 - `src/makker/legacy.py`: temporary. Everything that carries a jutul-agent
   install over (data folder, workspace folder, Julia env, old output folders),
   called from a few marked places. `bridge/` and `scripts/rename_to_makker.py`

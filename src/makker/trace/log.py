@@ -77,10 +77,11 @@ class TraceLog:
         self._conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         return self
 
-    def append(self, kind: str, payload: dict[str, Any]) -> None:
+    def append(self, kind: str, payload: dict[str, Any], *, at: datetime | None = None) -> None:
+        """Record an event, as happening now unless ``at`` says when it happened."""
         if self._readonly:
             raise RuntimeError(f"trace {self.path} is open read-only")
-        ts = datetime.now(UTC).isoformat()
+        ts = (at or datetime.now(UTC)).isoformat()
         self._conn.execute(
             "INSERT INTO events (timestamp, kind, payload_json) VALUES (?, ?, ?)",
             (ts, kind, json.dumps(payload, default=str)),

@@ -43,6 +43,9 @@ dependencies = [
     "httpx>=0.27",
     "websockets>=13",
     "tomli-w>=1.2.0",
+    # `makker mcp` serves the session's tools to another agent (interfaces/mcp).
+    # Version 2 of the SDK speaks both the stateless protocol and the older ones.
+    "mcp>=2.2,<3",
 ]
 
 [project.urls]
