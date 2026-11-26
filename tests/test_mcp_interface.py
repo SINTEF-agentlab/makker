@@ -51,13 +51,15 @@ def _text(result: types.CallToolResult) -> str:
 
 
 class _Gate:
-    """A kernel whose eval blocks until released."""
+    """A kernel whose eval prints two lines, then blocks until released."""
 
     def __init__(self) -> None:
+        self.started = asyncio.Event()  # the eval has printed and is blocked
         self.release = asyncio.Event()
         self.kernel = FakeJulia(eval_handler=self._eval, stream_chunks=["step 1\n", "step 2\n"])
 
     async def _eval(self, code: str) -> EvalResult:
+        self.started.set()
         await self.release.wait()
         return EvalResult(output=f"done: {code}")
 
@@ -144,6 +146,7 @@ async def test_a_long_call_answers_still_running_and_is_collected_later(tmp_path
     gate = _Gate()
     async with Client(build_server(_runtime(tmp_path, gate.kernel, wait=0.2))) as client:
         first = await client.call_tool("run_julia", {"code": "solve()"})
+        await gate.started.wait()
         again = await client.call_tool("julia_wait", {})
         gate.release.set()
         done = await client.call_tool("julia_wait", {})
@@ -151,9 +154,9 @@ async def test_a_long_call_answers_still_running_and_is_collected_later(tmp_path
 
     assert not first.is_error
     assert "Still running" in _text(first) and "job-1: run_julia" in _text(first)
-    # What the code has printed so far comes with the news.
-    assert "step 2" in _text(first)
     assert "Still running" in _text(again)
+    # What the code has printed so far comes with the news.
+    assert "step 2" in _text(again)
     assert _text(done).startswith("Result of job-1 (run_julia):") and "done: solve()" in _text(done)
     assert "No call is running" in _text(nothing)
 
@@ -175,6 +178,7 @@ async def test_an_interrupt_stops_the_running_call(tmp_path) -> None:
     gate = _Gate()
     async with Client(build_server(_runtime(tmp_path, gate.kernel, wait=0.2))) as client:
         await client.call_tool("run_julia", {"code": "forever()"})
+        await gate.started.wait()
         stopped = await client.call_tool("julia_interrupt", {})
         idle = await client.call_tool("julia_interrupt", {})
         nothing = await client.call_tool("julia_wait", {})
@@ -229,7 +233,9 @@ def test_a_wait_limit_must_be_positive() -> None:
 async def test_calls_take_turns(tmp_path) -> None:
     # A client may send its calls at once; the session runs them one at a time.
     gate = _Gate()
-    async with Client(build_server(_runtime(tmp_path, gate.kernel, wait=0.2))) as client:
+    runtime = _runtime(tmp_path, gate.kernel, wait=0.2)
+    await runtime.start()  # up first, so the later call waits its turn, not for the start
+    async with Client(build_server(runtime)) as client:
         first, second = await asyncio.gather(
             client.call_tool("run_julia", {"code": "a()"}),
             client.call_tool("run_julia", {"code": "b()"}),
