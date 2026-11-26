@@ -191,6 +191,8 @@ class ModelMenu(ModalScreen[ModelChoice | None]):
             )
 
         highlight = first_enabled
+        if raw in listed:  # an id typed out in full is the row to pick
+            highlight = options.get_option_index(raw)
         if keep_highlight and previous is not None:
             with contextlib.suppress(OptionDoesNotExist):
                 highlight = options.get_option_index(previous)
@@ -227,10 +229,8 @@ class ModelMenu(ModalScreen[ModelChoice | None]):
             self._select(target, scope)
 
     def _current_target(self) -> str | None:
-        """What Enter / Ctrl+A would pick: a typed provider:model, else the highlight."""
-        raw = self.query_one("#model-filter", Input).value.strip()
-        if ":" in raw:
-            return raw
+        """What Enter / Ctrl+A would pick: the highlighted row. A typed
+        provider:model has a row of its own, highlighted until the arrows move on."""
         options = self.query_one("#model-options", OptionList)
         if options.highlighted is None:
             return None
