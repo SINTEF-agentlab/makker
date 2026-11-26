@@ -1,156 +1,92 @@
-"""Compact summaries and display bodies for TUI tool cards."""
+"""How a tool call reads in the TUI: the line of a step, and what is behind it."""
 
 from __future__ import annotations
 
 import ast
 import json
 import re
-from pathlib import Path
 from typing import Any
 
-from makker.agent.tool_output import is_interrupt_payload, strip_read_file_gutter
-from makker.paths import workspace_root
+from makker.agent.tool_output import strip_read_file_gutter
 from makker.preview import (
     fenced_block,
-    shorten,
-    shorten_single_line,
     truncate_preview,
 )
 
-_COMPACT_TOOLS = frozenset(
-    {
-        "read_file",
-        "write_file",
-        "edit_file",
-        "ls",
-        "glob",
-        "grep",
-        "task",
-        "record_attempt",
-        "write_report",
-        "plot_julia",
-    }
-)
+
+def _count(n: int, one: str, many: str | None = None) -> str:
+    return f"{n} {one if n == 1 else many or one + 's'}"
 
 
-def uses_compact_display(tool_name: str, *, is_error: bool, output: str = "") -> bool:
-    if tool_name not in _COMPACT_TOOLS:
-        return False
-    if not is_error:
-        return True
-    return is_interrupt_payload(output)
+_READ_RANGE = re.compile(r"^@@ lines (\d+)-(\d+) of (\d+)")
+_EN_DASH, _MINUS = "\u2013", "\u2212"
 
 
-def compact_tool_summary(
-    tool_name: str,
-    args: dict[str, Any],
-    output: str,
-    *,
-    is_error: bool,
-) -> str | None:
-    if is_error and is_interrupt_payload(output):
-        if tool_name == "task":
-            agent = args.get("subagent_type") or "subagent"
-            return f"Delegated → {agent} · waiting for approval"
-        return "Waiting for approval"
+def _line_count(value: Any) -> int:
+    return str(value).count("\n") + 1 if value else 0
 
+
+def step_note(tool_name: str, args: dict[str, Any], output: str) -> str:
+    """A few words on how a finished call went ("222 lines", "3 matches", an
+    edit's lines added and removed), or "" for a tool whose result says nothing
+    in a few words."""
+    text = output.strip()
     if tool_name == "read_file":
-        return _read_file_summary(args, output)
-    if tool_name == "ls":
-        return _ls_summary(args, output)
-    if tool_name == "glob":
-        return _glob_summary(args, output)
+        m = _READ_RANGE.match(text)
+        if m:
+            first, last, total = (int(g) for g in m.groups())
+            whole = first == 1 and last == total
+            return _count(total, "line") if whole else f"lines {first}{_EN_DASH}{last}"
+        return _count(len([ln for ln in text.splitlines() if ln.strip()]), "line") if text else ""
     if tool_name == "grep":
-        return _grep_summary(args, output)
+        if text.startswith(("No matches found", _NO_MATCHES)):
+            return "no matches"
+        hits = sum(1 for ln in text.splitlines() if re.match(r"^\s+\d+:", ln))
+        files = len([ln for ln in text.splitlines() if ln.strip()])
+        return _count(hits, "match", "matches") if hits else _count(files, "file")
+    if tool_name in ("glob", "ls"):
+        n = len(_parse_path_list(output))
+        return _count(n, "file") if tool_name == "glob" else _count(n, "entry", "entries")
     if tool_name == "write_file":
-        return _write_file_summary(args)
+        return _count(str(args.get("content") or "").count("\n") + 1, "line")
     if tool_name == "edit_file":
-        return _edit_file_summary(args)
-    if tool_name == "task":
-        return _task_summary(args, output, is_error=is_error)
+        added, removed = (_line_count(args.get(k)) for k in ("new_string", "old_string"))
+        return f"+{added} {_MINUS}{removed}"
     if tool_name == "record_attempt":
-        return _record_attempt_summary(output)
-    if tool_name == "write_report":
-        return _render_report_summary(args, output)
-    if tool_name == "plot_julia":
-        return _plot_julia_summary(args, output)
-    return None
+        return text.split(" · id=")[0].splitlines()[0] if text else ""
+    return ""
 
 
-def display_tool_body(
-    tool_name: str,
-    args: dict[str, Any],
-    *,
-    output: str,
-    expanded: bool,
-    is_error: bool,
-) -> str:
-    # Running state: show the Code section while julia tools are in flight so
-    # the user can see what is being executed.  This check must come before the
-    # compact-summary path because plot_julia is in _COMPACT_TOOLS and would
-    # otherwise return "_plot_" with no code context.
-    if not output:
-        code_section = _julia_code_section(tool_name, args)
-        if code_section:
-            return _join_nonempty(code_section, "_running…_")
-        # File writes show the target and a character count that grows as the
-        # model streams the content, so a long write isn't silent dead air.
-        if tool_name == "write_file":
-            return f"_{_write_file_summary(args, running=True)}_"
-        if tool_name == "edit_file":
-            return f"_{_edit_file_summary(args, running=True)}_"
-
-    summary = compact_tool_summary(tool_name, args, output, is_error=is_error)
-    if (
-        summary
-        and not expanded
-        and uses_compact_display(tool_name, is_error=is_error, output=output)
-    ):
-        return f"_{summary}_"
-
-    # write_todos normally renders as a checklist in widgets._render_todo_output;
-    # reaching here means its output didn't parse, so fall through to the
-    # generic rendering rather than returning nothing.
-    code_section = _julia_code_section(tool_name, args)
+def display_tool_body(tool_name: str, args: dict[str, Any], *, output: str, expanded: bool) -> str:
+    """What a finished call returned, under the code it ran: a preview (the
+    end of a Julia run, where its result and timing are), or all of it when
+    ``expanded``."""
+    code_section = julia_code_section(tool_name, args)
     full = strip_read_file_gutter(output) if tool_name == "read_file" else output
     language = _TOOL_LANGUAGES.get(tool_name, "")
-
-    summary_meta = _summarize_output(full)
-
+    meta = _summarize_output(full)
     if expanded:
-        return _join_nonempty(
-            code_section,
-            f"_result · {summary_meta} · full output_",
-            "",
-            fenced_block(full, language=language),
-        )
+        block = fenced_block(full, language=language)
+        return _join_nonempty(code_section, f"_result · {meta} · full output_", "", block)
 
     expandable = is_expandable(full, tool_name=tool_name)
-    if expandable:
-        preview = (
-            _truncate_preview_tail(full, tool_name=tool_name)
-            if tool_name == "run_julia"
-            else _truncate_preview(full, tool_name=tool_name)
-        )
-    else:
+    if not expandable:
         preview = full
-    rendered_preview = (
+    elif tool_name == "run_julia":
+        preview = _truncate_preview_tail(full, tool_name=tool_name)
+    else:
+        preview = _truncate_preview(full, tool_name=tool_name)
+    rendered = (
         fenced_block(preview, language=language)
         if _prefer_fenced_preview(tool_name)
         else _quote_block(preview)
     )
-    if summary and uses_compact_display(tool_name, is_error=is_error, output=output):
-        header = f"_{summary}_ · {summary_meta} · details_"
-    else:
-        header = (
-            f"_output · {summary_meta}{' · preview' if expandable else ''}_"
-            if code_section
-            else f"_result · {summary_meta}{' · preview' if expandable else ''}_"
-        )
-    return _join_nonempty(code_section, header, "", rendered_preview)
+    kind = "output" if code_section else "result"
+    header = f"_{kind} · {meta}{' · preview' if expandable else ''}_"
+    return _join_nonempty(code_section, header, "", rendered)
 
 
-def _julia_code_section(tool_name: str, args: dict[str, Any]) -> str:
+def julia_code_section(tool_name: str, args: dict[str, Any]) -> str:
     """Return a fenced ``Code`` block for run_julia / plot_julia args.
 
     Empty string for any other tool. The TUI uses this so the agent's code
@@ -195,105 +131,6 @@ def _join_nonempty(*parts: str) -> str:
     return "\n".join(part for part in parts if part)
 
 
-def _read_file_summary(args: dict[str, Any], output: str) -> str:
-    path = _path_arg(args)
-    text = strip_read_file_gutter(output)
-    lines = [line for line in text.splitlines() if line.strip()]
-    return f"Read {path} · {len(lines)} lines"
-
-
-def _ls_summary(args: dict[str, Any], output: str) -> str:
-    root = path_link(str(args.get("path") or "."))
-    paths = _parse_path_list(output)
-    label = "entry" if len(paths) == 1 else "entries"
-    return f"Listed {root} · {len(paths)} {label}"
-
-
-def _glob_summary(args: dict[str, Any], output: str) -> str:
-    pattern = str(args.get("pattern") or args.get("glob") or "*")
-    paths = _parse_path_list(output)
-    label = "match" if len(paths) == 1 else "matches"
-    return f"Glob `{pattern}` · {len(paths)} {label}"
-
-
-def _grep_summary(args: dict[str, Any], output: str) -> str:
-    pattern = str(args.get("pattern") or args.get("regex") or "")
-    scope = args.get("path") or args.get("glob") or args.get("include")
-    lines = [line for line in output.splitlines() if line.strip()]
-    label = "line" if len(lines) == 1 else "lines"
-    if scope:
-        return (
-            f"Grep `{shorten_single_line(pattern, 40)}` in "
-            f"{path_link(str(scope))} · {len(lines)} {label}"
-        )
-    return f"Grep `{shorten_single_line(pattern, 48)}` · {len(lines)} {label}"
-
-
-def _content_len(value: Any) -> int:
-    return len(value) if isinstance(value, str) else 0
-
-
-def _write_file_summary(args: dict[str, Any], *, running: bool = False) -> str:
-    chars = _content_len(args.get("content"))
-    suffix = f" · {chars:,} chars" if chars else ""
-    verb = "Writing" if running else "Wrote"
-    return f"{verb} {_path_arg(args)}{suffix}"
-
-
-def _edit_file_summary(args: dict[str, Any], *, running: bool = False) -> str:
-    chars = _content_len(args.get("new_string"))
-    suffix = f" · {chars:,} chars" if chars else ""
-    verb = "Editing" if running else "Edited"
-    return f"{verb} {_path_arg(args)}{suffix}"
-
-
-def _task_summary(args: dict[str, Any], output: str, *, is_error: bool) -> str:
-    agent = str(args.get("subagent_type") or "subagent")
-    if is_error:
-        return f"Delegated → {agent} · failed"
-    if output.strip():
-        return f"Delegated → {agent} · {shorten_single_line(output, 72)}"
-    description = shorten_single_line(str(args.get("description") or ""), 72)
-    return f"Delegated → {agent} · {description}"
-
-
-def _record_attempt_summary(output: str) -> str:
-    # ``record_attempt`` returns ``"attempt #N (parent #M) · key=val · id=<uuid>"``;
-    # keep the leading "attempt #N..." part so the card body shows the index
-    # and primary metric inline.
-    head = output.strip().splitlines()[0] if output.strip() else ""
-    if head.startswith("attempt"):
-        return shorten_single_line(head, 80)
-    return "Recorded attempt"
-
-
-def _render_report_summary(args: dict[str, Any], output: str) -> str:
-    raw = output.strip() or str(args.get("output_path") or args.get("path") or "report.html")
-    path = Path(raw)
-    if path.is_absolute():
-        try:
-            rel = path.relative_to(workspace_root()).as_posix()
-        except ValueError:
-            rel = path.as_posix()
-        return f"Rendered {path_link(rel)}"
-    return f"Rendered {path_link(raw)}"
-
-
-def _plot_julia_summary(args: dict[str, Any], output: str) -> str:
-    cleaned = output.strip()
-    if cleaned.startswith("ERROR"):
-        return "plot · failed"
-    slot = args.get("slot")
-    caption = args.get("caption")
-    head = f"plot `{shorten(str(slot), 28)}`" if slot else "plot"
-    m = re.match(r"saved plot to (\S+) \(", cleaned)
-    if m:
-        return f"{head} · {path_link(m.group(1))}"
-    if caption:
-        return f"{head} · {shorten_single_line(str(caption), 48)}"
-    return head
-
-
 # What `ls` and `glob` render instead of an empty list. Without this the card
 # counts the sentence itself and an empty directory reads as "1 entry".
 _NO_MATCHES = "No files found"
@@ -311,11 +148,6 @@ def _parse_path_list(output: str) -> list[str]:
         if isinstance(parsed, list):
             return [str(item) for item in parsed]
     return [line for line in candidate.splitlines() if line.strip()]
-
-
-def _path_arg(args: dict[str, Any]) -> str:
-    path_value = args.get("path") or args.get("file_path")
-    return path_link(str(path_value or "file"))
 
 
 _PATH_DISPLAY_BUDGET = 40
@@ -361,25 +193,6 @@ def _middle_truncate(text: str, limit: int) -> str:
     keep = limit - 1
     head = keep // 2
     return f"{text[:head]}…{text[-(keep - head) :]}"
-
-
-def path_link(path_str: str) -> str:
-    """A clickable file link: short display text, full absolute path as target.
-
-    Cards render markdown and a ``file://`` link routes to the OS opener (see
-    ``on_markdown_link_clicked``), so the visible text stays short while a click
-    opens the real file, so the link and the text need not match.
-    """
-    short = display_path(path_str)
-    normalized = str(path_str or "").replace("\\", "/")
-    if normalized in {"", ".", "/"}:
-        return short
-    try:
-        path = Path(normalized)
-        full = path if path.is_absolute() else workspace_root() / normalized
-        return f"[{short}]({full.resolve().as_uri()})"
-    except (ValueError, OSError):
-        return short
 
 
 _TOOL_LANGUAGES: dict[str, str] = {

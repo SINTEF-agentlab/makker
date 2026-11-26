@@ -94,7 +94,8 @@ and check on staged `.py` files. To verify the whole tree like CI:
   alongside (`tools.py`, `plot_julia.py`, `memory.py`, `approval.py`,
   `turns.py`, and `added_dirs.py`, which records `/add-dir` folders);
   `tool_labels.py` holds the one friendly name per tool shared by the TUI,
-  approval prompt, and transcript. The Julia-side plot capture lives in the
+  approval prompt, and transcript, and what a run of calls did ("Read 4
+  files, ran Julia"; the web UI keeps a copy in `webapp/src/steps.ts`). The Julia-side plot capture lives in the
   `julia_runtime/Makker` package. The full system prompt is assembled in
   `prompts.py` (each rule stated once).
 - `src/makker/simulators/`: adapter dataclass, registry, env bootstrap +

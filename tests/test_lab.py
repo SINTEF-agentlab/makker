@@ -36,7 +36,7 @@ def test_capture_writes_svg_text_and_transcript(tmp_path):
     assert "<svg" in svg
     text = paths["txt"].read_text(encoding="utf-8")
     assert "Makker" in text  # the header rendered
-    assert "Vector" in text  # the tool output reached the screen
+    assert "[1, 2, 3] .+ 1" in text.replace("\xa0", " ")  # the step reached the screen
     assert paths["transcript"].read_text(encoding="utf-8").strip()
 
 

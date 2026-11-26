@@ -7,11 +7,10 @@ from pathlib import Path
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
-from textual.content import Content
 from textual.widgets import Footer
 
 from _tui import submit_prompt, wait_until_ready
-from makker.agent.turns import TurnTextDelta, TurnToolEvent
+from makker.agent.turns import TurnReasoningDelta, TurnTextDelta, TurnToolEvent
 from makker.interfaces.tui import TUIApp
 from makker.interfaces.tui.approval_menu import ApprovalMenu
 from makker.interfaces.tui.prompt import PromptTextArea
@@ -489,6 +488,45 @@ async def test_turn_cancelled_renders_once(session: Session) -> None:
         assert len(notes) == 1
 
 
+async def test_a_julia_call_still_being_written_is_not_julia_running(session: Session) -> None:
+    """Cancelling while the model writes a Julia call interrupts no Julia, and the
+    note must not say it did."""
+    app = TUIApp(agent=_stub_agent(), session=session)
+    async with app.run_test():
+        await wait_until_ready(app)
+        composing = TurnToolEvent(event="composing", tool_name="run_julia", tool_call_id="c1")
+        await app._render_tool_event(composing)
+        assert not app._has_running_julia_tool()
+        started = TurnToolEvent(
+            event="started", tool_name="run_julia", tool_call_id="c1", args={"code": "sim()"}
+        )
+        await app._render_tool_event(started)
+        assert app._has_running_julia_tool()
+
+
+async def test_a_thought_stays_whole_when_a_call_is_announced_mid_thought(
+    session: Session,
+) -> None:
+    """The call's first chunk and the end of the thought come down separate
+    streams: what is still to arrive of the thought joins it, not a new one."""
+    from makker.interfaces.tui.widgets import ReasoningBlock
+
+    app = TUIApp(agent=_stub_agent(), session=session)
+    async with app.run_test():
+        await wait_until_ready(app)
+        await app._render_reasoning_delta(TurnReasoningDelta("Let me "))
+        await app._render_tool_event(
+            TurnToolEvent(event="composing", tool_name="read_file", tool_call_id="r")
+        )
+        await app._render_reasoning_delta(TurnReasoningDelta("look."))
+        await app._render_tool_event(
+            TurnToolEvent(event="requested", tool_name="read_file", tool_call_id="r", args={})
+        )
+        thoughts = list(app.query(ReasoningBlock))
+        assert [t.content_text for t in thoughts] == ["Let me look."]
+        assert not thoughts[0].under_way
+
+
 async def test_ctrl_c_interrupts_running_turn(session: Session, monkeypatch) -> None:
     app = TUIApp(agent=_stub_agent(), session=session)
     async with app.run_test():
@@ -541,10 +579,9 @@ async def test_warming_indicator_has_its_own_status_chip(session: Session) -> No
         assert bar._warming is True
         assert "warming Julia" in str(bar.render())
 
-        # Turn status and approval state use the bottom line; the chip stays.
+        # A running turn and approval state use the bottom lines; the chip stays.
         app._busy = True
-        app._status_text = "running run_julia…"
-        assert app._activity_label() == "running run_julia…"
+        assert app._live_activity() is not None
         assert bar._warming is True
         app._busy = False
 
@@ -645,22 +682,24 @@ async def test_tui_renders_reasoning_from_v3_event_stream(session: Session) -> N
     async with app.run_test() as pilot:
         await submit_prompt(pilot, "hello")
 
-        reasoning_blocks = [
-            block for block in app.query(MessageBlock) if block.border_title == "Reasoning"
-        ]
+        from makker.interfaces.tui.steps import StepGroup
+        from makker.interfaces.tui.widgets import ReasoningBlock
+
+        reasoning_blocks = list(app.query(ReasoningBlock))
         assistant_blocks = [
             block for block in app.query(MessageBlock) if block.border_title == "Assistant"
         ]
 
         assert len(reasoning_blocks) == 1
-        assert reasoning_blocks[0]._content == "Checking simulator state."
+        assert reasoning_blocks[0].content_text == "Checking simulator state."
         assert len(assistant_blocks) == 1
         assert assistant_blocks[0]._content == "Answer ready"
 
         # Reasoning must render above the answer it precedes, regardless of the
         # order the concurrently-drained text/reasoning projections arrive in.
-        ordered = [b.border_title for b in app.query(MessageBlock)]
-        assert ordered.index("Reasoning") < ordered.index("Assistant")
+        log = list(app.query_one("#log").children)
+        (group,) = [child for child in log if isinstance(child, StepGroup)]
+        assert log.index(group) < log.index(assistant_blocks[0])
 
 
 async def test_tui_prompt_stays_compact_with_long_multiline_draft(session: Session) -> None:
@@ -1252,7 +1291,7 @@ async def test_reasoning_collapses_when_answer_starts(session: Session) -> None:
         block = app.query_one(ReasoningBlock)
         assert block._finished
         assert not block._expanded
-        assert "thought for" in (block.border_subtitle or "")
+        assert block.line_content().plain == "▸ Thought  Checking simulator state."
         assert block.content_text == "Checking simulator state."
 
         await pilot.press("ctrl+o")
@@ -1510,8 +1549,8 @@ async def test_typed_reply_marks_tool_block_rejected(session: Session) -> None:
         await pilot.pause()
 
         assert blocks[0].status == "rejected"
-        shown = Content.from_markup(blocks[0].border_subtitle or "").plain
-        assert shown == "rejected: use the chen cell, write to [/tmp] and keep arr[i]"
+        shown = blocks[0].line_content().plain
+        assert shown.endswith("declined: use the chen cell, write to [/tmp] and keep arr[i]")
 
 
 async def test_compact_updates_context_figure_immediately(session: Session, monkeypatch) -> None:
@@ -1703,3 +1742,69 @@ async def test_replacing_the_key_in_use_rebuilds_the_agent(session: Session, mon
         assert calls == ["openai:gpt-5.4-mini"]
         notes = [block.content_text for block in app.query(MessageBlock)]
         assert any("`openai:gpt-5.4-mini` uses it from the next turn" in note for note in notes)
+
+
+async def test_a_figure_a_tool_made_gets_a_line_of_its_own(session: Session) -> None:
+    """A plot or report is not a step: it is shown like what the agent says, a
+    line of its own after the work that made it, and opens its file on a click."""
+    from makker.interfaces.tui.steps import ArtifactLine, StepGroup
+    from makker.trace import schema
+    from makker.trace.schema import artifact_payload
+
+    app = TUIApp(agent=_stub_agent(), session=session)
+    async with app.run_test() as pilot:
+        await wait_until_ready(app)
+        args = {"code": "lines(1:3)", "caption": "Saturation at day 30"}
+        await app._render_message(
+            TurnToolEvent(event="started", tool_name="plot_julia", tool_call_id="p1", args=args)
+        )
+        session.trace.append(
+            schema.ARTIFACT,
+            artifact_payload(
+                path="artifacts/sat.png", mime="image/png", caption=args["caption"], kind="plot"
+            ),
+        )
+        await app._render_message(
+            TurnToolEvent(event="finished", tool_name="plot_julia", tool_call_id="p1", content="ok")
+        )
+        await pilot.pause()
+
+        (line,) = app.query(ArtifactLine)
+        assert str(line.content).startswith("▣ Plot  Saturation at day 30")
+        assert line.path == session.output_dir / "artifacts/sat.png"
+        log = list(app.query_one("#log").children)
+        (group,) = app.query(StepGroup)
+        assert log.index(group) < log.index(line) and not group.live
+
+        opened: list[Path] = []
+        app._open_file = opened.append  # type: ignore[method-assign]
+        await pilot.click(ArtifactLine)
+        assert opened == [line.path]
+
+
+async def test_the_plan_and_status_line_show_while_a_turn_runs(session: Session) -> None:
+    from makker.interfaces.tui.steps import LiveStatus, PlanView
+
+    app = TUIApp(agent=_stub_agent(), session=session)
+    async with app.run_test() as pilot:
+        await wait_until_ready(app)
+        status = app.query_one(LiveStatus)
+        plan = app.query_one(PlanView)
+        assert not status.has_class("active") and not plan.has_class("active")
+
+        app._busy = True
+        todos = [{"content": "Run it", "status": "in_progress"}]
+        await app._render_message(
+            TurnToolEvent(
+                event="requested", tool_name="write_todos", tool_call_id="t", args={"todos": todos}
+            )
+        )
+        await pilot.pause(0.2)
+        assert plan.has_class("active") and status.has_class("active")
+        assert "Working" in str(status.content)
+        # The plan is the plan, not a step of the work.
+        assert not app._tool_blocks
+
+        await app._finish_turn()
+        await pilot.pause(0.2)
+        assert not plan.has_class("active") and not status.has_class("active")

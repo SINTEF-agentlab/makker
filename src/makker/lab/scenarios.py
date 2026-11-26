@@ -170,7 +170,7 @@ scenario(
 )
 scenario(
     "tool_call",
-    "A run_julia tool card with code and a short result.",
+    "A run_julia step with code and a short result.",
     build_agent=lambda: _tool_agent("3-element Vector{Int64}:\n 2\n 3\n 4"),
     steps=("add one to [1, 2, 3]",),
     tags=("ui",),
@@ -219,7 +219,7 @@ scenario(
 )
 scenario(
     "narrow",
-    "A tool card in a cramped 80x24 terminal.",
+    "A step in a cramped 80x24 terminal.",
     build_agent=lambda: _tool_agent("3-element Vector{Int64}:\n 2\n 3\n 4"),
     steps=("add one to [1, 2, 3]",),
     size=(80, 24),

@@ -27,9 +27,8 @@ emulator (so progress bars collapse to their final state instead of thousands of
 carriage-return frames) and tail-capped at 256 KB; result values and error
 messages are capped at 64 KiB on the kernel side.
 
-The TUI's collapsed tool and reasoning cards are display only. `Ctrl+O`
-toggles the full output for you, and the model's context is unaffected
-either way.
+The TUI's folded steps are display only. `Ctrl+O` shows every step's full
+output for you, and the model's context is unaffected either way.
 
 ## Persistence
 
