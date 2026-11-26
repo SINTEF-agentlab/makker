@@ -476,7 +476,7 @@ class SysimageUnavailable(RuntimeError):
 
 # The command a surface tells the user to re-run. A refusal names the way through
 # it, and the way through depends on how they got here.
-SURFACE_COMMANDS = {"web": "makker", "tui": "makker tui", "cli": "makker run"}
+SURFACE_COMMANDS = {"web": "makker", "tui": "makker tui", "cli": "makker run", "mcp": "makker mcp"}
 
 
 def refusal(decision: Decision, *, command: str = "makker") -> str:

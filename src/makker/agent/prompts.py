@@ -64,6 +64,55 @@ def assemble_session_prompt(
     return "\n\n".join(sections) + "\n"
 
 
+def assemble_mcp_instructions(adapter: SimulatorAdapter | None, *, workspace: Path) -> str:
+    """What another agent's model is told about Makker's MCP server.
+
+    That agent has its own system prompt and its own file and shell tools, so this
+    covers only what it cannot know: that one Julia session is shared and
+    persistent, how long calls and figures are handled, the simulator's own hints
+    (as Makker's agent gets them), and the guides.
+    """
+    from makker.agent.skills import skill_index
+    from makker.simulators import registry
+
+    if adapter is None:
+        return (
+            f"Makker has no simulator set for {workspace}, so its tools cannot start a "
+            f"session yet. Ask the user which simulator to use (known: "
+            f"{', '.join(registry.names())}), then run `makker init --sim <name>` in that "
+            "folder. The tools work from the next call."
+        )
+    imports = ", ".join(adapter.package_imports)
+    lines = [
+        f"Makker runs one persistent Julia session for {adapter.display_name} ({imports}) "
+        f"in {workspace}, and records what is run there.",
+        "",
+        "- Run Julia only through `run_julia`, never as a separate `julia` process, which "
+        "shares no state and pays the full compile time again. State persists between "
+        "calls.",
+        "- Do not write a simulator API from memory. Read the matching guide with "
+        "`read_guide` first, and check details in the session (`@doc`, `methods`) or in "
+        f"the installed source under `pkgdir({adapter.primary_package})`.",
+        "- A call that runs long answers 'still running'. `julia_wait` returns its result "
+        "and `julia_interrupt` stops it. Long simulations are normal: wait for them, do "
+        "not start them again.",
+        "- Print summaries rather than whole arrays or logs. Long output reaches you as "
+        "its start and end, and the result names a file holding all of it.",
+        "- Build figures only with `plot_julia`. Its result names the saved PNG and a "
+        "link to the live, interactive figure: give the user that link, or open it in "
+        "your own browser pane if you have one. Drawing again with the same `slot` "
+        "updates an open page.",
+        "- The first call can take a while: Julia loads the simulator once per session, "
+        "and a folder used for the first time has its Julia environment installed "
+        "first, which takes several minutes.",
+    ]
+    if hints := adapter.domain_hints.strip():
+        lines += ["", "Simulator hints:", hints]
+    lines += ["", "Guides (`read_guide` with the name):"]
+    lines += [f"- {skill.name}: {skill.description}" for skill in skill_index(adapter)]
+    return "\n".join(lines)
+
+
 def _surface_note(surface: str) -> str | None:
     """Tell the agent which front end it is driving, when that changes behaviour.
 

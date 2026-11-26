@@ -54,7 +54,10 @@ looks wrong. Keep it current with `makker upgrade`.
 One folder is bound to one simulator and its Julia environment, so use a
 separate folder for each. `makker` with no command serves the web UI at
 <http://127.0.0.1:8742> and opens it in your browser; `makker tui`
-is the terminal alternative. The full [installation and usage
+is the terminal alternative. To work from an agent you already use, through
+the Model Context Protocol and with no API key for Makker, see
+[Use Makker from another agent](https://sintef-agentlab.github.io/makker/mcp/).
+The full [installation and usage
 guide](https://sintef-agentlab.github.io/makker/usage/) covers workspaces,
 interfaces, and models; to work on Makker itself, clone the repo (see
 [Development](#development)).

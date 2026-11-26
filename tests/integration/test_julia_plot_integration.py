@@ -261,6 +261,60 @@ async def test_the_plot_server_renders_a_figure_only_for_its_secret(plot_display
             session.finalize()
 
 
+@pytest.mark.skipif(
+    not _julia_available() or not _wgl_ready(JUTULDARCY_ENV),
+    reason="Julia and a WGLMakie-instantiated jutuldarcy env are required",
+)
+async def test_another_agent_drives_julia_through_the_mcp_server(plot_display, tmp_path) -> None:
+    """What another agent does through ``makker mcp``, against real Julia: state
+    persists between calls, a call that outlasts the wait keeps running and is
+    interrupted with the state intact, and a plot links to a live figure that only
+    its key opens."""
+    import re
+
+    import httpx
+    import mcp_types as types
+    from mcp import Client
+
+    from makker.interfaces.mcp.runtime import Launch, McpRuntime
+    from makker.interfaces.mcp.server import build_server
+    from makker.session_host import SessionHost
+
+    async def call(client: Client, tool: str, **arguments: object) -> str:
+        result = await client.call_tool(tool, arguments)
+        return "\n".join(b.text for b in result.content if isinstance(b, types.TextContent))
+
+    async with JuliaKernel(_plot_kernel_config(plot_display)) as julia:
+
+        async def start_host() -> SessionHost:
+            return SessionHost(session=_session(julia, tmp_path, "mcp"), agent=None)
+
+        runtime = McpRuntime(Launch(workspace=tmp_path, wait=3), start_host=start_host)
+        async with Client(build_server(runtime)) as client:
+            await call(client, "run_julia", code="x = 41")
+            assert "42" in await call(client, "run_julia", code="x + 1")
+
+            assert "Still running" in await call(client, "run_julia", code="sleep(600)")
+            stopped = await call(client, "julia_interrupt")
+            assert "Interrupted job-" in stopped and "intact" in stopped
+            assert "42" in await call(client, "run_julia", code="x + 1")
+
+            code = "fig = WGLMakie.Figure(); WGLMakie.lines!(WGLMakie.Axis(fig[1, 1]), 1:3); fig"
+            plotted = await call(client, "plot_julia", code=code)
+            while "Still running" in plotted:  # the first plot loads the plotting stack
+                plotted = await call(client, "julia_wait")
+            link = re.search(r"Live figure: (\S+)", plotted)
+            assert link, plotted
+            origin, key = re.match(r"(http://127\.0\.0\.1:\d+)(/[^/]+)/", link[1]).groups()
+            async with httpx.AsyncClient(timeout=60) as http:
+                page = await http.get(link[1])
+                figure = await http.get(origin + re.search(r'src="([^"]+)"', page.text)[1])
+                keyless = await http.get(link[1].replace(key, "", 1))
+            assert page.status_code == 200
+            assert figure.status_code == 200 and "<html" in figure.text.lower()
+            assert keyless.status_code == 404
+
+
 # Every Makie return shape that `_as_figure` must resolve, built from plain Makie so
 # the test stays stable across simulator-package changes. `nonfig` is the negative
 # case: a non-figure value must NOT capture the (now stale) current figure.

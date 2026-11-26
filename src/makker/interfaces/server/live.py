@@ -137,6 +137,7 @@ _POPOUT_WRAPPER_HTML = """<!doctype html>
 <script>
   let W = __W__, H = __H__;
   const REFIT = "__REFIT__";
+  const DRAWN = "__DRAWN__";
   function fit() {
     const s = Math.min(innerWidth / W, innerHeight / H, 1);
     const stage = document.getElementById("stage");
@@ -168,6 +169,27 @@ _POPOUT_WRAPPER_HTML = """<!doctype html>
       } catch (e) { /* best-effort: the scaled presentation stands */ }
     }, 1000);
   });
+  if (DRAWN) {
+    // Drawing the plot again serves the new figure on this route and closes the
+    // view shown here, so ask which drawing is current and load it when it changes.
+    let drawn, misses = 0;
+    const poll = setInterval(async () => {
+      try {
+        const d = await (await fetch(DRAWN)).json();
+        if (drawn !== undefined && d.drawn !== drawn) {
+          if (d.size) { W = d.size[0]; H = d.size[1]; }
+          const frame = document.getElementById("frame");
+          frame.src = frame.src;
+          fit();
+        }
+        drawn = d.drawn;
+        misses = 0;
+      } catch (e) {
+        // What is shown stands. A server silent for a minute has gone for good.
+        if (++misses >= 30) clearInterval(poll);
+      }
+    }, 2000);
+  }
   fit();
 </script>
 </body>
@@ -175,14 +197,40 @@ _POPOUT_WRAPPER_HTML = """<!doctype html>
 """
 
 
+def _plot_record(host: Any, route: str) -> Any:
+    """The newest record of the plot a route shows, or ``None``. A popout's route
+    is its record's plot id plus a ``--popN`` suffix."""
+    from makker.agent.plot_julia import _plot_id_of
+
+    base = re.sub(r"--pop\d+$", "", route)
+    return next(
+        (
+            event
+            for event in reversed(host.session.trace.events_of(schema.ARTIFACT))
+            if _plot_id_of(event.payload) == base
+        ),
+        None,
+    )
+
+
 @router.get("/popout/{session_id}")
 def popout_wrapper(
-    session_id: str, route: str, w: int, h: int, manager: ManagerDep, base_path: BasePathDep
+    session_id: str,
+    route: str,
+    w: int,
+    h: int,
+    manager: ManagerDep,
+    base_path: BasePathDep,
+    follow: bool = False,
 ) -> HTMLResponse:
     """The page a popout window hosts: the live figure, staged and scaled
     under the same presentation contract as the inline canvas stage (see
     ``_POPOUT_WRAPPER_HTML``), so resizing or fullscreening the popup can
-    never leave the scene mis-drawn with widgets floating outside it."""
+    never leave the scene mis-drawn with widgets floating outside it.
+
+    With ``follow`` the page keeps up with its plot: when the plot is drawn again
+    it loads the new figure (see ``popout_drawn``). That is for a page nothing
+    else refreshes, such as one opened from a link."""
     if _ROUTE_ID_RE.fullmatch(route) is None:
         raise HTTPException(status_code=404, detail="no such plot route")
     if not (100 <= w <= 8192 and 100 <= h <= 8192):
@@ -195,11 +243,31 @@ def popout_wrapper(
         raise HTTPException(status_code=404, detail="no live plot server for this session")
     src = public_url(base_path, f"/live/{quote(session_id)}{viz_route(quote(route), secret)}")
     refit = public_url(base_path, f"/popout/{quote(session_id)}/refit?route={quote(route)}")
+    drawn = public_url(base_path, f"/popout/{quote(session_id)}/drawn?route={quote(route)}")
     return HTMLResponse(
         _POPOUT_WRAPPER_HTML.replace("__SRC__", src)
         .replace("__REFIT__", refit)
+        .replace("__DRAWN__", drawn if follow else "")
         .replace("__W__", str(w))
         .replace("__H__", str(h))
+    )
+
+
+@router.get("/popout/{session_id}/drawn")
+async def popout_drawn(session_id: str, route: str, manager: ManagerDep) -> JSONResponse:
+    """Which drawing of its plot a page should show: the id of the plot's newest
+    record, and the size that figure was built at. A page opened with ``follow``
+    polls this. It is answered from the trace, so it answers while Julia is busy
+    (and on the event loop, since the trace belongs to that thread)."""
+    host = manager.get(session_id)
+    if host is None or _ROUTE_ID_RE.fullmatch(route) is None:
+        raise HTTPException(status_code=404, detail="no such plot route")
+    record = _plot_record(host, route)
+    return JSONResponse(
+        {
+            "drawn": record.id if record is not None else None,
+            "size": _authored_of(record.payload) if record is not None else None,
+        }
     )
 
 
@@ -212,24 +280,16 @@ async def popout_refit(
     wrapper stages the echoed size this answers as JSON. Best-effort: a
     missing session, route, or figure answers 204 and the wrapper's scaled
     presentation stands."""
-    from makker.agent.plot_julia import _plot_id_of, refit_web
+    from makker.agent.plot_julia import refit_web
 
     if _ROUTE_ID_RE.fullmatch(route) is None or _sane_size(w, h) is None:
         raise HTTPException(status_code=404, detail="no such plot route")
     host = manager.get(session_id)
     if host is None:
         return Response(status_code=204)
-    # The popout's route is its record's plot id plus a `--popN` suffix.
-    base = re.sub(r"--pop\d+$", "", route)
-    payload = next(
-        (
-            event.payload
-            for event in reversed(host.session.trace.events_of(schema.ARTIFACT))
-            if _plot_id_of(event.payload) == base
-        ),
-        None,
-    )
-    authored = (payload or {}).get("authored_px") or (payload or {}).get("size_px")
+    record = _plot_record(host, route)
+    payload = record.payload if record is not None else {}
+    authored = payload.get("authored_px") or payload.get("size_px")
     echoed = None
     with contextlib.suppress(Exception):
         _err, echoed = await refit_web(
