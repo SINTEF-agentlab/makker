@@ -63,8 +63,8 @@ fire only when the cheaper ones are not enough:
   which the context view counts; the chat does not announce it. This replaced clearing old results to a
   bare `[cleared]` on every call, which left the agent nothing to read back.
 - **Summarization.** When offloading is not enough and the conversation reaches
-  the compaction point (85% of the window, earlier for a model with a large
-  output allowance), the older turns are replaced by a structured summary
+  the compaction point (85% of the window by default, earlier for a model with
+  a large output allowance), the older turns are replaced by a structured summary
   (session intent, key decisions, artifacts, next steps) while the newest turns
   stay verbatim. The summarized turns are offloaded to
   `conversation_history/<internal-session-id>.md` first, so they remain
@@ -131,6 +131,13 @@ and both front ends show the same numbers:
   In the browser, the tool results expand to the largest ones.
 - **Free space** up to the compaction point, the compaction buffer, and how many
   tool results and compactions have been moved out so far.
+- **Where auto-compaction runs**, as a share of the window. In the browser, a click
+  on it offers other points, saved for every session and applied to this one at
+  once; the terminal reads it from `compact_at` in the
+  [user config](configuration.md#user-config). Few sessions need it: compacting
+  earlier keeps requests smaller and cheaper, later keeps more of the
+  conversation verbatim. A model's context size (in its
+  [settings](models.md#settings)) is the stronger lever.
 
 The ring (the terminal shows a `ctx` percentage in its status bar) updates after
 every model call, when a turn ends however it ends, on reconnect, after

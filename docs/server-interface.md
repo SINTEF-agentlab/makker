@@ -113,7 +113,7 @@ second is refused while the first is open.
 | `GET` | `/sessions/{id}/transcript` | The transcript (`?format=html` or `md`) |
 | `GET` | `/sessions/{id}/memory` | The session's workspace memory, as a page |
 | `POST` | `/sessions/{id}/upload` | Add a file to the session workspace (`uploads/<name>`) |
-| `GET` | `/sessions/{id}/context` | The context view as data: the meter (as in the `context` message), what fills the context part by part, the largest tool results, and how many tool results and compactions were moved out. The TUI's `/context` renders the same report |
+| `GET` | `/sessions/{id}/context` | The context view as data: the meter (as in the `context` message), what fills the context part by part, the largest tool results, how many tool results and compactions were moved out, and `compact_percent`, the setting for where compaction runs. The TUI's `/context` renders the same report |
 | `GET` | `/models` | List the models that can be selected, newest first per provider, each with `label`, `window` and `local`; also carries `protocol`, the wire-contract version |
 | `GET` | `/models/live` | The same list refreshed from configured provider APIs and the Ollama daemon (best effort; API-listed tool support is unverified) |
 | `GET` | `/models/menu?current=` | The model menu's short list: `sections` (pinned, recent, the newest per provider with a key, installed local models) and `pinned` |
@@ -121,6 +121,7 @@ second is refused while the first is open.
 | `GET` | `/models/settings?model=` | What a model can be set to: `settings` (the saved `effort`, `output`, `context`), and `effort` (levels, default, current), `output` (choices, default) and `context` (sizes from `min` to `max` and `auto`, the size used when none is chosen; for a local model, `local` is true and each size has its memory and whether it stays on the GPU once `measured`), each `null` when the model does not support it |
 | `POST` | `/models/settings` | Save a model's settings, `{"model", "effort", "output", "context"}` (an omitted one runs at its default), and return them as `GET` does. A running session picks them up when its agent is rebuilt: send `set_model` again with the same model |
 | `POST` | `/models/measure` | Measure a local model's memory at each context size by loading it in Ollama (seconds to a minute, once per model version): `{"model"}`, returned as `GET /models/settings` |
+| `POST` | `/context/settings` | Save where automatic compaction runs for every session, `{"compact_percent"}` (50 to 95, in percent of the window), and return it. A running session picks it up when its agent is rebuilt: send `set_model` again with the same model |
 | `GET` | `/models/window` | A model's context window: `window`, `window_source` (`provider`, `ollama` or `assumed`) and `compact_at` |
 | `GET` | `/credentials` | Which providers have keys, and whether a shell variable shadows a saved one |
 | `POST` | `/credentials` | Save a provider API key (used by the missing-key prompt) |

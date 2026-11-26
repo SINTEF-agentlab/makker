@@ -26,6 +26,9 @@ class UserConfig:
     # Per-model settings (effort, output limit, context size), keyed by model id;
     # see ``model_settings``.
     model_settings: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Where automatic compaction runs, in percent of the window; see
+    # ``context_budget.compact_percent``.
+    compact_at: int | None = None
 
 
 def load_user_config() -> UserConfig:
@@ -39,6 +42,7 @@ def load_user_config() -> UserConfig:
     model = data.get("model")
     pinned = data.get("pinned_models")
     settings = data.get("model_settings")
+    compact_at = data.get("compact_at")
     return UserConfig(
         model=model if isinstance(model, str) else None,
         pinned_models=tuple(m for m in pinned if isinstance(m, str))
@@ -47,6 +51,9 @@ def load_user_config() -> UserConfig:
         model_settings={k: dict(v) for k, v in settings.items() if isinstance(v, dict)}
         if isinstance(settings, dict)
         else {},
+        compact_at=compact_at
+        if isinstance(compact_at, int) and not isinstance(compact_at, bool)
+        else None,
     )
 
 
@@ -64,6 +71,8 @@ def write_user_config(config: UserConfig) -> Path:
     if config.pinned_models:
         pinned = ", ".join(toml_basic_string(m) for m in config.pinned_models)
         lines.append(f"pinned_models = [{pinned}]")
+    if config.compact_at is not None:
+        lines.append(f"compact_at = {int(config.compact_at)}")
     for model_id, values in sorted(config.model_settings.items()):
         if not values:
             continue

@@ -39,11 +39,13 @@ from someone else only if you would run its code.
 
 `<state home>/config.toml` (default `~/.local/share/makker/config.toml`)
 holds user-wide defaults: the model, the models pinned to the top of the
-model menu, and each model's [settings](models.md#settings):
+model menu, where compaction runs, and each model's
+[settings](models.md#settings):
 
 ```toml
 model = "<provider:model>"
 pinned_models = ["<provider:model>"]
+compact_at = 85                    # percent of the window, 50 to 95
 
 [model_settings."<provider:model>"]
 effort = "high"
@@ -52,8 +54,9 @@ context = 131072
 ```
 
 Set the model from the TUI model selector with `Ctrl+A` (save for all
-workspaces), and the settings from the model's settings in the web UI or
-`/effort` in the TUI.
+workspaces), the settings from the model's settings in the web UI or
+`/effort` in the TUI, and `compact_at` at the foot of the web UI's context view
+(see [context](context.md#growth-and-its-limits)).
 
 ## API keys
 

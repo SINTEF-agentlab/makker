@@ -675,6 +675,21 @@ export class Controller {
     this.sendCommand("set_model", current.model);
   }
 
+  /** Save where compaction runs, for every session, and apply it to this one,
+   *  which rebuilds its agent on the same model to pick it up. */
+  async setCompactPercent(percent: number): Promise<void> {
+    let saved: { compact_percent: number };
+    try {
+      saved = await api.saveContextSettings({ compact_percent: percent });
+    } catch (e) {
+      this.s.addSysNote(failureMessage(e, "Could not save the setting."), "warn");
+      return;
+    }
+    const report = this.s.contextView.report;
+    if (report) this.s.setContextView({ report: { ...report, compact_percent: saved.compact_percent } });
+    if (this.s.model) this.sendCommand("set_model", this.s.model);
+  }
+
   /** Measure the current local model's memory at each context size; one
    *  measurement per model at a time, however often its sizes are shown. */
   measureModel(): Promise<void> {

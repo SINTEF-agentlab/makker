@@ -104,7 +104,13 @@ def context_meter(trace: TraceLog) -> dict[str, Any] | None:
 
 
 def context_report(trace: TraceLog) -> dict[str, Any]:
-    """Everything the context view shows, as data both front ends render."""
+    """Everything the context view shows, as data both front ends render.
+
+    ``compact_percent`` is the setting for where compaction runs, not a trace
+    figure: the meter's ``compact_at`` is where it runs for this session's model.
+    """
+    from makker.context_budget import compact_percent
+
     meter = context_meter(trace)
     usage_event = trace.last_event((MODEL_USAGE,))
     usage = usage_event.payload if usage_event else {}
@@ -129,6 +135,7 @@ def context_report(trace: TraceLog) -> dict[str, Any]:
         "breakdown": breakdown,
         "largest": list(measured.get("largest") or ()),
         "moved": moved,
+        "compact_percent": compact_percent(),
     }
 
 
@@ -203,6 +210,8 @@ def render_context_markdown(report: dict[str, Any]) -> str:
         bits.append(f"{count} compaction{'s' if count != 1 else ''}")
     if bits:
         lines += ["", "Moved out: " + ", ".join(bits) + "."]
+    if report.get("compact_percent"):
+        lines += ["", f"Auto-compacts at {report['compact_percent']}% of the window."]
     return "\n".join(lines)
 
 
