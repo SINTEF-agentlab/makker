@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from makker import models, ollama_client
-from makker.context_budget import ASSUMED_WINDOW, ContextBudget, context_budget
+from makker.context_budget import ASSUMED_WINDOW, ContextBudget, context_budget, least_window
 
 
 def test_window_comes_from_the_provider_data_without_building_the_model(monkeypatch) -> None:
@@ -64,6 +64,31 @@ def test_a_model_instance_answers_from_its_own_profile() -> None:
 )
 def test_compact_at(budget: ContextBudget, compact_at: int) -> None:
     assert budget.compact_at == compact_at
+
+
+def test_a_chosen_size_leaves_room_for_the_reply(monkeypatch) -> None:
+    """With 24K kept free for the reply, a 32K window left 7K for the conversation,
+    less than the agent's own prompt, and no turn could run."""
+    from makker.model_settings import MIN_CONTEXT, ModelSettings, save_settings
+
+    class _Model:
+        max_tokens = 24_000
+
+    monkeypatch.setattr(models, "context_window", lambda model_id: 1_000_000)
+    save_settings("anthropic:claude-test", ModelSettings(context=32_768))
+    budget = context_budget("anthropic:claude-test", _Model())
+    # As much room to work in as the smallest size leaves a model keeping nothing free.
+    assert budget.window == least_window(24_000, MIN_CONTEXT) == 39_923
+    assert budget.compact_at == ContextBudget(MIN_CONTEXT, "provider").compact_at
+
+    # A larger choice stands, and so does any choice for a model keeping nothing free.
+    save_settings("anthropic:claude-test", ModelSettings(context=65_536))
+    assert context_budget("anthropic:claude-test", _Model()).window == 65_536
+    save_settings("openai:gpt-test", ModelSettings(context=32_768))
+    assert context_budget("openai:gpt-test", object()).window == 32_768
+    # A local model is loaded with the size chosen, so that is its window whatever it keeps free.
+    save_settings("ollama:qwen3.8:27b", ModelSettings(context=32_768))
+    assert context_budget("ollama:qwen3.8:27b", _Model()).window == 32_768
 
 
 async def test_building_an_agent_records_the_model_and_sizes_the_summarizer(tmp_path) -> None:
