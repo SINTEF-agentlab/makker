@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from makker.agent.approval import ApprovalPolicy, parse_approval_mode
 from makker.agent.turns import TurnRunner
+from makker.surfaces import renders_in_browser
 
 if TYPE_CHECKING:
     from contextlib import AsyncExitStack
@@ -478,6 +479,7 @@ class SessionHost:
         warmup: bool = True,
         virtual_display: bool = True,
         allow_missing_credential: bool = False,
+        with_agent: bool = True,
         extensions: Sequence[Capability] = (),
         sysimage: bool | None = None,
     ) -> SessionHost:
@@ -494,7 +496,9 @@ class SessionHost:
         Julia warm-up. ``virtual_display=False`` skips the per-session Xvfb.
         ``allow_missing_credential=True`` lets an interactive front end come up
         with no agent when the model's provider key is missing, so the user can
-        supply it in-app and rebuild via ``reconfigure``. ``sysimage`` overrides
+        supply it in-app and rebuild via ``reconfigure``. ``with_agent=False``
+        builds no agent at all, for a front end whose agent is someone else's and
+        only calls the session's tools (the MCP server). ``sysimage`` overrides
         the workspace's own on/off setting for this session.
         """
 
@@ -668,7 +672,9 @@ class SessionHost:
             approval = ApprovalPolicy(
                 approval_mode, workspace=ws, store=session.state_dir / "approval-gate.json"
             )
-            if allow_missing_credential and missing_credential(resolved_model) is not None:
+            if not with_agent:
+                agent, backend = None, None
+            elif allow_missing_credential and missing_credential(resolved_model) is not None:
                 # The provider key isn't set, so building the model would crash.
                 # Come up without an agent; the front end collects the key and
                 # rebuilds through ``reconfigure``.
@@ -731,7 +737,7 @@ class SessionHost:
                 collect_warm_packages(all_extensions),
                 collect_warm_code(all_extensions),
                 abandonable=abandonable,
-                native_plotting=surface != "web",
+                native_plotting=not renders_in_browser(surface),
             )
             julia.set_warmup(host._warmup_task, abandonable)
         return host

@@ -51,24 +51,15 @@ from makker.agent.memory import (
     make_remember_tool,
 )
 from makker.agent.offload import ToolResultOffloadMiddleware
-from makker.agent.plot_julia import (
-    make_close_plots_tool,
-    make_plot_julia_tool,
-    make_recapture_tool,
-)
 from makker.agent.prompts import assemble_session_prompt
 from makker.agent.real_paths import enable_real_paths
 from makker.agent.recovery import InvalidToolCallRecoveryMiddleware
-from makker.agent.tools import (
-    make_record_attempt_tool,
-    make_reset_julia_tool,
-    make_run_julia_tool,
-    make_write_report_tool,
-)
+from makker.agent.skills import skill_sources
+from makker.agent.tools import session_tools
 from makker.context_budget import ContextBudget, context_budget
 from makker.model_settings import DEFAULT_OUTPUT, chosen_effort, effort, load_settings
 from makker.models import PROVIDERS, is_ollama_cloud, provider_key_vars, provider_of
-from makker.paths import SHARED_SKILLS_DIR, workspace_memory_dir, workspace_root
+from makker.paths import workspace_memory_dir, workspace_root
 from makker.session import Session
 from makker.simulators.base import SimulatorAdapter
 from makker.trace import TraceRecorder
@@ -486,23 +477,6 @@ def build_backend(
     return backend
 
 
-def skill_sources(adapter: SimulatorAdapter) -> list[str | tuple[str, str]]:
-    """Skill sources for ``SkillsMiddleware``: the real skill directories.
-
-    Bundled skills ship with the package (so they resolve at a real path even
-    from a pip install, no repo checkout needed). The middleware reads their
-    ``SKILL.md`` through the real-path backend. Labels are explicit. This is the
-    seam for user/project skills later (append their real dirs, last wins).
-    """
-
-    sources: list[str | tuple[str, str]] = []
-    if SHARED_SKILLS_DIR.exists():
-        sources.append((str(SHARED_SKILLS_DIR), "Built-in"))
-    if adapter.skills_dir.exists():
-        sources.append((str(adapter.skills_dir), adapter.display_name))
-    return sources
-
-
 def build_agent(
     session: Session,
     *,
@@ -546,13 +520,7 @@ def build_agent(
     active = select_for_surface(list(extensions), surface)
 
     tools = [
-        make_run_julia_tool(session),
-        make_reset_julia_tool(session),
-        make_plot_julia_tool(session, surface=surface),
-        make_recapture_tool(session, surface=surface),
-        make_close_plots_tool(session, surface=surface),
-        make_record_attempt_tool(session),
-        make_write_report_tool(session, surface=surface),
+        *session_tools(session, surface=surface),
         make_remember_tool(memory_dir),
         *collect_tools(active, session),
     ]

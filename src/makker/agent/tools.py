@@ -10,15 +10,23 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Callable
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
-from langchain_core.tools import ToolException, tool
+from langchain_core.tools import BaseTool, ToolException, tool
 
+from makker.agent.plot_julia import (
+    make_close_plots_tool,
+    make_plot_julia_tool,
+    make_recapture_tool,
+)
 from makker.agent.tool_output import error_reply_tool
 from makker.juliakernel.result import OnChunk, OutputChunk
 from makker.paths import resolve_in_workspace, workspace_root
 from makker.session import Session
+from makker.surfaces import renders_in_browser
 from makker.trace.schema import ARTIFACT, ATTEMPT, artifact_payload
 
 # langgraph exposes the active tool call's output-delta writer only through this
@@ -31,17 +39,25 @@ except Exception:  # pragma: no cover - langgraph internals moved
     _tool_call_writer = None  # type: ignore[assignment]
 
 
+# A front end that runs the tools outside a langgraph graph (the MCP server) sets
+# this around a call to receive the same live output the graph would stream.
+tool_output_writer: ContextVar[Callable[[str], None] | None] = ContextVar(
+    "tool_output_writer", default=None
+)
+
+
 def _capture_delta_writer() -> OnChunk | None:
     """Return an ``on_chunk`` that streams kernel output as tool-output deltas.
 
-    The writer is captured here, in the tool's context where langgraph set the
-    ContextVar, so it stays valid when the kernel's pump task (a different task)
-    invokes it. Returns ``None`` outside a streaming graph (e.g. unit tests).
+    The writer is captured here, in the tool's context where the caller set the
+    ContextVar (``tool_output_writer``, else langgraph's), so it stays valid when
+    the kernel's pump task (a different task) invokes it. Returns ``None`` when
+    nobody is streaming (e.g. unit tests).
     """
 
-    if _tool_call_writer is None:
-        return None
-    writer = _tool_call_writer.get()
+    writer = tool_output_writer.get()
+    if writer is None and _tool_call_writer is not None:
+        writer = _tool_call_writer.get()
     if writer is None:
         return None
 
@@ -257,7 +273,7 @@ def _fmt_metric(value: Any) -> str:
 
 
 def make_write_report_tool(session: Session, *, surface: str | None = None):
-    web = (surface or session.surface) == "web"
+    web = renders_in_browser(surface or session.surface)
 
     @tool
     async def write_report(
@@ -386,3 +402,22 @@ def _replaces_other_files(out: Path, reports: set[Path]) -> bool:
         return False
     beside_a_report = any(report.parent == out.parent for report in reports)
     return out.exists() or (not beside_a_report and (out.parent / TRANSCRIPT_FILENAME).exists())
+
+
+def session_tools(session: Session, *, surface: str | None = None) -> list[BaseTool]:
+    """The Julia, plotting and record-keeping tools every front end offers.
+
+    ``build_agent`` gives them to the agent, and a front end that exposes the
+    session to someone else's agent (the MCP server) serves the same list, so the
+    two cannot drift. ``surface`` defaults to ``session.surface``.
+    """
+    surface = surface or session.surface
+    return [
+        make_run_julia_tool(session),
+        make_reset_julia_tool(session),
+        make_plot_julia_tool(session, surface=surface),
+        make_recapture_tool(session, surface=surface),
+        make_close_plots_tool(session, surface=surface),
+        make_record_attempt_tool(session),
+        make_write_report_tool(session, surface=surface),
+    ]
