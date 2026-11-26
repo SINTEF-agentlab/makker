@@ -42,6 +42,27 @@ def load_user_credentials() -> None:
         load_dotenv(path, override=False)
 
 
+# Name endings that mark a credential (``*_API_KEY``, ``OPENAI_ADMIN_KEY``,
+# ``GITHUB_TOKEN``, ``AZURE_CLIENT_SECRET``, ...).
+_SECRET_SUFFIXES = ("_API_KEY", "_ADMIN_KEY", "_TOKEN", "_SECRET")
+
+
+def is_secret_env_var(name: str) -> bool:
+    """Whether code the model writes (Julia, shell commands) runs without ``name``:
+    a provider's key, or any other variable named like a credential.
+
+    Neither needs one, and a command that prints its environment while debugging
+    would copy it into the trace and every transcript made from it.
+    """
+    return name in provider_key_vars() or name.upper().endswith(_SECRET_SUFFIXES)
+
+
+def withheld_env_vars() -> tuple[str, ...]:
+    """The variables Julia starts without: every provider's key, set or not, and
+    every other credential set now."""
+    return tuple(sorted(provider_key_vars() | {n for n in os.environ if is_secret_env_var(n)}))
+
+
 def missing_credential(model_id: str) -> str | None:
     """Env var the model's provider needs but that isn't set, else ``None``.
 

@@ -68,8 +68,10 @@ with owner-only permissions. Recognized:
 Only these are read from the workspace `.env`; its other variables are left
 alone.
 Ollama needs none. The agent's shell commands and Julia session run without
-these variables, so a command that prints its environment cannot copy a key
-into the session's trace or transcript.
+these variables, or any other named like a credential (ending in `_API_KEY`,
+`_ADMIN_KEY`, `_TOKEN` or `_SECRET`, such as `GITHUB_TOKEN`), so a command
+that prints its environment cannot copy one into the session's trace or
+transcript.
 
 You never have to find or edit that file by hand. Set or change a key in
 whichever interface you use:

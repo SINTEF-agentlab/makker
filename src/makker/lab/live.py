@@ -76,9 +76,9 @@ async def _live_render(
     max_frames: int,
 ) -> tuple[list[str], str]:
     from makker.agent.builder import build_agent, resolve_package_sources
+    from makker.credentials import withheld_env_vars
     from makker.interfaces.tui import TUIApp
     from makker.juliakernel import JuliaKernel, KernelConfig
-    from makker.models import provider_key_vars
     from makker.paths import set_workspace_root
     from makker.session import Session
     from makker.simulators import registry
@@ -93,7 +93,7 @@ async def _live_render(
     config = KernelConfig(
         julia_project=julia_project,
         cwd=workspace,
-        env_remove=tuple(sorted(provider_key_vars())),
+        env_remove=withheld_env_vars(),
     )
     async with JuliaKernel(config) as julia:
         session = Session.create(
