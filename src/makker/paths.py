@@ -92,6 +92,10 @@ def resolve_agent_path(raw: str | Path, *, workspace: Path | None = None) -> Pat
     text = str(raw)
     if not text:
         return None
+    if os.sep == "/":
+        # The file tools read a backslash as a separator on every system, so
+        # ``\etc\x`` names ``/etc/x`` here too, not one odd file in the workspace.
+        text = text.replace("\\", "/")
     # Joining keeps an absolute path as it is, the same as the backend does.
     return (workspace or workspace_root()).resolve() / text
 

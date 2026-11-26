@@ -202,6 +202,27 @@ async def test_accept_edits_asks_for_a_file_outside_the_workspace(tmp_path: Path
     ]
 
 
+async def test_accept_edits_asks_for_an_outside_file_spelt_with_backslashes(
+    tmp_path: Path,
+) -> None:
+    # The file tools turn backslashes into separators on every system, so this
+    # names the same file as the test above and must be asked about the same way.
+    outside = tmp_path.parent / f"{tmp_path.name}-elsewhere.txt"
+    spelt = str(outside).replace("/", "\\")
+    host = _host(
+        tmp_path,
+        [_calls(("w1", "write_file", {"file_path": spelt, "content": "b"}))],
+        mode="workspace",
+    )
+
+    result = await host.drive_turn(lambda: host.runner.run_prompt("write it"))
+
+    assert [a["args"]["file_path"] for a in result.interrupts[0].value["action_requests"]] == [
+        spelt
+    ]
+    assert not outside.exists()
+
+
 async def test_a_mode_change_applies_without_a_rebuild(tmp_path: Path) -> None:
     host = _host(
         tmp_path,
