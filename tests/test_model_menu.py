@@ -152,6 +152,37 @@ async def test_model_menu_free_text_enter_saves_to_workspace() -> None:
     assert results == [("openrouter:some/model", "workspace")]
 
 
+async def test_model_menu_enter_takes_the_row_the_arrows_moved_to(_openai_key_only) -> None:
+    # A search with a colon in it (any "provider:" prefix, every Ollama tag) was
+    # taken as the model on Enter, whichever row was highlighted.
+    results: list = []
+    app = _Host()
+    async with app.run_test() as pilot:
+        app.push_screen(ModelMenu(current=None), results.append)
+        await pilot.pause()
+        app.screen.query_one("#model-filter", Input).value = "openai:gpt-"
+        await pilot.pause()
+        ids = [i for i in _option_ids(app.screen) if i]
+        await pilot.press("down", "enter")
+        await pilot.pause()
+
+    assert ids[0] == "openai:gpt-"  # the typed text has the first row
+    assert results == [(ids[1], "workspace")]
+
+
+async def test_model_menu_enter_takes_an_id_typed_in_full(_openai_key_only) -> None:
+    results: list = []
+    app = _Host()
+    async with app.run_test() as pilot:
+        app.push_screen(ModelMenu(current=None), results.append)
+        await pilot.pause()
+        app.screen.query_one("#model-filter", Input).value = "openai:gpt-6-luna"
+        await pilot.press("enter")
+        await pilot.pause()
+
+    assert results == [("openai:gpt-6-luna", "workspace")]
+
+
 async def test_model_menu_ctrl_a_saves_to_all_workspaces() -> None:
     results: list = []
     app = _Host()
