@@ -639,7 +639,9 @@ class SessionHost:
             package_sources = await asyncio.to_thread(resolve_package_sources, project)
             # One policy for the graph and the host, so the front end's changes reach
             # the graph (an unknown mode fails here, before anything starts).
-            approval = ApprovalPolicy(approval_mode, workspace=ws)
+            approval = ApprovalPolicy(
+                approval_mode, workspace=ws, store=session.state_dir / "approval-gate.json"
+            )
             if allow_missing_credential and missing_credential(resolved_model) is not None:
                 # The provider key isn't set, so building the model would crash.
                 # Come up without an agent; the front end collects the key and

@@ -50,6 +50,11 @@ A change applies from the agent's next tool call, mid-turn included, and
 prompt, so a gated call under `ask` ends the turn with an error; scripts and
 the bench run with `auto`.
 
+A card left unanswered when Makker stops is shown again when the session is
+resumed, and is answered as it was shown, whatever mode Makker was started in
+this time: a call you reject does not run. The mode and "always allow" are not
+kept with a session; each launch starts from its `--approval-mode`.
+
 ## What approval is not
 
 Approval is a review checkpoint for visible side effects, not a security

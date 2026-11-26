@@ -182,6 +182,68 @@ async def test_a_change_while_a_card_waits_does_not_break_the_resume(tmp_path: P
     assert (tmp_path / "scratch").is_dir()
 
 
+def _started(tmp_path: Path, session: Session, saver, responses: list, mode: str) -> SessionHost:
+    """A host for ``session`` as a new process builds it: a fresh policy, reading
+    what the one before it stored beside the session."""
+    from makker.agent.builder import build_agent
+
+    policy = ApprovalPolicy(
+        mode, workspace=tmp_path, store=session.state_dir / "approval-gate.json"
+    )
+    agent, backend = build_agent(
+        session,
+        model=make_scripted_model([*responses, scripted_final("done")]),
+        checkpointer=saver,
+        approval_mode=policy,
+    )
+    return SessionHost(
+        session=session, agent=agent, backend=backend, approval_mode=policy, surface="tui"
+    )
+
+
+async def test_a_card_left_pending_is_answered_as_shown_after_a_restart(tmp_path: Path) -> None:
+    """Makker stops with a card on screen and starts again in another mode. The
+    card is the one that was shown: what it asked about still waits for its
+    answer, and what ran without asking is not asked about now."""
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    def session() -> Session:
+        return Session.create(
+            julia=FakeJulia(), state_root=tmp_path / "state", simulator=make_fake_adapter(tmp_path)
+        )
+
+    # Asked under "ask", rejected after a restart in "auto": it must not run.
+    first, saver = session(), InMemorySaver()
+    write = _calls(("w1", "write_file", {"file_path": "notes.txt", "content": "hi"}))
+    host = _started(tmp_path, first, saver, [write], "ask")
+    result = await host.drive_turn(lambda: host.runner.run_prompt("write"))
+    assert _asked(result) == ["write_file"]
+
+    host = _started(tmp_path, first, saver, [], "auto")
+    payload = build_resume_payload(await host.pending_interrupts(), {"type": "reject"})
+    result = await host.drive_turn(lambda: host.runner.resume(payload))
+    assert result.interrupts == []
+    assert not (tmp_path / "notes.txt").exists()
+    assert not (first.state_dir / "approval-gate.json").exists()  # settled: nothing kept
+
+    # An edit let through under "accept edits" beside a shell command that asked,
+    # approved after a restart in "ask": one decision for the one card.
+    second, saver = session(), InMemorySaver()
+    both = _calls(
+        ("w2", "write_file", {"file_path": "notes.txt", "content": "hi"}),
+        ("e2", "execute", {"command": "echo hi"}),
+    )
+    host = _started(tmp_path, second, saver, [both], "workspace")
+    result = await host.drive_turn(lambda: host.runner.run_prompt("write and run"))
+    assert _asked(result) == ["execute"]
+
+    host = _started(tmp_path, second, saver, [], "ask")
+    payload = build_resume_payload(await host.pending_interrupts(), {"type": "approve"})
+    result = await host.drive_turn(lambda: host.runner.resume(payload))
+    assert result.interrupts == []
+    assert (tmp_path / "notes.txt").read_text() == "hi"
+
+
 async def test_accept_edits_asks_for_a_file_outside_the_workspace(tmp_path: Path) -> None:
     outside = tmp_path.parent / f"{tmp_path.name}-elsewhere.txt"
     host = _host(

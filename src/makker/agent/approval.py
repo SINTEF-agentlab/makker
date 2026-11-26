@@ -9,6 +9,9 @@ only ever holds the calls the policy could not allow.
 
 from __future__ import annotations
 
+import contextlib
+import json
+import os
 from collections.abc import Iterable
 from copy import deepcopy
 from enum import StrEnum
@@ -92,12 +95,20 @@ class ApprovalPolicy:
     """
 
     def __init__(
-        self, mode: ApprovalMode | str | None = None, *, workspace: Path | None = None
+        self,
+        mode: ApprovalMode | str | None = None,
+        *,
+        workspace: Path | None = None,
+        store: Path | None = None,
     ) -> None:
         self.mode = mode if isinstance(mode, ApprovalMode) else parse_approval_mode(mode)
         self._workspace = workspace
         self._allow_edits = False
-        self._frozen: dict[str, bool] = {}
+        # The gate's answers for the turn in progress. Kept in ``store`` (a file
+        # beside the session's checkpoints) so that a card left pending when
+        # Makker stops is answered, after a restart, as the card that was shown.
+        self._store = store
+        self._frozen: dict[str, bool] = self._stored()
 
     @property
     def allowlist(self) -> frozenset[str]:
@@ -129,7 +140,8 @@ class ApprovalPolicy:
         The answer is frozen per tool call. Resuming a paused turn runs the check
         again for the same model message, and the calls it picks must match the
         decisions sent, or deepagents raises; worse, a call it now lets through
-        would run whatever the decision was.
+        would run whatever the decision was. The resume may come after a restart,
+        under another mode, so the answers are stored with the session.
         """
         call = request.tool_call
         call_id = call.get("id")
@@ -137,11 +149,38 @@ class ApprovalPolicy:
             return self.needs_approval(call["name"], call.get("args"))
         if call_id not in self._frozen:
             self._frozen[call_id] = self.needs_approval(call["name"], call.get("args"))
+            self._store_frozen()
         return self._frozen[call_id]
 
     def settled(self) -> None:
         """Forget the frozen answers once a turn ends with nothing pending."""
-        self._frozen.clear()
+        if self._frozen:
+            self._frozen.clear()
+            self._store_frozen()
+
+    def _stored(self) -> dict[str, bool]:
+        """The answers a session stopped mid-turn left behind (none when unreadable)."""
+        if self._store is None:
+            return {}
+        try:
+            saved = json.loads(self._store.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(saved, dict):
+            return {}
+        return {call_id: asks for call_id, asks in saved.items() if isinstance(asks, bool)}
+
+    def _store_frozen(self) -> None:
+        """Write the answers through, whole or not at all (best-effort)."""
+        if self._store is None:
+            return
+        with contextlib.suppress(OSError):
+            if not self._frozen:
+                self._store.unlink(missing_ok=True)
+                return
+            partial = self._store.with_name(self._store.name + ".tmp")
+            partial.write_text(json.dumps(self._frozen), encoding="utf-8")
+            os.replace(partial, self._store)
 
     def approves(self, interrupts: Iterable[SupportsInterrupt]) -> bool:
         """Whether every action of these pending interrupts is now allowed.
