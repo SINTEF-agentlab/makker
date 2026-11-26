@@ -16,6 +16,9 @@ Sample metadata understood by the solver:
   workspace first (slow on a cold depot; off by default).
 - ``needs_display``: start a managed virtual display so GLMakie plotting
   works headless.
+- ``context_window``: run the agent as if its model had this many tokens of
+  context, so that a task of ordinary length fills it, and offloading and
+  compaction happen as they do late in a long session.
 - ``answer``: mapping of key -> what the value is. The prompt then asks for a
   final ``ANSWER: {...}`` line holding them, which the value scorers read
   (see :mod:`makker.eval.answer`).
@@ -90,7 +93,27 @@ def _bridge_model() -> Any:
     else:
         spec = "anthropic:inspect"
     options = {"use_responses_api": True} if provider == "openai" else {}
-    return init_chat_model(spec, disable_streaming=True, api_key="inspect-agent-bridge", **options)
+    model = init_chat_model(spec, disable_streaming=True, api_key="inspect-agent-bridge", **options)
+    model.__class__ = type(f"Bridged{type(model).__name__}", (_FullInputCount, type(model)), {})
+    return model
+
+
+class _FullInputCount:
+    """Count a request's cached tokens in its input, as the providers do.
+
+    The bridge answers in the client's format, but its OpenAI-format usage leaves
+    the cached tokens out of the input count while its total keeps them. The agent
+    sizes its context from the input count (offloading, the context meter), so it
+    would see a nearly empty context and never move anything out.
+    """
+
+    async def _agenerate(self, *args: Any, **kwargs: Any) -> Any:
+        result = await super()._agenerate(*args, **kwargs)  # type: ignore[misc]
+        for generation in result.generations:
+            usage = getattr(generation.message, "usage_metadata", None)
+            if usage and usage["input_tokens"] + usage["output_tokens"] < usage["total_tokens"]:
+                usage["input_tokens"] = usage["total_tokens"] - usage["output_tokens"]
+        return result
 
 
 # The bridge annotates assistant text with internal capsules that must not
@@ -180,6 +203,7 @@ async def _run_makker_session(
     scratch: Path,
     store: Any,
     ground_truth: str | None = None,
+    context_window: int | None = None,
 ) -> str:
     from makker.paths import set_workspace_root
     from makker.simulators import registry
@@ -229,10 +253,14 @@ async def _run_makker_session(
     # prepared above (golden copy), no ambient entry-point capabilities, no
     # background warm-up competing with the sample's own Julia work, and a
     # virtual display only when the task declares it needs one.
+    model = _bridge_model()
+    if context_window:
+        # The context budget reads a model instance's window from its profile.
+        model.profile = {**(model.profile or {}), "max_input_tokens": context_window}
     host = await SessionHost.start(
         simulator=adapter,
         surface="tui",
-        model=_bridge_model(),
+        model=model,
         approval_mode="auto",
         workspace=workspace,
         state_root=eval_sessions_state_root(simulator),
@@ -291,6 +319,7 @@ def makker_solver(simulator: str = "jutuldarcy") -> Solver:
                 scratch=scratch,
                 store=state.store,
                 ground_truth=state.metadata.get("expected"),
+                context_window=state.metadata.get("context_window"),
             )
 
         # The bridge tracked the real conversation; the completion graded by

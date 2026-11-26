@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from typing import Any
 
 from makker.review.findings import Finding, ReviewReport, append_report, now_iso
@@ -63,17 +64,24 @@ async def review_transcript(
     model_id: str,
     simulator: str | None = None,
     ground_truth: str | None = None,
+    events: Iterable[Any] = (),
 ) -> ReviewReport:
-    """Send a rendered session to the reviewer model and parse its findings."""
+    """Send a rendered session to the reviewer model and parse its findings.
 
+    ``events`` are the session's trace events, for the checks that need no model
+    (``grounding``); their findings join the model's.
+    """
     from langchain.chat_models import init_chat_model
     from langchain_core.messages import HumanMessage, SystemMessage
+
+    from makker.review.grounding import ungrounded_writes
 
     model = init_chat_model(model_id)
     user = build_user_message(_clip(transcript), simulator=simulator, ground_truth=ground_truth)
     reply = await model.ainvoke([SystemMessage(content=SYSTEM), HumanMessage(content=user)])
     data = _extract_json(_coerce_text(reply.content))
     findings = [Finding.from_dict(f) for f in (data.get("findings") or []) if isinstance(f, dict)]
+    findings += [write.finding() for write in ungrounded_writes(events)]
     return ReviewReport(
         session_id=session_id,
         title=title,
@@ -132,6 +140,7 @@ async def review_session(
             title=getattr(session, "title", "") or "",
             model_id=model_id,
             simulator=session_simulator(session),
+            events=session.trace.iter_events(),
         )
         return await store_report(report, store=store, curate=curate, model_id=model_id)
     except Exception:
@@ -170,6 +179,7 @@ async def ingest_findings(
     simulator: str | None = None,
     store: bool = True,
     curate: bool = True,
+    events: Iterable[Any] = (),
 ) -> ReviewReport:
     """Build a report from findings produced *outside* the API path and store it.
 
@@ -177,11 +187,13 @@ async def ingest_findings(
     (see ``makker review prompt``), produces the same ``{summary, findings}``
     JSON the critic would, and feeds it back here, so the expensive read costs no
     API. ``source`` records who produced it; curation still runs (cheaply) unless
-    disabled.
+    disabled. ``events`` get the same checks as in ``review_transcript``.
     """
     from makker.review.findings import Finding, now_iso
+    from makker.review.grounding import ungrounded_writes
 
     findings = [Finding.from_dict(f) for f in (data.get("findings") or []) if isinstance(f, dict)]
+    findings += [write.finding() for write in ungrounded_writes(events)]
     report = ReviewReport(
         session_id=session_id,
         title=title,

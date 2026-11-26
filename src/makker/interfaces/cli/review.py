@@ -179,7 +179,7 @@ def _ingest(args: argparse.Namespace) -> int:
     import asyncio
     import json
 
-    from makker.review.discovery import find_session, session_simulator
+    from makker.review.discovery import find_session, session_simulator, trace_events
     from makker.review.reviewer import ingest_findings
     from makker.review.settings import review_model
 
@@ -206,6 +206,7 @@ def _ingest(args: argparse.Namespace) -> int:
             source="coding-agent",
             simulator=sim,
             curate=not args.no_curate,
+            events=trace_events(found.trace_path) if found else (),
         )
     )
     print(f"Ingested {len(report.findings)} finding(s) for {session_id}.")
@@ -262,6 +263,7 @@ def _mine(args: argparse.Namespace) -> int:
         eval_review_context,
         render_trace,
         session_simulator,
+        trace_events,
     )
     from makker.review.reviewer import review_transcript, store_report
     from makker.review.settings import review_model
@@ -297,6 +299,7 @@ def _mine(args: argparse.Namespace) -> int:
                     model_id=model_id,
                     simulator=session_simulator(s.trace_path),
                     ground_truth=eval_review_context(s.trace_path),
+                    events=trace_events(s.trace_path),
                 )
                 await store_report(report, store=True, curate=True, model_id=model_id)
             except Exception as exc:
@@ -487,6 +490,7 @@ def _review_one(session_arg: str, args: argparse.Namespace) -> int:
         find_session,
         render_trace,
         session_simulator,
+        trace_events,
     )
     from makker.review.findings import append_report
     from makker.review.reviewer import review_transcript
@@ -517,6 +521,7 @@ def _review_one(session_arg: str, args: argparse.Namespace) -> int:
             model_id=model_id,
             simulator=session_simulator(session.trace_path),
             ground_truth=eval_review_context(session.trace_path),
+            events=trace_events(session.trace_path),
         )
     )
     if not args.no_store:
