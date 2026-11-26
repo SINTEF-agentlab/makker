@@ -382,6 +382,18 @@ describe("Thread rendering", () => {
     expect(container.querySelector(".tool-output")?.textContent).toBe("2");
   });
 
+  it("names the call itself when a stretch of work has one call and its thinking", () => {
+    const { store, container } = renderWithStore(<Thread />);
+    drive(
+      store,
+      { type: "reasoning", text: "Check the example." },
+      { type: "tool", event: "requested", name: "read_file", label: "Read", tool_call_id: "1", args: { file_path: "/pkg/examples/wells.jl" } },
+      { type: "tool", event: "finished", name: "read_file", tool_call_id: "1", content: "@@ lines 1-74 of 74 @@\nx" },
+      { type: "text", text: "Read it." },
+    );
+    expect(container.querySelector(".group-line")?.textContent).toBe("Readexamples/wells.jl74 lines");
+  });
+
   it("folds the steps between two messages into one line that opens", () => {
     const { store, container } = renderWithStore(<Thread />);
     const call = (id: string, name: string, label: string, args: Record<string, unknown>, event: "finished" | "error" = "finished") => [
