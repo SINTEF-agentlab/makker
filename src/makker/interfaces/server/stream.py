@@ -308,6 +308,13 @@ class _SessionStream:
             elif command == "add_dir":
                 await self._send(protocol.notice_to_wire(self._host.add_dir(arg)))
             elif command == "compact":
+                # Compacting rewrites the conversation, which drops the paused
+                # call along with the decision about to be given for it.
+                if self._pending or await self._host.pending_interrupts():
+                    await self._send(
+                        protocol.error_to_wire("answer the pending approval before compacting"),
+                    )
+                    return
                 note, _result = await self._host.compact()
                 await self._send(protocol.notice_to_wire(note))
                 await self._send_context()
@@ -378,6 +385,14 @@ class _SessionStream:
                 await self._send(protocol.popout_ready_to_wire(record, None, error=reason))
             else:
                 await self._send(protocol.error_to_wire(reason))
+            return
+        # A regenerate adds a note to the conversation, which would land between
+        # the paused call and its result and drop the decision about to be given.
+        # A popout adds nothing, so it may go ahead.
+        if target != "popout" and (self._pending or await self._host.pending_interrupts()):
+            await self._send(
+                protocol.error_to_wire("answer the pending approval before regenerating a plot"),
+            )
             return
         # An optional target size the client measured (the stage on a regenerate,
         # the popup window on a popout): the replay re-fits the figure to it.

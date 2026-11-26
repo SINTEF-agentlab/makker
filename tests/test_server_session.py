@@ -2445,6 +2445,33 @@ def test_set_model_refused_while_approval_pending(tmp_path: Path) -> None:
     assert "pending approval" in err["message"]
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"type": "command", "command": "compact"},
+        {"type": "replot", "record": "artifacts/res.png"},
+    ],
+)
+def test_the_conversation_is_left_alone_while_approval_pending(
+    tmp_path: Path, message: dict
+) -> None:
+    """Compacting, or noting a regenerated plot, would drop the paused call and
+    the decision about to be given for it. The card stays answerable instead."""
+    with _client(interrupt_agent, tmp_path) as client:
+        sid = client.post("/sessions", json={"sim": "jutuldarcy"}).json()["session_id"]
+        with open_stream(client, sid) as ws:
+            ws.send_json({"type": "prompt", "text": "run it"})
+            assert _drain_turn(ws)[-1]["type"] == "interrupt"
+            ws.send_json(message)
+            err = ws.receive_json()
+            ws.send_json({"type": "decision", "decision": "approve"})
+            events = _drain_turn(ws)
+    assert err["type"] == "error"
+    assert "pending approval" in err["message"]
+    assert events[-1]["type"] == "turn_end"
+    assert events[-1]["text"] == "approval handled"
+
+
 def test_set_approval_auto_resolves_a_pending_interrupt(tmp_path: Path) -> None:
     """Switching to auto mode resumes an approval that is now a foregone conclusion."""
     manager = _manager(interrupt_agent, tmp_path)
