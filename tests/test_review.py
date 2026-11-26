@@ -284,6 +284,32 @@ async def test_ingest_findings_logs_without_a_model_call():
     assert load_reports()[-1].session_id == "sess-X"
 
 
+async def test_a_review_reports_typed_numbers_no_output_showed():
+    """The trace check needs no model: its finding joins the reviewer's."""
+    from makker.review import ingest_findings
+    from makker.trace import Event
+    from makker.trace.schema import TOOL_CALL, TOOL_RESULT
+
+    events = [
+        Event(1, "", TOOL_RESULT, {"name": "run_julia", "content": "objective = 0.03494785"}),
+        Event(
+            2,
+            "",
+            TOOL_CALL,
+            {
+                "name": "write_file",
+                "args": {"file_path": "README.md", "content": "fell from 0.0349737"},
+            },
+        ),
+    ]
+    report = await ingest_findings(
+        {"findings": []}, session_id="s", model_id="m", curate=False, events=events
+    )
+    assert [f.title for f in report.findings] == [
+        "Numbers written to README.md that no output showed"
+    ]
+
+
 async def test_curate_falls_back_to_titles_when_no_api_key(monkeypatch):
     """Offline path: with no provider key, curation merges by exact title, no model call."""
     from makker.review import curate

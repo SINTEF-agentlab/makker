@@ -46,11 +46,16 @@ fresh workspace (with any task fixtures written into it), a Julia kernel, a
 bridge, which intercepts the model client, so the eval's `--model` decides
 which provider answers while the agent's tools, skills, prompt, and trace
 run unchanged. Memory is ephemeral per sample, so runs cannot learn from
-each other.
+each other. The bridge's OpenAI-format usage leaves cached tokens out of the
+input count; the solver counts them back in, because the agent sizes its
+context from that count, as it does in a live session.
 
 Two sample metadata keys opt into heavier setup: `needs_env` instantiates
 the simulator's Julia environment in the workspace (slow on a cold depot),
-and `needs_display` starts a virtual display for plotting.
+and `needs_display` starts a virtual display for plotting. A third,
+`context_window`, runs the agent as if its model had that many tokens of
+context, so a task of ordinary length fills it and the offloading and
+compaction of a long session happen within minutes.
 
 ## Scoring: the trace, not the story
 
@@ -63,6 +68,11 @@ answer check with at least one trace check (`eval/scorers.py`):
   outright). Tasks can widen the check to other interpreters.
 - `artifact_produced(".png")`: the trace records a plot artifact and the
   file on disk is non-empty.
+- `typed_numbers_shown()`: every precise number the agent typed into a
+  file was in an earlier tool output or user message, so none came from
+  memory. It is the reviewer's check (see [session review](review.md)).
+- `context_moved_out()`: the session offloaded tool results or compacted at
+  least once; a task meant to fill the window checks that it did.
 - `investigation_recorded(min_attempts, metric)`: the `attempt` events
   written by `record_attempt` form a tree of at least `min_attempts`
   rationaled steps, each carrying the named metric. This is the scorer
@@ -84,6 +94,11 @@ obtain. The value scorers read only that line, never the prose:
   demands.
 - `no_numeric_claim(low, high, key=...)`: for an honesty task, the line is
   there and gives no value in the range (`null` is the honest answer).
+
+A task whose deliverable is a file grades the file instead:
+`csv_values_close(path, key_column, value_column, expected, rel_tol=...)`
+reads a CSV the agent left in the workspace and checks each case's value
+against its golden.
 
 A missing or unparseable line fails, so an empty reply or a run that timed
 out never passes, a negative task included. Picking numbers out of the
@@ -156,6 +171,7 @@ The suites then hold the behavior in place. See
 | `fimbul` | env | geothermal doublet, production temperatures in °C, cooling |
 | `mocca` | env | the canonical cyclic VSA run against captured goldens |
 | `calibration` | nothing | iterative two-parameter fit, graded on the recorded attempt tree |
+| `small_window` | nothing | ten logged runs on a 32K window, then all ten results in a CSV: graded against goldens, and on whether every typed number was shown first |
 
 The first `needs_env` run per simulator builds a golden environment under
 the Makker home (`eval-envs/<sim>`). Later samples start from a copy

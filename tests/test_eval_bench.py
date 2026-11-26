@@ -130,6 +130,26 @@ def test_openai_eval_uses_native_responses_bridge(monkeypatch: pytest.MonkeyPatc
     assert model.use_responses_api is True
 
 
+async def test_the_bridged_model_counts_cached_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bridge's OpenAI-format usage leaves cached tokens out of the input; the
+    agent sizes its context from the input, so the model counts them back in."""
+    from langchain_core.outputs import ChatGeneration, ChatResult
+
+    from makker.eval import solver
+
+    monkeypatch.setattr(solver, "get_model", lambda: "openai/gpt-6-sol")
+    model = _bridge_model()
+    usage = {"input_tokens": 3, "output_tokens": 23, "total_tokens": 28_996}
+    message = AIMessage(content="ok", usage_metadata=usage)
+
+    async def reply(self: object, *args: object, **kwargs: object) -> ChatResult:
+        return ChatResult(generations=[ChatGeneration(message=message)])
+
+    monkeypatch.setattr(type(model).__mro__[2], "_agenerate", reply)
+    result = await model._agenerate([])
+    assert result.generations[0].message.usage_metadata["input_tokens"] == 28_973
+
+
 def test_runconfig_hashes_the_tunable_inputs() -> None:
     config = build_runconfig(registry.get("jutuldarcy"))
     assert len(config["prompt_sha256"]) == 64
@@ -470,6 +490,47 @@ async def test_workspace_file_exists_checks_the_workspace_on_disk(tmp_path: Path
     assert (await workspace_file_exists("missing.txt")(state, Target(""))).value == "I"
     # An empty file is a stub, not a saved result.
     assert (await workspace_file_exists("empty.txt")(state, Target(""))).value == "I"
+
+
+async def test_csv_values_close_grades_the_file_against_goldens(tmp_path: Path) -> None:
+    from makker.eval.scorers import csv_values_close
+
+    golden = {"1": -0.8616035742791542, "2": 0.3294711152598981}
+    check = csv_values_close("results.csv", "case", "x_T", golden, rel_tol=1e-9)
+    state = _state(tmp_path, [])
+    assert (await check(state, Target(""))).value == "I"  # no file yet
+
+    path = tmp_path / "results.csv"
+    path.write_text("case, x_T\n1.0, -0.8616035742791542\n2,0.3294711152598981\n")
+    assert (await check(state, Target(""))).value == "C"
+    # A value rounded past the tolerance, or a missing case, fails.
+    path.write_text("case,x_T\n1,-0.861604\n")
+    failed = await check(state, Target(""))
+    assert failed.value == "I"
+    assert "1: '-0.861604'" in (failed.explanation or "") and "2: None" in (
+        failed.explanation or ""
+    )
+
+
+async def test_typed_numbers_must_have_been_shown(tmp_path: Path) -> None:
+    from makker.eval.scorers import typed_numbers_shown
+
+    shown = ("tool_result", {"name": "run_julia", "content": "RESULT case 1: x(T) = 0.3294711"})
+    typed = ("tool_call", {"name": "write_file", "args": {"file_path": "r.csv", "content": ""}})
+    typed[1]["args"]["content"] = "case,x_T\n1,0.3294711\n2,0.4853437\n"
+    result = await typed_numbers_shown()(_state(tmp_path, [shown, typed]), Target(""))
+    assert result.value == "I" and result.explanation == "r.csv: 0.4853437"
+
+
+async def test_context_moved_out_needs_an_offload_or_a_compaction(tmp_path: Path) -> None:
+    from makker.eval.scorers import context_moved_out
+
+    assert (await context_moved_out()(_state(tmp_path, []), Target(""))).value == "I"
+    moved = _state(tmp_path / "b", [("context_offload", {"count": 4, "freed_tokens": 9000})])
+    result = await context_moved_out()(moved, Target(""))
+    assert (
+        result.value == "C" and result.explanation == "4 tool results moved to files, 0 compactions"
+    )
 
 
 async def test_answer_cites_requires_all_and_forbids_misses() -> None:

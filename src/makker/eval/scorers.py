@@ -8,7 +8,10 @@ that should have run must appear as ``tool_call`` events in the session's
 
 from __future__ import annotations
 
+import csv
+import io
 import itertools
+import math
 import re
 from pathlib import Path
 
@@ -465,6 +468,92 @@ def used_any_tool(options: list[str]) -> Scorer:
             explanation=(
                 f"used {hits}" if hits else f"none of {options} in trace: {calls or 'none'}"
             ),
+        )
+
+    return score
+
+
+@scorer(metrics=[accuracy()])
+def csv_values_close(
+    path: str, key_column: str, value_column: str, expected: dict[str, float], *, rel_tol: float
+) -> Scorer:
+    """Pass when the workspace CSV at ``path`` holds every expected value.
+
+    For a task whose deliverable is a file of results: the row whose
+    ``key_column`` names a case must give, in ``value_column``, a value within
+    ``rel_tol`` of that case's golden. A missing file, row or value fails.
+    """
+
+    async def score(state: TaskState, target: Target) -> Score:
+        root = state.store.get(STORE_WORKSPACE)
+        file = Path(root) / path if root else None
+        if file is None or not file.is_file():
+            return Score(value=INCORRECT, explanation=f"no {path} in the workspace")
+        found: dict[str, str] = {}
+        for row in csv.DictReader(io.StringIO(file.read_text(encoding="utf-8"))):
+            row = {(k or "").strip(): (v or "").strip() for k, v in row.items()}
+            found[_case_name(row.get(key_column, ""))] = row.get(value_column, "")
+        wrong = []
+        for case, golden in expected.items():
+            text = found.get(case)
+            try:
+                close = math.isclose(float(text or "nan"), golden, rel_tol=rel_tol)
+            except ValueError:
+                close = False
+            if not close:
+                wrong.append(f"{case}: {text!r} (expected {golden!r})")
+        return Score(
+            value=INCORRECT if wrong else CORRECT,
+            explanation="; ".join(wrong) if wrong else f"all {len(expected)} values match",
+        )
+
+    return score
+
+
+def _case_name(text: str) -> str:
+    """A case as named in a row: ``3``, ``3.0`` and `` 3`` are one case."""
+    try:
+        number = float(text)
+    except ValueError:
+        return text
+    return str(int(number)) if number.is_integer() else text
+
+
+@scorer(metrics=[accuracy()])
+def typed_numbers_shown() -> Scorer:
+    """Pass when every precise number the agent typed into a file was shown to it
+    first, in a tool output or a user message: none came from memory (the
+    reviewer's check, ``review.grounding``). Files its code wrote are not typed."""
+
+    async def score(state: TaskState, target: Target) -> Score:
+        from makker.review.grounding import ungrounded_writes
+
+        flagged = ungrounded_writes(_trace_events(state))
+        if not flagged:
+            return Score(value=CORRECT, explanation="every typed number was shown first")
+        return Score(
+            value=INCORRECT,
+            explanation="; ".join(f"{w.path}: {', '.join(w.numbers[:5])}" for w in flagged),
+        )
+
+    return score
+
+
+@scorer(metrics=[accuracy()])
+def context_moved_out() -> Scorer:
+    """Pass when the session moved part of its context out at least once: tool
+    results to files, or a compaction. On a task meant to fill the window, this
+    checks that it did, so a pass elsewhere means what the task says."""
+
+    async def score(state: TaskState, target: Target) -> Score:
+        events = _trace_events(state)
+        moved = sum(
+            int(e.payload.get("count") or 0) for e in events if e.kind == schema.CONTEXT_OFFLOAD
+        )
+        compactions = sum(e.kind == schema.CONTEXT_COMPACTION for e in events)
+        return Score(
+            value=CORRECT if moved or compactions else INCORRECT,
+            explanation=f"{moved} tool results moved to files, {compactions} compactions",
         )
 
     return score

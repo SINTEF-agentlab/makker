@@ -181,6 +181,16 @@ Findings and issues are stored as JSON because curation has to merge, count, and
 them. Each report also carries a prose summary, and the CLI renders everything as
 readable text.
 
+One check needs no model, and every review runs it (the API path and the
+coding-agent path alike): numbers the agent typed into a file that nothing it was
+shown holds. An agent that has lost a result from its context can fill the gap from
+memory, and the session still looks fine. So each file written with `write_file` or
+`edit_file` (code files aside, whose constants are knowledge) is checked: every number
+with five or more significant digits must equal, at the precision written, a number
+in an earlier tool output or user message. A file that fails becomes a high-severity
+finding naming the numbers (`review/grounding.py`). The eval suite `small_window`
+grades the same check.
+
 The reviewer is general: it reasons from the actual session, not a hard-coded
 checklist, so it works across simulators and surfaces more than unit errors (agent
 mistakes, unverified claims, missing checks). It is best-effort, so a missing key or a

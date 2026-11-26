@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from makker.paths import state_home
 from makker.session import read_session_title, started_from_id
@@ -148,6 +149,14 @@ def render_trace(trace_path: Path) -> str:
 
     with TraceLog.open_readonly(trace_path) as log:
         return render_markdown(log.iter_events())
+
+
+def trace_events(trace_path: Path) -> list[Any]:
+    """A session's trace events, read from its database by path."""
+    from makker.trace import TraceLog
+
+    with TraceLog.open_readonly(trace_path) as log:
+        return log.iter_events()
 
 
 def render_trace_html(trace_path: Path) -> str:
