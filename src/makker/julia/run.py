@@ -49,7 +49,10 @@ def run_julia(
             argv,
             stdin=subprocess.DEVNULL,
             capture_output=capture,
-            text=True,
+            # Julia writes UTF-8 whatever the system's code page is. Read as that,
+            # so a path under a home folder such as C:/Users/Bjørn comes out intact.
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             env=julia_environment(),
             check=False,

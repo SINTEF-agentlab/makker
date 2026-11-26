@@ -33,6 +33,8 @@ def test_runs_the_resolved_julia_non_interactively(calls, tmp_path: Path) -> Non
     assert argv == ["/opt/julia", f"--project={tmp_path}", "--startup-file=no", "-e", "1"]
     assert kwargs["stdin"] is subprocess.DEVNULL
     assert kwargs["capture_output"] is True
+    # Julia's output is UTF-8 on every system, not the locale's code page.
+    assert (kwargs["encoding"], kwargs["errors"]) == ("utf-8", "replace")
 
 
 def test_only_a_display_run_is_wrapped_in_xvfb(calls) -> None:
