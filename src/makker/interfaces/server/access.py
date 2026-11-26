@@ -107,20 +107,30 @@ class TokenGuard:
     Paths under ``open_prefixes`` carry a capability of their own and pass
     without the token: a live plot's URL holds its session's plot secret
     (``plot_julia_src.viz_route``), so it can be shown where no cookie reaches,
-    such as another application's frame or browser pane.
+    such as another application's frame or browser pane. ``open_paths`` are
+    single paths that give nothing away and pass too.
     """
 
     def __init__(
-        self, app: ASGIApp, *, token: str, base_path: str = "", open_prefixes: Iterable[str] = ()
+        self,
+        app: ASGIApp,
+        *,
+        token: str,
+        base_path: str = "",
+        open_prefixes: Iterable[str] = (),
+        open_paths: Iterable[str] = (),
     ) -> None:
         self.app = app
         self.token = token.encode()
         self.base_path = base_path
         self.open_prefixes = tuple(open_prefixes)
+        self.open_paths = frozenset(open_paths)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] not in ("http", "websocket") or scope["path"].startswith(
-            self.open_prefixes
+        if (
+            scope["type"] not in ("http", "websocket")
+            or scope["path"].startswith(self.open_prefixes)
+            or scope["path"] in self.open_paths
         ):
             await self.app(scope, receive, send)
             return

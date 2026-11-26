@@ -442,6 +442,11 @@ pane, without handing out the token, which opens everything. The plot server
 itself listens on a local port of its own, but answers with a figure only to an
 address that names the secret.
 
+One more thing passes: a server that has just restarted after an update from
+the browser answers `GET /version` without the token. The page that started the
+update is waiting for that answer, and a page from a version before the token
+has no cookie; it then reloads onto the page that asks for the link.
+
 A browser also lets any website send requests to `127.0.0.1` and open WebSockets
 to it, so the server turns away pages that aren't its own as well. A WebSocket,
 or a request that changes something, is only answered when the browser's

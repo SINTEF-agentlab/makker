@@ -157,6 +157,27 @@ def test_the_server_is_guarded(tmp_path) -> None:
         assert refused.value.code == 1008
 
 
+def test_a_server_restarted_after_an_update_says_it_is_back(tmp_path) -> None:
+    # The page that started the update polls /version to learn the server is back.
+    # One from before the token has no cookie, so only that route answers it.
+    from makker.interfaces.server.app import create_app
+    from makker.interfaces.server.manager import SessionManager
+
+    async def unused_factory(**_kwargs):
+        raise AssertionError("no session should start")
+
+    def app(**kwargs):
+        manager = SessionManager(host_factory=unused_factory)
+        return create_app(manager, default_sim="jutuldarcy", token=TOKEN, **kwargs)
+
+    with TestClient(app(restarted=True)) as client:
+        assert client.get("/version").json()["boot"]
+        assert client.get("/sessions").status_code == 401
+        assert client.get("/", headers=HTML).status_code == 401
+    with TestClient(app()) as client:
+        assert client.get("/version").status_code == 401
+
+
 # --- The token ----------------------------------------------------------------
 
 TOKEN = "s3cret-token"

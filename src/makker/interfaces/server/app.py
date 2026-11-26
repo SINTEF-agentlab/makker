@@ -76,6 +76,7 @@ def create_app(
     local_only: bool = False,
     allowed_origins: Sequence[str] = (),
     token: str | None = None,
+    restarted: bool = False,
 ) -> FastAPI:
     # The launch-wide knobs (folder-fixed) ride in the default manager's host
     # factory; an injected manager (tests) brings its own. The model is a default
@@ -129,7 +130,17 @@ def create_app(
     # computer only) also checks Host. Without a token (tests, an embedding host
     # that controls access itself) anyone who reaches the port may.
     if token is not None:
-        app.add_middleware(TokenGuard, token=token, base_path=base, open_prefixes=("/live/",))
+        # Temporary: the page that started an update waits for /version to say the
+        # server is back. One from before the token (0.3.0) has no cookie, and
+        # would wait out its ten minutes on a 401. A server restarted after an
+        # update answers it; the page then reloads onto the one asking for the link.
+        app.add_middleware(
+            TokenGuard,
+            token=token,
+            base_path=base,
+            open_prefixes=("/live/",),
+            open_paths=("/version",) if restarted else (),
+        )
     app.add_middleware(OriginGuard, local_only=local_only, allowed_origins=allowed_origins)
 
     for group in (models, update, sessions, artifacts, live, stream):
