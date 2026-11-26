@@ -17,6 +17,7 @@ loading the web server stack.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from makker.agent.approval import SupportsInterrupt, allowed_decisions_for_interrupt
@@ -299,8 +300,13 @@ def replay_tool_event(
     tool_call_id: Any,
     args: Any = None,
     content: Any = None,
+    at: float | None = None,
 ) -> dict[str, Any]:
-    """One replayed tool lifecycle item, shaped exactly like the live ``tool`` kind."""
+    """One replayed tool lifecycle item, shaped like the live ``tool`` kind.
+
+    ``at`` is when it was recorded (epoch milliseconds): a live event is timed by
+    the page as it arrives, a replayed one has to say when it happened.
+    """
 
     wire: dict[str, Any] = {
         "type": "tool",
@@ -313,6 +319,8 @@ def replay_tool_event(
         wire["args"] = args
     if content is not None:
         wire["content"] = content
+    if at is not None:
+        wire["at"] = at
     return wire
 
 
@@ -323,6 +331,7 @@ def snapshot_to_wire(
     busy: bool,
     model: str | None,
     context: dict[str, Any] | None = None,
+    started_at: float | None = None,
 ) -> dict[str, Any]:
     """The session as a newly connected front end finds it; the first message.
 
@@ -331,10 +340,13 @@ def snapshot_to_wire(
     then holds the live messages it has sent so far, for the front end to apply
     as if it had been connected all along, before the turn's next message.
     ``model`` is the one the session runs (``None``: the server's default), and
-    ``context`` its context meter (see ``context_to_wire``).
+    ``context`` its context meter (see ``context_to_wire``). ``started_at`` is
+    when the running turn began and ``now`` when this was sent (epoch ms, the
+    server's clock, as is a turn message's ``at``), so the front end can time
+    the turn from its own clock.
     """
 
-    return {
+    wire: dict[str, Any] = {
         "type": "snapshot",
         "messages": messages,
         "turn": turn,
@@ -342,6 +354,10 @@ def snapshot_to_wire(
         "model": model,
         "context": context,
     }
+    if busy and started_at is not None:
+        wire["started_at"] = started_at
+        wire["now"] = time.time() * 1000
+    return wire
 
 
 def model_to_wire(model: str | None) -> dict[str, Any]:

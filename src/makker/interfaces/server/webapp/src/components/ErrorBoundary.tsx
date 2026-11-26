@@ -1,4 +1,4 @@
-// A part of the page that fails to render (a tool card for a malformed argument,
+// A part of the page that fails to render (a step with a malformed argument,
 // say) shows a short note in its place, instead of unmounting the whole app on
 // every replay of the session.
 

@@ -24,7 +24,7 @@ import type {
   ServerMessage,
 } from "./protocol";
 import { HISTORY_CHANGED, SIDE_OUTPUT_TYPES } from "./protocol";
-import { toolPolicy } from "./toolPolicy";
+import { toolNote } from "./toolPolicy";
 
 // The built-in kinds; any other names a panel an extension registered
 // (`registerPanel` in canvas/registry.tsx).
@@ -89,10 +89,11 @@ export type ThreadItem =
       status: ToolStatus;
       output: string;
       note?: string;
-      // When the call started, so a card that is still running can say how long
-      // it has been running. Wall clock from this browser: the point is elapsed
-      // time on screen, not agreement with the server's clock.
+      // When the call started and ended: how long a running step has been going,
+      // and how long a finished one took. Live, the page's own clock as events
+      // arrive; replayed, the times the record carries.
       startedAt?: number;
+      endedAt?: number;
     }
   | { kind: "viz-chip"; id: string; viewId: string; title: string; viewKind: ViewKind }
   | { kind: "artifact-image"; id: string; url: string; title: string }
@@ -102,6 +103,8 @@ export type ThreadItem =
   // `retry` is the prompt of the turn that failed, when it can be sent again.
   | { kind: "error"; id: string; message: string; retry: string | null }
   | { kind: "help"; id: string };
+
+type ToolItem = Extract<ThreadItem, { kind: "tool" }>;
 
 export interface PendingInterrupt {
   ids: string[];
@@ -185,6 +188,8 @@ export interface SessionState {
   busy: boolean;
   warming: boolean;
   working: boolean;
+  // when the running turn started, for the clock on the status line
+  turnStartedAt: number | null;
   // the socket dropped and we are re-establishing it (shows the reconnecting bar)
   reconnecting: boolean;
   // thread
@@ -266,6 +271,7 @@ const initialState: SessionState = {
   busy: false,
   warming: false,
   working: false,
+  turnStartedAt: null,
   reconnecting: false,
   items: [],
   liveAssistantId: null,
@@ -355,13 +361,15 @@ export function createSessionStore() {
     const onTool = (msg: Extract<ServerMessage, { type: "tool" }>) => {
       const cid = msg.tool_call_id;
       if (!cid) return;
-      const policy = toolPolicy(msg.name);
+      const at = msg.at ?? Date.now();
+      // While the model is still writing the call, what it thinks or says before
+      // the call may still be arriving: that stays open, where it started. Any
+      // later event means the message is whole, and closes it.
+      const writing = msg.event === "composing";
       set((s) => {
-        let items = s.items;
-        let exists = items.some((it) => it.kind === "tool" && it.toolCallId === cid);
-        if (!exists) {
-          // A new tool step closes any open assistant/reasoning segment first.
-          items = finalizeReasoning(items, s.liveReasoningId);
+        let items = writing ? s.items : finalizeReasoning(s.items, s.liveReasoningId);
+        const known = items.find((it) => it.kind === "tool" && it.toolCallId === cid);
+        if (!known) {
           items = [
             ...items,
             {
@@ -373,43 +381,34 @@ export function createSessionStore() {
               args: msg.args ?? null,
               status: "running",
               output: "",
-              startedAt: Date.now(),
+              startedAt: at,
             },
           ];
-          exists = true;
         }
-        const update = (patch: Partial<Extract<ThreadItem, { kind: "tool" }>>) =>
+        const update = (patch: Partial<ToolItem>) =>
           items.map((it) =>
             it.kind === "tool" && it.toolCallId === cid ? { ...it, ...patch } : it,
           );
 
         if (msg.event === "delta") {
-          if (msg.content != null && policy.rawOutput !== false) {
-            items = update({ output: msg.content });
-          }
-        } else if (msg.event === "finished") {
-          // A tool that reports failure in its reply (an "ERROR: ..." string
-          // the model reads) still "finishes" at the protocol level; the policy
-          // predicate is what keeps the card honest, and the reply is surfaced
-          // even for tools whose successful output is hidden.
-          const failed = !!(msg.content && policy.failed?.(msg.content));
-          const patch: Partial<Extract<ThreadItem, { kind: "tool" }>> = {
-            status: failed ? "error" : "done",
-          };
-          if (!failed && policy.note && msg.content) patch.note = policy.note(msg.content);
-          if (msg.content && (failed || policy.rawOutput !== false)) patch.output = msg.content;
+          if (msg.content != null) items = update({ output: msg.content });
+        } else if (msg.event === "finished" || msg.event === "error") {
+          const failed = msg.event === "error";
+          const args = (known?.kind === "tool" ? known.args : null) ?? msg.args;
+          const patch: Partial<ToolItem> = { status: failed ? "error" : "done", endedAt: at };
+          if (msg.content) patch.output = msg.content;
+          if (!failed) patch.note = toolNote(msg.name, args, msg.content ?? "");
           items = update(patch);
-        } else if (msg.event === "error") {
-          const patch: Partial<Extract<ThreadItem, { kind: "tool" }>> = { status: "error" };
-          if (msg.content) patch.output = msg.content; // always surface errors
+        } else if (known) {
+          // The step was first seen while the model was still writing the call:
+          // its arguments arrive when it is whole, and its clock starts when it runs.
+          const patch: Partial<ToolItem> = msg.event === "started" ? { startedAt: at } : {};
+          if (msg.args) patch.args = msg.args;
           items = update(patch);
         }
-        return {
-          working: false,
-          liveAssistantId: null,
-          liveReasoningId: null,
-          items,
-        };
+        return writing
+          ? { working: false, items }
+          : { working: false, liveAssistantId: null, liveReasoningId: null, items };
       });
     };
 
@@ -520,9 +519,10 @@ export function createSessionStore() {
       set((s) => ({
         busy: false,
         working: false,
+        turnStartedAt: null,
         liveAssistantId: null,
-        // collapse the live reasoning block once the turn is done, and settle a
-        // tool card that never heard its end (the record replays those as done)
+        // close the live reasoning once the turn is done, and settle a tool
+        // step that never heard its end (the record replays those as done)
         items: finalizeReasoning(s.items, s.liveReasoningId).map((it) =>
           it.kind === "tool" && it.status === "running"
             ? { ...it, status: cancelled ? ("stopped" as const) : ("done" as const) }
@@ -537,6 +537,7 @@ export function createSessionStore() {
       set((s) => ({
         busy: false,
         working: false,
+        turnStartedAt: null,
         items: [
           ...s.items,
           { kind: "error", id: nextId(), message, retry: s.pending ? null : s.lastPrompt || null },
@@ -562,6 +563,7 @@ export function createSessionStore() {
       set((s) => ({
         busy: false,
         working: false,
+        turnStartedAt: null,
         items: [...s.items, { kind: "sys-note", id: nextId(), text }],
       }));
     };
@@ -575,8 +577,14 @@ export function createSessionStore() {
       set({ sessionId, meta, warming, context: msg.context ?? null });
       get().replay(msg.messages);
       if (!msg.busy) return;
-      set({ busy: true, working: true });
-      for (const m of msg.turn) get().handle(m);
+      get().beginWorking();
+      // The turn's times are the server's clock: moved onto this page's, so its
+      // clock and its steps' durations carry on from where they were.
+      const skew = msg.now != null ? Date.now() - msg.now : 0;
+      if (msg.started_at != null) set({ turnStartedAt: msg.started_at + skew });
+      for (const m of msg.turn) {
+        get().handle(m.type === "tool" && m.at != null ? { ...m, at: m.at + skew } : m);
+      }
     };
 
     return {
@@ -702,12 +710,18 @@ export function createSessionStore() {
         set((s) => ({
           busy: true,
           working: true,
+          turnStartedAt: Date.now(),
           lastPrompt: text,
           liveAssistantId: null,
           items: [...s.items, { kind: "user", id: nextId(), text }],
         })),
 
-      beginWorking: () => set({ busy: true, working: true }),
+      beginWorking: () =>
+        set((s) => ({
+          busy: true,
+          working: true,
+          turnStartedAt: (s.busy && s.turnStartedAt) || Date.now(),
+        })),
 
       pinBottom: () => set((s) => ({ bottomPin: s.bottomPin + 1 })),
 

@@ -95,7 +95,7 @@ turn.
 A turn belongs to the session, not to the socket that started it: closing the
 socket (switching chats, a dropped connection, a closed tab) leaves it running,
 and only a cancel stops it. So every connection opens with a `snapshot` of the
-session: the whole conversation replayed (text, reasoning, tool cards and their
+session: the whole conversation replayed (text, reasoning, tool calls and their
 results, and views), and, while a turn is running, everything that turn has sent
 so far. A front end that applies it shows the session exactly as one that never
 left, then follows the turn live. One socket at a time may hold a session; a
@@ -140,10 +140,10 @@ Messages from the server to the front end:
 
 | Message | Carries |
 | --- | --- |
-| `snapshot` | The first message on every connection: `messages`, the conversation replayed as `/sessions/{id}/messages` gives it; `busy`, whether a turn is running; `turn`, the messages that turn has sent so far, to apply as if they had arrived live; `model`, the model the session runs (`null` for the server's default); and `context`, its context meter (`null` before an agent was built) |
+| `snapshot` | The first message on every connection: `messages`, the conversation replayed as `/sessions/{id}/messages` gives it; `busy`, whether a turn is running; `turn`, the messages that turn has sent so far, to apply as if they had arrived live; `model`, the model the session runs (`null` for the server's default); `context`, its context meter (`null` before an agent was built); and while busy `started_at` and `now`, when the turn began and when the snapshot was sent (epoch ms on the server's clock, as a `tool` message's `at` is) |
 | `text` | A piece of the assistant's reply |
 | `reasoning` | A piece of the assistant's reasoning |
-| `tool` | A step in a tool call: requested, started, finished, or failed |
+| `tool` | A step in a tool call: composing (the model has begun writing it), requested (with its arguments), started, finished, or failed. One replayed, or kept for a page that attaches mid-turn, carries `at`, when it happened (epoch ms) |
 | `interrupt` | A request for approval: the actions, the decisions allowed, and per action a markdown `body` with the same detail the terminal shows (the command, a content preview, or the on-disk diff) |
 | `interrupt_resolved` | The pending approval was resolved without a decision from this client (a change of mode now allows it): drop its card, the turn is running again |
 | `artifact` | A file the session produced, given as a URL |

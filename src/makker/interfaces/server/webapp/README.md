@@ -42,8 +42,10 @@ backend at `http://127.0.0.1:8181` — run `makker --port 8181` (or set
 - `src/api.ts` — typed REST calls.
 - `src/markdown.tsx` — assistant prose via `react-markdown` + `rehype-sanitize`
   (no raw HTML, so model/tool output can't inject markup).
+- `src/steps.ts` — how the thread condenses the agent's work: the steps between
+  two messages as one group, its summary, and what the status line says.
 - `src/ansi.ts`, `src/julia.ts`, `src/toolPolicy.ts` — terminal-output rendering,
-  Julia highlighting, and per-tool card policy (all pure, all tested).
+  Julia highlighting, and how one tool call reads on its line (all pure, all tested).
 - `src/components/` — the UI (Thread, Composer, Canvas, Sidebar, Topbar, …).
 - `src/canvas/registry.tsx` — **the extension seam.** A pinned view has a `kind`;
   the canvas looks up a panel for it. Built-ins render in an iframe or an image.

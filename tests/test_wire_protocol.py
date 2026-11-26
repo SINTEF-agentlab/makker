@@ -287,3 +287,46 @@ def test_interrupt_wire_carries_the_edit_diff(tmp_path, monkeypatch) -> None:
     wire = protocol.interrupt_to_wire(TurnInterrupt(interrupt_id="i3", value=value))
     body = wire["actions"][0]["body"]
     assert "-x = 1" in body and "+x = 2" in body  # a real unified diff, not an arg dump
+
+
+def test_replayed_tool_events_say_when_they_happened() -> None:
+    """A live step is timed by the page as its events arrive; a replayed one has
+    only the record's times to say how long it took."""
+    from makker.interfaces.server.replay import replay_events
+    from makker.lab.fakes import make_event
+    from makker.trace import schema
+
+    events = [
+        make_event(1, schema.TOOL_CALL, {"id": "c1", "name": "run_julia", "args": {"code": "1"}}),
+        make_event(
+            31, schema.TOOL_RESULT, {"tool_call_id": "c1", "name": "run_julia", "content": "1"}
+        ),
+    ]
+    requested, finished = replay_events(events, "s1")
+    assert (requested["event"], finished["event"]) == ("requested", "finished")
+    assert finished["at"] - requested["at"] == 30_000
+
+
+def test_a_failed_plot_recorded_before_failures_had_a_status_replays_as_failed() -> None:
+    """Older sessions recorded a plot tool's "ERROR: …" reply with a success
+    status; it still replays as a failure, and other tools' text is not read."""
+    from makker.interfaces.server.replay import replay_events
+    from makker.lab.fakes import make_event
+    from makker.trace import schema
+
+    def result(cid: str, name: str, content: str, status: str = "success") -> object:
+        payload = {"tool_call_id": cid, "name": name, "content": content, "status": status}
+        return make_event(2, schema.TOOL_RESULT, payload)
+
+    events = [
+        result("old", "plot_julia", "ERROR: size must be two numbers"),
+        result("new", "plot_julia", "ERROR: size must be two numbers", "error"),
+        result("ok", "plot_julia", "Figure shown"),
+        result("shell", "execute", "ERROR: printed by a script that succeeded"),
+    ]
+    assert [w["event"] for w in replay_events(events, "s1")] == [
+        "error",
+        "error",
+        "finished",
+        "finished",
+    ]

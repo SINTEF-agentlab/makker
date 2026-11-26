@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import sys
+import time
 from typing import Any
 from urllib.parse import quote
 
@@ -121,6 +122,7 @@ class _SessionStream:
         self._turn_start_id = 0
         self._turn_prompt: str | None = None
         self._turn_log: list[dict[str, Any]] = []
+        self._turn_started_at: float | None = None  # epoch ms
         # Whether the running turn has already told the client it ended, so the
         # backstop in ``_run_turn`` never sends a second end.
         self._turn_ended = True
@@ -642,6 +644,7 @@ class _SessionStream:
             busy=busy,
             model=self._host.model,
             context=context_meter(session.trace),
+            started_at=self._turn_started_at,
         )
 
     async def _send_context(self) -> None:
@@ -671,7 +674,12 @@ class _SessionStream:
                 if entry.get("event") == "delta" and entry.get("tool_call_id") == cid:
                     log[i] = dict(message)
                     return
-        log.append(dict(message))
+        entry = dict(message)
+        if kind == "tool":
+            # A live step is timed by the page as it arrives; one the page reads
+            # later has to say when it happened.
+            entry.setdefault("at", time.time() * 1000)
+        log.append(entry)
 
     async def _send_interrupt(self, interrupt: Any) -> None:
         offer = self._host.approval.always_allow_offer(interrupt.value)
@@ -702,6 +710,7 @@ class _SessionStream:
         self._turn_start_id = self._side_output_id = self._latest_event_id()
         self._turn_prompt = prompt
         self._turn_log = []
+        self._turn_started_at = time.time() * 1000
 
     async def _run_turn(self, factory) -> None:
         """Drive one turn and, whatever happens, tell the client it ended.

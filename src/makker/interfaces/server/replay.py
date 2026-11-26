@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Collection
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +96,14 @@ def artifact_wire_events(
     return events
 
 
+def _epoch_ms(timestamp: str) -> float | None:
+    """A trace timestamp as epoch milliseconds, or None when it does not parse."""
+    try:
+        return datetime.fromisoformat(timestamp).timestamp() * 1000
+    except (TypeError, ValueError):
+        return None
+
+
 def replay_events(
     events: list[Any],
     session_id: str,
@@ -134,23 +143,29 @@ def replay_events(
         elif ev.kind == schema.TOOL_CALL:
             name = ev.payload.get("name")
             cid = ev.payload.get("id")
+            at = _epoch_ms(ev.timestamp)
             items.append(
                 protocol.replay_tool_event(
-                    event="requested", name=name, tool_call_id=cid, args=ev.payload.get("args")
+                    event="requested",
+                    name=name,
+                    tool_call_id=cid,
+                    args=ev.payload.get("args"),
+                    at=at,
                 )
             )
             if cid not in result_ids:
                 items.append(
-                    protocol.replay_tool_event(event="finished", name=name, tool_call_id=cid)
+                    protocol.replay_tool_event(event="finished", name=name, tool_call_id=cid, at=at)
                 )
         elif ev.kind == schema.TOOL_RESULT:
-            finished = "error" if ev.payload.get("status") == "error" else "finished"
+            finished = "error" if schema.result_failed(ev.payload) else "finished"
             items.append(
                 protocol.replay_tool_event(
                     event=finished,
                     name=ev.payload.get("name"),
                     tool_call_id=ev.payload.get("tool_call_id"),
                     content=ev.payload.get("content"),
+                    at=_epoch_ms(ev.timestamp),
                 )
             )
         elif ev.kind == schema.CONTEXT_COMPACTION:

@@ -349,3 +349,107 @@ async def test_a_tool_paused_by_an_interrupt_is_not_reported_finished() -> None:
 
     events = [(m.event, m.tool_call_id) for m in seen if isinstance(m, TurnToolEvent)]
     assert events == [("started", "tool-task")]
+
+
+async def test_a_call_is_announced_when_the_model_starts_writing_it() -> None:
+    """A call with long arguments takes a while to arrive whole, so a front end
+    hears of it at its first chunk and gets the arguments once it is complete."""
+    events = tool_call_events(
+        tool_name="run_julia", tool_call_id="c1", args={"code": "1"}, output="1", final_text="ok"
+    )
+    seen: list[TurnToolEvent] = []
+    await TurnRunner(ScriptedV3Agent(events), thread_id="t").run_prompt(
+        "go", on_message=lambda m: seen.append(m) if isinstance(m, TurnToolEvent) else None
+    )
+    said = [e for e in seen if e.event in ("composing", "requested")]
+    assert [(e.event, e.args) for e in said] == [("composing", None), ("requested", {"code": "1"})]
+
+
+async def test_a_tool_that_fails_without_raising_reaches_the_stream_as_an_error(
+    tmp_path: Path,
+) -> None:
+    """The stream hands over a result's text without its status, so the runner
+    reads the status from the trace.
+
+    That has to hold for a Julia error that follows printed output, for a refused
+    plot argument, for a file that is not there, and for calls made together,
+    whose results land before the loop reaches them.
+    """
+    from makker.agent.builder import build_agent
+    from makker.julia.session import EvalResult
+    from makker.lab import fakes
+    from makker.session import Session
+
+    def julia(code: str) -> EvalResult:
+        if "boom" in code:
+            return EvalResult(output="printed first", error="UndefVarError: `boom` not defined")
+        return EvalResult(output="2")
+
+    def calls(*specs: tuple[str, str, dict]) -> AIMessage:
+        return AIMessage(
+            content="", tool_calls=[{"id": i, "name": n, "args": a} for i, n, a in specs]
+        )
+
+    script = [
+        calls(("ok", "run_julia", {"code": "1 + 1", "description": "Add two numbers"})),
+        calls(
+            ("gone", "read_file", {"file_path": "/nonexistent/x.jl"}),
+            ("boom", "run_julia", {"code": "boom"}),
+            ("fine", "run_julia", {"code": "2"}),
+        ),
+        calls(("plot", "plot_julia", {"code": "lines(1:3)", "size": [1]})),
+        fakes.scripted_final("done"),
+    ]
+    session = Session.create(
+        julia=fakes.FakeJulia(eval_handler=julia),
+        state_root=tmp_path,
+        simulator=fakes.make_fake_adapter(tmp_path),
+    )
+    seen: list[TurnToolEvent] = []
+    try:
+        agent, _ = build_agent(session, model=fakes.make_scripted_model(script))
+        runner = TurnRunner(agent, thread_id="t", trace=session.trace)
+        await runner.run_prompt(
+            "go", on_message=lambda m: seen.append(m) if isinstance(m, TurnToolEvent) else None
+        )
+    finally:
+        session.finalize()
+
+    ended = {e.tool_call_id: e for e in seen if e.event in ("finished", "error")}
+    assert {cid: e.event for cid, e in ended.items()} == {
+        "ok": "finished",
+        "gone": "error",
+        "boom": "error",
+        "fine": "finished",
+        "plot": "error",
+    }
+    # The model still reads the reply as the tool wrote it.
+    assert ended["boom"].content == "printed first\nERROR: UndefVarError: `boom` not defined"
+    assert ended["plot"].content.startswith("ERROR: size must be")
+
+
+async def test_a_result_written_late_still_marks_its_call_failed(tmp_path: Path) -> None:
+    """Middleware can write a result a little after the stream reports the call's
+    end: the status waits for it, briefly, and a result that never comes reads as
+    not failed."""
+    import asyncio
+
+    from makker.agent.turns import _ResultStatus
+    from makker.trace.schema import TOOL_RESULT
+
+    log = TraceLog(tmp_path / "trace.sqlite")
+    try:
+        results = _ResultStatus(log)
+        log.append(TOOL_RESULT, {"tool_call_id": "early", "status": "success"})
+
+        async def write_later() -> None:
+            await asyncio.sleep(0.05)
+            log.append(TOOL_RESULT, {"tool_call_id": "late", "status": "error"})
+
+        writer = asyncio.create_task(write_later())
+        assert await results.failed("late") is True
+        await writer
+        assert await results.failed("early") is False  # read once, kept until asked
+        assert await results.failed("never") is False
+    finally:
+        log.close()

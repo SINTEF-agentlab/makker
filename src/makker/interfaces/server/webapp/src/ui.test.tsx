@@ -363,50 +363,114 @@ describe("Thread rendering", () => {
     expect(screen.getByText("Sim prompt.")).toBeInTheDocument();
   });
 
-  it("renders a streamed exchange: user, assistant, tool", () => {
-    const { store } = renderWithStore(<Thread />);
+  it("renders a streamed exchange: user, assistant, and the step as one line", () => {
+    const { store, container } = renderWithStore(<Thread />);
     act(() => store.getState().addUser("run a sim"));
     drive(
       store,
       { type: "text", text: "On it." },
-      { type: "tool", event: "requested", name: "run_julia", label: "run_julia", tool_call_id: "1", args: { code: "1+1" } },
+      { type: "tool", event: "requested", name: "run_julia", label: "Julia", tool_call_id: "1", args: { code: "1+1" } },
       { type: "tool", event: "finished", name: "run_julia", tool_call_id: "1", content: "2" },
     );
     expect(screen.getByText("run a sim")).toBeInTheDocument();
     expect(screen.getByText("On it.")).toBeInTheDocument();
-    expect(screen.getByText("run_julia")).toBeInTheDocument();
-    expect(screen.getByText("done")).toBeInTheDocument();
+    expect(screen.getByText("Julia")).toBeInTheDocument();
+    expect(screen.getByText("1+1")).toBeInTheDocument();
+    // Its code and output are behind the line, not on show.
+    expect(container.querySelector(".tool-output")).toBeNull();
+    fireEvent.click(screen.getByText("1+1"));
+    expect(container.querySelector(".tool-output")?.textContent).toBe("2");
   });
 
-  it("counts up on a tool that is still running, and stops when it finishes", () => {
+  it("folds the steps between two messages into one line that opens", () => {
+    const { store, container } = renderWithStore(<Thread />);
+    const call = (id: string, name: string, label: string, args: Record<string, unknown>, event: "finished" | "error" = "finished") => [
+      { type: "tool", event: "requested", name, label, tool_call_id: id, args } as ServerMessage,
+      { type: "tool", event, name, tool_call_id: id, content: "x" } as ServerMessage,
+    ];
+    drive(
+      store,
+      { type: "reasoning", text: "Look at the examples first." },
+      ...call("1", "read_file", "Read", { file_path: "/pkg/examples/wells.jl" }),
+      ...call("2", "read_file", "Read", { file_path: "/pkg/examples/forces.jl" }),
+      ...call("3", "run_julia", "Julia", { code: "boom" }, "error"),
+      { type: "text", text: "Done looking." },
+    );
+    expect(screen.getByText("Read 2 files, ran Julia")).toBeInTheDocument();
+    expect(screen.getByText("1 failed")).toBeInTheDocument();
+    expect(container.querySelectorAll(".steps .step")).toHaveLength(0);
+    fireEvent.click(screen.getByText("Read 2 files, ran Julia"));
+    expect(container.querySelectorAll(".steps .step")).toHaveLength(4);
+    expect(screen.getByText("examples/wells.jl")).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+    expect(screen.getByText("Look at the examples first.")).toBeInTheDocument();
+  });
+
+  it("keeps a status line at the bottom for the whole turn, with a clock", () => {
     vi.useFakeTimers();
     try {
       const { store, container } = renderWithStore(<Thread />);
-      drive(store, {
-        type: "tool",
-        event: "requested",
-        name: "setup_mesh",
-        label: "setup_mesh",
-        tool_call_id: "1",
-        args: {},
-      });
-      // Nothing yet: a number that flashes up and vanishes is noise.
-      expect(container.querySelector(".elapsed")).toBeNull();
+      act(() => store.getState().startTurn("go"));
+      expect(container.querySelector(".status")?.textContent).toContain("Working");
+      drive(store, { type: "text", text: "On it." });
+      expect(container.querySelector(".status")?.textContent).toContain("Working");
+      drive(store, { type: "tool", event: "requested", name: "run_julia", label: "Julia", tool_call_id: "1", args: { code: "simulate()" } });
+      // The step under way is the status line, not yet a line of the thread.
+      expect(container.querySelector(".status")?.textContent).toContain("Juliasimulate()");
+      expect(container.querySelector(".step-group")).toBeNull();
+      expect(container.querySelector(".thread")?.lastElementChild).toBe(container.querySelector(".status"));
       act(() => void vi.advanceTimersByTime(65_000));
-      expect(container.querySelector(".elapsed")?.textContent).toBe("1:05");
-      drive(store, { type: "tool", event: "finished", name: "setup_mesh", tool_call_id: "1", content: "ok" });
-      expect(container.querySelector(".elapsed")).toBeNull();
+      expect(container.querySelector(".status .elapsed")?.textContent).toBe("1:05");
+      drive(store, { type: "tool", event: "finished", name: "run_julia", tool_call_id: "1", content: "ok" });
+      expect(container.querySelector(".step-group")?.textContent).toContain("simulate()");
+      drive(store, { type: "turn_end", text: "" });
+      expect(container.querySelector(".status")).toBeNull();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("shows the thinking indicator only while working", () => {
+  it("shows what a long step prints while it runs, and all of it when opened", () => {
+    vi.useFakeTimers();
+    try {
+      const { store, container } = renderWithStore(<Thread />);
+      act(() => store.getState().startTurn("go"));
+      drive(
+        store,
+        { type: "tool", event: "requested", name: "run_julia", label: "Julia", tool_call_id: "1", args: { code: "simulate()" } },
+        { type: "tool", event: "delta", name: "run_julia", tool_call_id: "1", content: "Progress 10%" },
+      );
+      // Not at once: a quick step would only flash it.
+      expect(container.querySelector(".live-tail")).toBeNull();
+      act(() => void vi.advanceTimersByTime(3000));
+      expect(container.querySelector(".live-tail")?.textContent).toBe("Progress 10%");
+      fireEvent.click(screen.getByText("simulate()"));
+      expect(container.querySelector(".live-tail")).toBeNull();
+      expect(container.querySelector(".status .tool-code")?.textContent).toContain("simulate()");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows the plan once while the agent works, not as steps", () => {
     const { store, container } = renderWithStore(<Thread />);
-    act(() => store.getState().beginWorking());
-    expect(container.querySelector(".working")).toBeInTheDocument();
-    drive(store, { type: "text", text: "hi" });
-    expect(container.querySelector(".working")).toBeNull();
+    const todos = (first: string) => ({
+      todos: [null, { content: "Write the script", status: first }, { content: "Run it", status: "pending" }],
+    });
+    act(() => store.getState().startTurn("go"));
+    drive(
+      store,
+      { type: "tool", event: "requested", name: "write_todos", tool_call_id: "p1", args: todos("in_progress") },
+      { type: "tool", event: "finished", name: "write_todos", tool_call_id: "p1", content: "ok" },
+      { type: "tool", event: "requested", name: "write_todos", tool_call_id: "p2", args: todos("completed") },
+      { type: "tool", event: "finished", name: "write_todos", tool_call_id: "p2", content: "ok" },
+    );
+    expect(container.querySelectorAll(".plan")).toHaveLength(1);
+    expect(container.querySelectorAll(".plan .todo")).toHaveLength(2);
+    expect(container.querySelector(".plan .todo.completed")?.textContent).toContain("Write the script");
+    expect(container.querySelector(".step-group")).toBeNull();
+    drive(store, { type: "turn_end", text: "" });
+    expect(container.querySelector(".plan")).toBeNull();
   });
 });
 
@@ -478,20 +542,32 @@ describe("a part that fails to render", () => {
   it("shows a note in its place and leaves the rest of the thread", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { store } = renderWithStore(<Thread />);
-    drive(
-      store,
-      { type: "text", text: "Before the bad card." },
-      // A model's malformed todo list: the card's preview reads each entry.
-      { type: "tool", event: "requested", name: "write_todos", tool_call_id: "t", args: { todos: [null] } },
-      { type: "turn_end", text: "" },
-    );
+    act(() => store.getState().addUser("Before the bad part."));
+    // A malformed message: the text of a reply has to be a string to render.
+    drive(store, { type: "text", text: { not: "text" } as unknown as string }, { type: "turn_end", text: "" });
     expect(screen.getByText("Could not show this item.")).toBeInTheDocument();
-    expect(screen.getByText("Before the bad card.")).toBeInTheDocument();
+    expect(screen.getByText("Before the bad part.")).toBeInTheDocument();
     error.mockRestore();
   });
 });
 
 describe("approval", () => {
+  it("keeps the call that waits for approval off the summary until it has run", () => {
+    const { store, container } = renderWithStore(<Thread />);
+    act(() => store.getState().startTurn("go"));
+    drive(
+      store,
+      { type: "tool", event: "requested", name: "read_file", label: "Read", tool_call_id: "1", args: { file_path: "a.jl" } },
+      { type: "tool", event: "finished", name: "read_file", tool_call_id: "1", content: "x" },
+      { type: "tool", event: "requested", name: "edit_file", label: "Edit", tool_call_id: "2", args: { file_path: "a.jl" } },
+      { type: "interrupt", interrupt_id: "x", actions: [{ name: "edit_file", args: { file_path: "a.jl" } }], allowed_decisions: ["approve", "reject"], allowlist: [] },
+    );
+    expect(container.querySelector(".status")).toBeNull();
+    expect(container.querySelector(".step-group")?.textContent).toContain("Read");
+    expect(container.querySelector(".step-group")?.textContent).not.toContain("Edit");
+    expect(container.querySelector(".approval")).toBeInTheDocument();
+  });
+
   it("renders the request and clears it on approve", () => {
     const { store } = renderWithStore(<Thread />);
     drive(store, {

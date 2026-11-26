@@ -174,7 +174,12 @@ silently at runtime. The contacts:
   `astream_events` typed projections (`run.messages` / `run.tool_calls` /
   `run.interrupts` / `run.output`), and most turn tests run on the fakes. A
   canary drives one tool call through the real graph and through the fakes
-  and requires both to yield the shape `turns.py` reads.
+  and requires both to yield the shape `turns.py` reads. The tool-call
+  projection hands over a result's text without its status, so `turns.py`
+  reads whether a call failed from the trace (a test drives failing calls
+  through the real graph); it announces a call (`composing`) from the first
+  tool-call chunk that carries its id and name, and skips that if the chunk
+  shape moves.
 - `agent/summarization.py`: manual `/compact` composes the summarization
   middleware's private engine methods. Guarded by a `hasattr` sweep that
   degrades to a clear "unavailable" message.

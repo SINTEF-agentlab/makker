@@ -104,6 +104,25 @@ def model_payload(
     }
 
 
+# The tools that say they failed with an "ERROR: …" reply. Sessions recorded
+# before that reply also set the result's error status have it as a success.
+_ERROR_REPLY_TOOLS = frozenset(
+    {"run_julia", "reset_julia", "plot_julia", "recapture_plot", "close_plots"}
+)
+
+
+def result_failed(payload: dict[str, Any]) -> bool:
+    """Whether a ``TOOL_RESULT`` says its call failed."""
+    if payload.get("status") == "error":
+        return True
+    content = payload.get("content")
+    return (
+        payload.get("name") in _ERROR_REPLY_TOOLS
+        and isinstance(content, str)
+        and content.startswith("ERROR:")
+    )
+
+
 def offload_payload(*, count: int, freed_tokens: int) -> dict[str, Any]:
     """Payload for a ``CONTEXT_OFFLOAD`` event: how many tool results moved to
     files, and about how many tokens that freed."""

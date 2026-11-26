@@ -33,9 +33,10 @@ import uuid
 from pathlib import Path
 from typing import Annotated, Any
 
-from langchain_core.tools import InjectedToolCallId, tool
+from langchain_core.tools import InjectedToolCallId
 
 from makker.agent import plot_julia_src as jl
+from makker.agent.tool_output import error_reply_tool
 from makker.paths import workspace_root
 from makker.session import Session
 from makker.simulators.base import SimulatorAdapter
@@ -552,7 +553,7 @@ def make_plot_julia_tool(session: Session, *, surface: str | None = None):
                 live_base = f"/live/{session.session_id}"
         return None
 
-    @tool
+    @error_reply_tool
     async def plot_julia(
         code: str,
         tool_call_id: Annotated[str, InjectedToolCallId],
@@ -708,7 +709,7 @@ def make_recapture_tool(session: Session, *, surface: str | None = None):
     artifacts_dir = session.output_dir / "artifacts"
     web = (surface or session.surface) == "web"
 
-    @tool
+    @error_reply_tool
     async def recapture_plot(
         tool_call_id: Annotated[str, InjectedToolCallId],
         caption: str = "",
@@ -782,7 +783,7 @@ def make_recapture_tool(session: Session, *, surface: str | None = None):
 def make_close_plots_tool(session: Session, *, surface: str | None = None):
     web = (surface or session.surface) == "web"
 
-    @tool
+    @error_reply_tool
     async def close_plots(slot: str | None = None) -> str:
         """Close interactive plots (native windows, or live views in the web canvas).
 
