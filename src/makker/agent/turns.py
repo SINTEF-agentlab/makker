@@ -27,6 +27,7 @@ from makker.trace.schema import (
     HITL_RESPONSE,
     MESSAGE_USER,
     MODEL_USAGE,
+    TOOL_CALL,
     TOOL_RESULT,
 )
 
@@ -392,29 +393,37 @@ class _ResultStatus:
 
     The stream hands over a result's text without its status. The trace has the
     whole result, written once the tool's middleware has run, which can be a
-    little after the stream reports the end: a call waits for its result up to
-    ``RESULT_WAIT`` seconds. Each result is read once, from where the run began
-    (calls made together run together, so a later call's result can be on the
-    trace before this loop reaches it).
+    little after the stream reports the end. The recorder writes a call before
+    it runs, so a call on the trace waits for its result, up to ``RESULT_WAIT``
+    seconds; one not on it (nothing records this run) has none coming. Each
+    event is read once, from where the run began (calls made together run
+    together, so a later call's result can be on the trace before this loop
+    reaches it).
     """
 
     def __init__(self, trace: TraceLog | None) -> None:
         self._trace = trace
         self._mark = trace.max_id() if trace is not None else 0
+        self._called: set[str] = set()
         self._seen: dict[str, bool] = {}
 
     async def failed(self, tool_call_id: str | None) -> bool:
         if self._trace is None or tool_call_id is None:
             return False
+        cid = str(tool_call_id)
         deadline = asyncio.get_running_loop().time() + RESULT_WAIT
         while True:
-            for event in self._trace.events_after(self._mark, kinds=(TOOL_RESULT,)):
+            for event in self._trace.events_after(self._mark, kinds=(TOOL_CALL, TOOL_RESULT)):
                 self._mark = event.id
-                status = event.payload.get("status")
-                self._seen[str(event.payload.get("tool_call_id"))] = status == "error"
-            if str(tool_call_id) in self._seen:
-                return self._seen.pop(str(tool_call_id))
-            if asyncio.get_running_loop().time() >= deadline:
+                if event.kind == TOOL_CALL:
+                    self._called.add(str(event.payload.get("id")))
+                else:
+                    failed = event.payload.get("status") == "error"
+                    self._seen[str(event.payload.get("tool_call_id"))] = failed
+            if cid in self._seen:
+                self._called.discard(cid)
+                return self._seen.pop(cid)
+            if cid not in self._called or asyncio.get_running_loop().time() >= deadline:
                 return False
             await asyncio.sleep(0.005)
 

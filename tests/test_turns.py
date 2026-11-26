@@ -430,16 +430,19 @@ async def test_a_tool_that_fails_without_raising_reaches_the_stream_as_an_error(
 
 async def test_a_result_written_late_still_marks_its_call_failed(tmp_path: Path) -> None:
     """Middleware can write a result a little after the stream reports the call's
-    end: the status waits for it, briefly, and a result that never comes reads as
-    not failed."""
+    end: a call the trace has seen waits for its result, briefly. A call it has
+    not seen (nothing records the run) has no result coming, and does not wait."""
     import asyncio
+    import time
 
-    from makker.agent.turns import _ResultStatus
-    from makker.trace.schema import TOOL_RESULT
+    from makker.agent.turns import RESULT_WAIT, _ResultStatus
+    from makker.trace.schema import TOOL_CALL, TOOL_RESULT
 
     log = TraceLog(tmp_path / "trace.sqlite")
     try:
         results = _ResultStatus(log)
+        for cid in ("early", "late", "lost"):
+            log.append(TOOL_CALL, {"id": cid, "name": "run_julia", "args": {}})
         log.append(TOOL_RESULT, {"tool_call_id": "early", "status": "success"})
 
         async def write_later() -> None:
@@ -450,6 +453,10 @@ async def test_a_result_written_late_still_marks_its_call_failed(tmp_path: Path)
         assert await results.failed("late") is True
         await writer
         assert await results.failed("early") is False  # read once, kept until asked
-        assert await results.failed("never") is False
+        assert await results.failed("lost") is False  # waited for, never came
+
+        began = time.monotonic()
+        assert await results.failed("unrecorded") is False
+        assert time.monotonic() - began < RESULT_WAIT / 2
     finally:
         log.close()
