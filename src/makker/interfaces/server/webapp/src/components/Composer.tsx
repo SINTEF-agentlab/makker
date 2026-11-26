@@ -15,6 +15,7 @@ import { replyDecision } from "../store";
 export function Composer() {
   const controller = useController();
   const busy = useSel((s) => s.busy);
+  const contextOpen = useSel((s) => s.contextView.open);
   const pending = useSel((s) => s.pending);
 
   const [value, setValue] = useState("");
@@ -89,7 +90,8 @@ export function Composer() {
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Escape") {
-      if (busy) return controller.stop();
+      // With the context view open, Escape closes that and the turn runs on.
+      if (busy && !contextOpen) return controller.stop();
       return;
     }
     if (slashOpen) {

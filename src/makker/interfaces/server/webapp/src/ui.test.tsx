@@ -261,6 +261,36 @@ describe("context ring and view", () => {
     report.mockRestore();
   });
 
+  it("closes on Escape in the message box without stopping the turn", () => {
+    const { store, controller } = renderWithStore(<Composer />);
+    const stop = vi.spyOn(controller, "stop").mockImplementation(() => {});
+    act(() => store.setState({ sessionId: "s1", context: meter, busy: true }));
+    act(() => store.getState().setContextView({ open: true }));
+
+    const box = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Context" })).toBeNull();
+    expect(stop).not.toHaveBeenCalled();
+
+    // With the view closed, Escape stops the turn as before.
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays open when the click that opened it came from a button now gone", () => {
+    const { store } = renderWithStore(<Composer />);
+    act(() => store.setState({ sessionId: "s1", context: meter }));
+    act(() => store.getState().setContextView({ open: true }));
+
+    // As with /context sent from the Send button: the button leaves the page
+    // before its click reaches the document.
+    const gone = document.createElement("button");
+    document.body.append(gone);
+    gone.addEventListener("click", () => gone.remove());
+    fireEvent.click(gone);
+    expect(screen.getByRole("dialog", { name: "Context" })).toBeInTheDocument();
+  });
+
   it("shows an empty ring before the first model call", () => {
     const { store } = renderWithStore(<Composer />);
     act(() => store.setState({ context: { ...meter, used: null } }));
