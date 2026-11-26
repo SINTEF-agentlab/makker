@@ -343,6 +343,7 @@ def run(args: argparse.Namespace) -> int:
         local_only=local,
         allowed_origins=args.allowed_origin,
         token=token,
+        restarted=restarted,
     )
     server = uvicorn.Server(
         uvicorn.Config(app, host=args.host, port=args.port, timeout_graceful_shutdown=5)

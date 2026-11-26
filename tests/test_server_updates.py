@@ -561,6 +561,11 @@ def test_a_restarted_server_starts_even_if_something_needs_fixing(web_run, monke
     assert updates.RESTARTED_ENV_VAR not in os.environ
     # The page that asked for the update hears how it went.
     assert calls.updater.status()["job"]["state"] == "done"
+    # A page from before the token hears that the server is back, and no more.
+    from makker.interfaces.server.access import TokenGuard
+
+    guard = next(m.kwargs for m in calls.app.user_middleware if m.cls is TokenGuard)
+    assert guard["open_paths"] == ("/version",)
 
 
 @pytest.mark.parametrize(
@@ -578,7 +583,12 @@ def test_the_server_asks_for_its_token(web_run, capsys, base_path, link) -> None
     token = server_token()
     guard = next(m.kwargs for m in calls.app.user_middleware if m.cls is TokenGuard)
     # Live plots carry their own capability (the secret in their routes).
-    assert guard == {"token": token, "base_path": base_path, "open_prefixes": ("/live/",)}
+    assert guard == {
+        "token": token,
+        "base_path": base_path,
+        "open_prefixes": ("/live/",),
+        "open_paths": (),
+    }
     assert link.format(token=token) in capsys.readouterr().err
 
 
