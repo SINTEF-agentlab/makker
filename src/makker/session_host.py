@@ -726,20 +726,41 @@ class SessionHost:
             # kernel is per workspace, and a package left unloaded here would be
             # loaded by the first tool call that needs it, at the user's expense.
             from makker.agent.capabilities import collect_warm_code, collect_warm_packages
-            from makker.simulators.warmup import start_warmup
+            from makker.simulators.warmup import past_loading, start_warmup
 
-            # Set once the warm-up is past loading; before that, cancelling it
-            # would interrupt a `using` and take the kernel down with it.
-            abandonable = asyncio.Event()
-            host._warmup_task = start_warmup(
-                kernel,
-                session.warm,
-                collect_warm_packages(all_extensions),
-                collect_warm_code(all_extensions),
-                abandonable=abandonable,
-                native_plotting=not renders_in_browser(surface),
-            )
-            julia.set_warmup(host._warmup_task, abandonable)
+            def warm() -> asyncio.Event:
+                # Set once the warm-up is past loading; before that, cancelling it
+                # would interrupt a `using` and take the kernel down with it.
+                abandonable = asyncio.Event()
+                host._warmup_task = start_warmup(
+                    kernel,
+                    session.warm,
+                    collect_warm_packages(all_extensions),
+                    collect_warm_code(all_extensions),
+                    abandonable=abandonable,
+                    native_plotting=not renders_in_browser(surface),
+                )
+                julia.set_warmup(host._warmup_task, abandonable)
+                return abandonable
+
+            def rewarm(_restart: object) -> Awaitable[None] | None:
+                # A restart replaces the process and all the warm-up did in it (the
+                # packages, HYPRE's threads, the `using GLMakie` plot code relies on),
+                # so the new one is warmed the same way. What is left of the last
+                # warm-up was meant for the old process. The kernel holds other
+                # calls until the new one is past loading.
+                stale = host._warmup_task
+                if stale is not None and not stale.done():
+                    stale.cancel()
+                abandonable = warm()
+                if host._warmup_task is None:
+                    return None
+                return past_loading(host._warmup_task, abandonable)
+
+            warm()
+            # The stack unwinds in reverse, so this stops listening before the
+            # kernel closes: a restart during teardown can't start a warm-up.
+            stack.callback(kernel.on_restart(rewarm))
         return host
 
 
