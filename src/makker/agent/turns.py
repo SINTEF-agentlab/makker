@@ -27,6 +27,7 @@ from makker.trace.schema import (
     HITL_RESPONSE,
     MESSAGE_USER,
     MODEL_USAGE,
+    TOOL_RESULT,
 )
 
 # The turn runs on langgraph's v3 event stream on purpose, which warns that it is
@@ -211,7 +212,7 @@ class TurnRunner:
         forward = notes.relay if on_message is not None else None
         await asyncio.gather(
             _drain_messages(run, forward),
-            _drain_tool_calls(run, forward),
+            _drain_tool_calls(run, forward, self._trace),
         )
         await notes.surface()
 
@@ -266,16 +267,28 @@ async def _drain_reasoning(message_stream: Any, on_message: MessageCallback | No
 
 
 async def _drain_tool_call_chunks(message_stream: Any, on_message: MessageCallback | None) -> None:
-    """Surface a ``requested`` TurnToolEvent once each tool call finalizes.
+    """Surface each tool call: ``composing`` at its first chunk, ``requested``
+    with its arguments once it is whole.
 
     The tool-call projection is both async-iterable (partial chunks) and
-    awaitable (the finalized list). We only need the finalized view, but
-    we have to exhaust the iterator first so the awaitable resolves.
+    awaitable (the finalized list); the iterator has to be exhausted before the
+    awaitable resolves.
     """
 
+    composing: set[str] = set()
     try:
-        async for _ in message_stream.tool_calls:
-            pass
+        async for chunk in message_stream.tool_calls:
+            # Name the call as soon as the model starts writing it: one with long
+            # arguments (a file's contents) takes a while to arrive in full.
+            call_id = chunk.get("id") if isinstance(chunk, dict) else None
+            name = chunk.get("name") if isinstance(chunk, dict) else None
+            if on_message is None or not call_id or not name or call_id in composing:
+                continue
+            composing.add(call_id)
+            await _emit(
+                on_message,
+                TurnToolEvent(event="composing", tool_name=name, tool_call_id=str(call_id)),
+            )
         finalized = await message_stream.tool_calls
     except (TypeError, AttributeError):
         return
@@ -304,9 +317,12 @@ async def _drain_tool_call_chunks(message_stream: Any, on_message: MessageCallba
         )
 
 
-async def _drain_tool_calls(run: Any, on_message: MessageCallback | None) -> None:
+async def _drain_tool_calls(
+    run: Any, on_message: MessageCallback | None, trace: TraceLog | None = None
+) -> None:
     """Stream ``tool-started`` / ``tool-finished`` / ``tool-error`` lifecycle."""
 
+    results = _ResultStatus(trace)
     async for call in run.tool_calls:
         tool_name = getattr(call, "tool_name", None) or "tool"
         tool_call_id = getattr(call, "tool_call_id", None)
@@ -359,15 +375,52 @@ async def _drain_tool_calls(run: Any, on_message: MessageCallback | None) -> Non
                 ),
             )
         else:
+            failed = await results.failed(tool_call_id)
             await _emit(
                 on_message,
                 TurnToolEvent(
-                    event="finished",
+                    event="error" if failed else "finished",
                     tool_name=tool_name,
                     tool_call_id=tool_call_id,
                     content=_stringify_tool_output(call.output),
                 ),
             )
+
+
+class _ResultStatus:
+    """Whether a tool that returned says it failed, in its result's status.
+
+    The stream hands over a result's text without its status. The trace has the
+    whole result, written once the tool's middleware has run, which can be a
+    little after the stream reports the end: a call waits for its result up to
+    ``RESULT_WAIT`` seconds. Each result is read once, from where the run began
+    (calls made together run together, so a later call's result can be on the
+    trace before this loop reaches it).
+    """
+
+    def __init__(self, trace: TraceLog | None) -> None:
+        self._trace = trace
+        self._mark = trace.max_id() if trace is not None else 0
+        self._seen: dict[str, bool] = {}
+
+    async def failed(self, tool_call_id: str | None) -> bool:
+        if self._trace is None or tool_call_id is None:
+            return False
+        deadline = asyncio.get_running_loop().time() + RESULT_WAIT
+        while True:
+            for event in self._trace.events_after(self._mark, kinds=(TOOL_RESULT,)):
+                self._mark = event.id
+                status = event.payload.get("status")
+                self._seen[str(event.payload.get("tool_call_id"))] = status == "error"
+            if str(tool_call_id) in self._seen:
+                return self._seen.pop(str(tool_call_id))
+            if asyncio.get_running_loop().time() >= deadline:
+                return False
+            await asyncio.sleep(0.005)
+
+
+# How long a finished call's event waits for its result on the trace.
+RESULT_WAIT = 0.25
 
 
 async def _collect_interrupts(run: Any, trace: TraceLog | None) -> list[TurnInterrupt]:

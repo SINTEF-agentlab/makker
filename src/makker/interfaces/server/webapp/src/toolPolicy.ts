@@ -1,85 +1,81 @@
-// Per-tool card policy and the small helpers that summarize a tool call. Unlisted
-// tools default to: open, with the args/code body and the raw text output shown.
-// Listed tools get a compact, web-native rendering. Pure functions, unit-tested.
+// How one tool call reads on its line in the thread: what it acted on (from its
+// arguments) and a short note on how it went. Pure functions, unit-tested.
 
-export interface ToolPolicy {
-  /** Start collapsed (a quiet, read-only step). */
-  collapsed?: boolean;
-  /** "none" = summary only; "path" = just the file path; default = a full body. */
-  body?: "none" | "path";
-  /** false: don't dump the text result (it's noise, or it lives in the canvas). */
-  rawOutput?: boolean;
-  /** A short result summary appended to the summary line ("42 lines"). */
-  note?: (content: string) => string;
-  /** The tool reports failure in its reply text (an "ERROR: ..." string the
-   *  model reads, rather than a raised error). The card then shows failed, with
-   *  the reply surfaced — without this a failed plot call reads as done while
-   *  no figure ever appears. */
-  failed?: (content: string) => boolean;
+type Args = Record<string, unknown>;
+
+const lineCount = (v: unknown): number => (v ? String(v).split("\n").length : 0);
+
+/** read_file opens its reply with the range it returned ("@@ lines 101-200 of 222 @@").
+ *  A file read as an image has no text to count. */
+function readNote(content: string): string {
+  const m = /^@@ lines (\d+)-(\d+) of (\d+)/.exec(content);
+  if (!m) return content.trim() ? unitNote(content, "line") : "";
+  const [from, to, total] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  return from === 1 && to === total ? `${total} ${total === 1 ? "line" : "lines"}` : `lines ${from}–${to}`;
 }
 
-/** The convention the Julia-facing tools use: a failure is a returned reply
- *  starting with ERROR, so the model can read and react to it. */
-const errorReply = (content: string): boolean => content.trimStart().startsWith("ERROR");
+/** grep lists matching lines under each file ("  474: text"), or just the files. */
+function grepNote(content: string): string {
+  if (/^No (matches|files) found/.test(content.trim())) return "no matches";
+  const hits = content.split("\n").filter((l) => /^\s+\d+:/.test(l)).length;
+  return hits ? `${hits} ${hits === 1 ? "match" : "matches"}` : unitNote(content, "file");
+}
 
-export const TOOL_POLICY: Record<string, ToolPolicy> = {
-  write_todos: { rawOutput: false }, // the checklist is the body
-  read_file: { collapsed: true, body: "path", rawOutput: false, note: (c) => unitNote(c, "line") },
-  grep: { collapsed: true, body: "none", note: (c) => unitNote(c, "match", "matches") },
-  glob: { collapsed: true, body: "none", note: (c) => unitNote(c, "file") },
-  ls: { collapsed: true, body: "none", rawOutput: false, note: listingNote },
-  // The figure is pinned in the canvas; a failure must still surface here.
-  plot_julia: { collapsed: true, rawOutput: false, failed: errorReply },
-  recapture_plot: { collapsed: true, failed: errorReply },
-  close_plots: { collapsed: true, failed: errorReply },
-  write_report: { collapsed: true, body: "none", rawOutput: false }, // the report is in the canvas
-  record_attempt: { rawOutput: false }, // a structured body (rationale + metrics) below
+// A short note for the tools whose result (or arguments) says something worth a
+// few words. A tool not listed has no note.
+const NOTE: Record<string, (content: string, args: Args) => string> = {
+  read_file: readNote,
+  grep: grepNote,
+  glob: (c) => listingNote(c, "file", "files"),
+  ls: (c) => listingNote(c),
+  write_file: (_c, a) => `${lineCount(a.content)} ${lineCount(a.content) === 1 ? "line" : "lines"}`,
+  edit_file: (_c, a) => `+${lineCount(a.new_string)} −${lineCount(a.old_string)}`,
+  // "attempt #3 (parent #2) · rmse=0.12 · id=<uuid>": the id is not for reading.
+  record_attempt: (c) => c.split(" · id=")[0].split("\n")[0],
 };
 
-export function toolPolicy(name: string | null | undefined): ToolPolicy {
-  return (name && TOOL_POLICY[name]) || {};
+/** The note for a finished call, or "" when its tool has none. */
+export function toolNote(name: string | null | undefined, args: Args | null | undefined, content: string): string {
+  const note = name ? NOTE[name] : undefined;
+  return note ? note(content, args ?? {}) : "";
 }
 
-/** Args worth previewing on the collapsed summary line, in priority order. */
+/** Args worth showing on the line, in priority order. */
 const PREVIEW_KEYS = [
-  "title", "caption", "code", "command", "file_path", "path", "pattern", "query", "slot",
+  "title", "caption", "description", "code", "command", "pattern", "query", "file_path", "path", "slot",
 ];
 
-interface TodoItem {
-  content?: string;
-  activeForm?: string;
-  status?: string;
+/** A path as its last two segments: enough to tell files apart, short enough for a line. */
+export function shortPath(path: string): string {
+  const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
+  return parts.length > 2 ? parts.slice(-2).join("/") : path;
 }
 
-/** A one-line preview of what a tool call is doing, for the collapsed summary. */
-export function argPreview(args: Record<string, unknown> | null | undefined, name?: string): string {
+/** What a tool call is acting on, in one line. */
+export function argPreview(args: Args | null | undefined): string {
   if (!args) return "";
-  if (name === "write_todos" && Array.isArray(args.todos)) {
-    const todos = args.todos as TodoItem[];
-    const active = todos.find((t) => t.status === "in_progress");
-    if (active) return active.content ?? "";
-    return `${todos.length} item${todos.length === 1 ? "" : "s"}`;
-  }
   for (const key of PREVIEW_KEYS) {
     const v = args[key];
-    if (v) return String(v).split("\n").find((l) => l.trim()) ?? "";
+    if (!v) continue;
+    const line = String(v).split("\n").find((l) => l.trim()) ?? "";
+    return key === "file_path" || key === "path" ? shortPath(line) : line.trim();
   }
   const first = Object.values(args)[0];
   if (first == null || typeof first === "object") return "";
   return String(first).split("\n")[0];
 }
 
-/** ls returns a single-line list repr (['a/', 'b/', …]); count the entries by their
- *  commas rather than quotes, so a filename containing an apostrophe (Python reprs it
- *  with double quotes) doesn't skew the count. */
-export function listingNote(content: string): string {
+/** ls and glob return a single-line list repr (['a/', 'b/', …]); count the entries
+ *  by their commas rather than quotes, so a filename containing an apostrophe
+ *  (Python reprs it with double quotes) doesn't skew the count. */
+export function listingNote(content: string, singular = "entry", plural = "entries"): string {
   const inner = String(content || "")
     .trim()
     .replace(/^\[/, "")
     .replace(/\]$/, "")
     .trim();
-  const n = inner === "" ? 0 : inner.split(",").length;
-  return `${n} ${n === 1 ? "entry" : "entries"}`;
+  const n = inner === "" || inner === "No files found" ? 0 : inner.split(",").length;
+  return `${n} ${n === 1 ? singular : plural}`;
 }
 
 /** Count non-blank lines and label them ("3 matches", "1 file"). */
@@ -88,7 +84,7 @@ export function unitNote(content: string, singular: string, plural?: string): st
   return `${n} ${n === 1 ? singular : plural || singular + "s"}`;
 }
 
-export function summarizeArgs(args: Record<string, unknown>): string {
+export function summarizeArgs(args: Args): string {
   return Object.entries(args)
     .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
     .join("\n");

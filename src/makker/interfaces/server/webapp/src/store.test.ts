@@ -87,10 +87,42 @@ describe("tool lifecycle", () => {
     expect(tools[0]).toMatchObject({ status: "done", output: "2", args: { code: "1+1" } });
   });
 
-  it("honours per-tool policy: read_file shows a line note, not raw output", () => {
+  it("notes what a finished call did, next to its output", () => {
     state().handle({ type: "tool", event: "requested", name: "read_file", tool_call_id: "r", args: { file_path: "a.jl" } });
     state().handle({ type: "tool", event: "finished", name: "read_file", tool_call_id: "r", content: "l1\nl2\nl3" });
-    expect(byKind("tool")[0]).toMatchObject({ status: "done", output: "", note: "3 lines" });
+    expect(byKind("tool")[0]).toMatchObject({ status: "done", output: "l1\nl2\nl3", note: "3 lines" });
+  });
+
+  it("a call first seen while the model writes it gets its arguments and clock later", () => {
+    state().handle({ type: "tool", event: "composing", name: "write_file", tool_call_id: "w", at: 1000 });
+    expect(byKind("tool")[0]).toMatchObject({ status: "running", args: null, startedAt: 1000 });
+    state().handle({ type: "tool", event: "requested", name: "write_file", tool_call_id: "w", args: { file_path: "a.jl", content: "x\ny" }, at: 4000 });
+    state().handle({ type: "tool", event: "started", name: "write_file", tool_call_id: "w", at: 5000 });
+    state().handle({ type: "tool", event: "finished", name: "write_file", tool_call_id: "w", content: "Updated file a.jl", at: 5200 });
+    const tools = byKind("tool");
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({ status: "done", note: "2 lines", startedAt: 5000, endedAt: 5200 });
+  });
+
+  it("keeps the thought and the answer open while the model writes a call", () => {
+    // Thinking and the call's first chunk come down separate streams: what the
+    // model thought or said just before the call can arrive after it is announced.
+    state().handle({ type: "reasoning", text: "Let me " });
+    state().handle({ type: "tool", event: "composing", name: "read_file", tool_call_id: "r" });
+    state().handle({ type: "reasoning", text: "look." });
+    expect(items().map((it) => it.kind)).toEqual(["reasoning", "tool"]);
+    expect(byKind("reasoning")[0]).toMatchObject({ text: "Let me look.", live: true });
+    // The call whole, the message is too: what follows starts afresh.
+    state().handle({ type: "tool", event: "requested", name: "read_file", tool_call_id: "r", args: {} });
+    expect(byKind("reasoning")[0].live).toBe(false);
+    state().handle({ type: "reasoning", text: "Next" });
+    expect(items().map((it) => it.kind)).toEqual(["reasoning", "tool", "reasoning"]);
+
+    state().handle({ type: "text", text: "Checking" });
+    state().handle({ type: "tool", event: "composing", name: "grep", tool_call_id: "g" });
+    state().handle({ type: "text", text: " the file." });
+    expect(byKind("assistant")).toHaveLength(1);
+    expect(byKind("assistant")[0].text).toBe("Checking the file.");
   });
 
   it("always surfaces error output", () => {
@@ -324,6 +356,25 @@ describe("snapshot", () => {
     expect(state().meta).toBe("model · s1");
   });
 
+  it("times a running turn from when it began, whatever the server's clock says", () => {
+    const serverNow = Date.now() - 3_600_000; // the server's clock is an hour behind
+    state().handle({
+      type: "snapshot",
+      messages: [],
+      busy: true,
+      model: null,
+      started_at: serverNow - 90_000,
+      now: serverNow,
+      turn: [
+        { type: "tool", event: "started", name: "run_julia", tool_call_id: "c1", at: serverNow - 30_000 },
+      ],
+    });
+    expect(Date.now() - (state().turnStartedAt ?? 0)).toBeGreaterThanOrEqual(90_000);
+    expect(Date.now() - (state().turnStartedAt ?? 0)).toBeLessThan(91_000);
+    expect(Date.now() - (byKind("tool")[0].startedAt ?? 0)).toBeLessThan(31_000);
+    expect(Date.now() - (byKind("tool")[0].startedAt ?? 0)).toBeGreaterThanOrEqual(30_000);
+  });
+
   it("leaves the composer free when no turn is running", () => {
     state().handle({
       type: "snapshot", messages: [{ type: "user", text: "hi" }], busy: false, turn: [], model: null,
@@ -538,31 +589,30 @@ describe("closed views and the thread chip", () => {
   });
 });
 
-describe("failed tool replies", () => {
-  const finished = (name: string, content: string) => {
-    state().handle({ type: "tool", event: "requested", name, tool_call_id: "c1", args: {} });
-    state().handle({ type: "tool", event: "finished", name, tool_call_id: "c1", content });
+describe("failed tool calls", () => {
+  const ended = (event: "finished" | "error", content: string) => {
+    state().handle({ type: "tool", event: "requested", name: "run_julia", tool_call_id: "c1", args: {} });
+    state().handle({ type: "tool", event, name: "run_julia", tool_call_id: "c1", content });
   };
 
-  it("a plot call replying ERROR shows as failed with the reply surfaced", () => {
-    finished("plot_julia", "ERROR: the code did not produce a Makie figure.");
-    const [card] = byKind("tool");
-    expect(card.status).toBe("error");
-    // plot_julia hides successful output (the figure is the result); a failure
-    // must surface anyway or the card reads done while no plot appeared.
-    expect(card.output).toContain("did not produce a Makie figure");
+  it("an error event marks the step failed and keeps what it printed", () => {
+    ended("error", "printed first\nERROR: UndefVarError: `x` not defined");
+    const [step] = byKind("tool");
+    expect(step.status).toBe("error");
+    expect(step.output).toContain("printed first");
   });
 
-  it("a successful plot call still reads done with its output hidden", () => {
-    finished("plot_julia", "served a live interactive plot (artifacts/res.png)");
-    const [card] = byKind("tool");
-    expect(card.status).toBe("done");
-    expect(card.output).toBe("");
+  it("the event decides, not the text: a finished call that printed ERROR is done", () => {
+    ended("finished", "ERROR_CODES = {1: 'bad'}");
+    expect(byKind("tool")[0].status).toBe("done");
   });
+});
 
-  it("tools without the convention are not re-labeled by ERROR-looking text", () => {
-    finished("grep", "ERROR_CODES = {1: 'bad'}");
-    const [card] = byKind("tool");
-    expect(card.status).toBe("done");
+describe("the turn clock", () => {
+  it("starts with the turn and stops when it ends", () => {
+    state().startTurn("go");
+    expect(state().turnStartedAt).not.toBeNull();
+    state().handle({ type: "turn_end", text: "" });
+    expect(state().turnStartedAt).toBeNull();
   });
 });

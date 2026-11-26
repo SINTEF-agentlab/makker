@@ -52,3 +52,13 @@ def test_normalize_plain_list_data_is_still_json() -> None:
 
     assert normalize_tool_output([{"a": 1}, {"b": 2}]) == '[{"a": 1}, {"b": 2}]'
     assert normalize_tool_output(["x", {"y": 1}]) == '["x", {"y": 1}]'
+
+
+def test_normalize_a_command_gives_the_reply_it_carries() -> None:
+    """A tool that updates state answers with a command; shown as-is it is a
+    screenful of repr where the tool's one-line reply belongs."""
+    from langgraph.types import Command
+
+    reply = ToolMessage(content="Updated todo list", tool_call_id="t1", name="write_todos")
+    command = Command(update={"todos": [{"content": "a"}], "messages": [reply]})
+    assert normalize_tool_output(command) == "Updated todo list"

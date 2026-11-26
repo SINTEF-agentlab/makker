@@ -2876,6 +2876,9 @@ async def test_a_socket_attaching_mid_turn_sees_all_of_it(tmp_path: Path) -> Non
         ("tool", "requested", None),
         ("tool", "delta", "step 1"),
     ]
+    # Its clock and its steps' times carry on from when they began, not from now.
+    requested = next(m for m in snapshot["turn"] if m.get("event") == "requested")
+    assert snapshot["started_at"] <= requested["at"] <= snapshot["now"]
 
     go_on.set()
     await st._turn

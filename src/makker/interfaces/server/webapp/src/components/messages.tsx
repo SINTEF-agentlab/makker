@@ -1,6 +1,6 @@
 // Renderers for every kind of thread item. Presentational components driven by the
-// store's render model; the streaming ones (assistant, tool) are memoized so only
-// the item that changed re-renders during a turn.
+// store's render model; the streaming ones (assistant, steps) are memoized so only
+// what changed re-renders during a turn.
 
 import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -12,13 +12,17 @@ import { tokenizeJulia } from "../julia";
 import { Markdown } from "../markdown";
 import { SLASH_COMMANDS } from "../controller";
 import {
-  argPreview,
-  asObject,
-  summarizeArgs,
-  toolPolicy,
-  type ToolPolicy,
-} from "../toolPolicy";
-import { KIND_LABEL, type ThreadItem, type ViewKind } from "../store";
+  failedCount,
+  groupDuration,
+  groupSummary,
+  liveActivity,
+  snippet,
+  type Step,
+  type Todo,
+  type ToolStep,
+} from "../steps";
+import { argPreview, asObject, summarizeArgs } from "../toolPolicy";
+import { KIND_LABEL, type ViewKind } from "../store";
 
 // --- shared building blocks -------------------------------------------------
 
@@ -105,39 +109,9 @@ export const AssistantMessage = memo(function AssistantMessage({ text }: { text:
   );
 });
 
-function reasoningSnippet(text: string): string {
-  const first = text.split("\n").map((l) => l.trim()).find((l) => l) || "";
-  const clean = first.replace(/[*#`>_]/g, "").trim();
-  return clean.length > 90 ? clean.slice(0, 90).replace(/\s+\S*$/, "") + "…" : clean;
-}
-
-export function ReasoningBlock({ text, live }: { text: string; live: boolean }) {
-  const [open, setOpen] = useState(live);
-  const wasLive = useRef(live);
-  useEffect(() => {
-    if (wasLive.current && !live) setOpen(false); // collapse when the segment ends
-    wasLive.current = live;
-  }, [live]);
-  return (
-    <details className="block reasoning" open={open}>
-      <summary onClick={(e) => { e.preventDefault(); setOpen((o) => !o); }}>
-        <span className="tool-name">Reasoning</span>
-        {!open && <span className="tool-preview">{reasoningSnippet(text)}</span>}
-      </summary>
-      <div className="body">{text}</div>
-    </details>
-  );
-}
-
-// --- tool card --------------------------------------------------------------
+// --- what a step shows when opened -------------------------------------------
 
 const TODO_MARK: Record<string, string> = { completed: "✓", in_progress: "▸", pending: "○" };
-
-interface Todo {
-  content?: string;
-  activeForm?: string;
-  status?: string;
-}
 
 function Todos({ todos }: { todos: Todo[] }) {
   return (
@@ -180,13 +154,8 @@ function KV({ obj, label }: { obj: Record<string, unknown>; label?: string }) {
   );
 }
 
-function ToolBody({ name, args, policy }: { name: string | null; args: Record<string, unknown> | null; policy: ToolPolicy }) {
-  if (policy.body === "none" || !args) return null;
-  if (policy.body === "path") {
-    const p = args.file_path || args.path;
-    return p ? <div className="tool-path">{String(p)}</div> : null;
-  }
-  if (name === "write_todos" && Array.isArray(args.todos)) return <Todos todos={args.todos as Todo[]} />;
+function ToolBody({ name, args }: { name: string | null; args: Record<string, unknown> | null }) {
+  if (!args) return null;
   if (name === "edit_file" && (args.old_string != null || args.new_string != null)) {
     return (
       <>
@@ -221,63 +190,189 @@ function ToolBody({ name, args, policy }: { name: string | null; args: Record<st
   return null;
 }
 
-type ToolItem = Extract<ThreadItem, { kind: "tool" }>;
+// Tools whose arguments are the content: their reply only confirms it.
+const CONFIRMS = new Set(["write_file", "edit_file", "record_attempt"]);
 
-/** Seconds since `startedAt`, re-rendered once a second while `active`.
+/** Milliseconds since `since`, re-rendered once a second while `active`.
  *
- * A tool that takes minutes (the first plot of a session compiles most of the
- * Julia plotting stack) otherwise shows a spinner and nothing else, which reads
- * as a hang. The clock is the difference between "stuck" and "still going".
+ * A step that takes minutes (the first plot of a session compiles most of the
+ * plotting stack) otherwise shows a spinner and nothing else, which reads as a
+ * hang. The clock is the difference between "stuck" and "still going".
  */
-function useElapsed(startedAt: number | undefined, active: boolean): number | null {
+function useElapsed(since: number | null | undefined, active: boolean): number | null {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!active || startedAt == null) return;
+    if (!active || since == null) return;
     setNow(Date.now());
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, [active, startedAt]);
-  if (startedAt == null || !active) return null;
-  return now - startedAt;
+  }, [active, since]);
+  if (since == null || !active) return null;
+  return now - since;
 }
 
-export const ToolCard = memo(function ToolCard({ item }: { item: ToolItem }) {
-  const policy = toolPolicy(item.name);
-  const [open, setOpen] = useState(!policy.collapsed);
-  const preview = argPreview(item.args, item.name ?? undefined);
-  const summary = item.note ? (preview ? `${preview} · ${item.note}` : item.note) : preview;
-  const showOutput = item.output && policy.rawOutput !== false;
-  const running = item.status === "running";
-  const elapsed = useElapsed(item.startedAt, running);
+// --- steps: the agent's tool calls and reasoning, one line each ---------------
+
+// Under this a duration is not worth showing: a number that flashes up is noise.
+const WORTH_TIMING = 2000;
+
+const STATUS_WORD: Partial<Record<ToolStep["status"], string>> = {
+  error: "Failed",
+  stopped: "Stopped",
+  rejected: "Declined",
+};
+
+function Line({
+  open,
+  onToggle,
+  className,
+  children,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  className: string;
+  children: React.ReactNode;
+}) {
   return (
-    <details className="block tool" open={open}>
-      <summary onClick={(e) => { e.preventDefault(); setOpen((o) => !o); }}>
-        <span className="tool-name">{item.label || item.name}</span>
-        {summary && <span className="tool-preview">{summary}</span>}
-        <span className={`chip-status ${running ? "running" : item.status === "error" ? "error" : ""}`}>
-          {running ? (
-            <>
-              <span className="spinner" />
-              {/* Only once it is worth saying: under a couple of seconds a
-                  number that appears and vanishes is noise. */}
-              {elapsed != null && elapsed >= 2000 && (
-                <span className="elapsed">{formatElapsed(elapsed)}</span>
-              )}
-            </>
-          ) : item.status === "done" ? (
-            "done"
-          ) : (
-            item.status
-          )}
-        </span>
-      </summary>
-      <div className="body">
-        <ToolBody name={item.name} args={item.args ?? null} policy={policy} />
-        {showOutput ? <TerminalOutput raw={item.output} /> : null}
+    <button type="button" className={`line ${className}`} aria-expanded={open} onClick={onToggle}>
+      {children}
+      <span className="line-chevron" aria-hidden="true">
+        <ChevronRight />
+      </span>
+    </button>
+  );
+}
+
+function StepDetail({ step }: { step: ToolStep }) {
+  return (
+    <div className="step-detail">
+      <ToolBody name={step.name} args={step.args ?? null} />
+      {step.output && (step.status === "error" || !CONFIRMS.has(step.name ?? "")) ? (
+        <TerminalOutput raw={step.output} />
+      ) : null}
+    </div>
+  );
+}
+
+const StepRow = memo(function StepRow({ step }: { step: Step }) {
+  const [open, setOpen] = useState(false);
+  const toggle = () => setOpen((o) => !o);
+  if (step.kind === "reasoning") {
+    return (
+      <div className="step">
+        <Line className="step-line" open={open} onToggle={toggle}>
+          <span className="step-label">Thought</span>
+          <span className="step-what prose">{snippet(step.text)}</span>
+        </Line>
+        {open && <div className="step-detail reasoning-text">{step.text}</div>}
       </div>
-    </details>
+    );
+  }
+  const took = step.startedAt != null && step.endedAt != null ? step.endedAt - step.startedAt : 0;
+  const word = STATUS_WORD[step.status];
+  const path = step.args?.file_path ?? step.args?.path;
+  return (
+    <div className="step">
+      <Line className="step-line" open={open} onToggle={toggle}>
+        <span className="step-label">{step.label || step.name}</span>
+        <span className="step-what" title={path ? String(path) : undefined}>
+          {argPreview(step.args)}
+        </span>
+        {word && <span className={`step-status ${step.status}`}>{word}</span>}
+        {step.note && <span className="step-note">{step.note}</span>}
+        {took >= WORTH_TIMING && <span className="step-note elapsed">{formatElapsed(took)}</span>}
+      </Line>
+      {open && <StepDetail step={step} />}
+    </div>
   );
 });
+
+const sameSteps = (a: Step[], b: Step[]) => a.length === b.length && a.every((s, i) => s === b[i]);
+
+/** The agent's work between two things it says or shows: one line, with the
+ *  steps behind it. A lone step is its own line. */
+export const StepGroup = memo(
+  function StepGroup({ steps }: { steps: Step[] }) {
+    const [open, setOpen] = useState(false);
+    const rows = steps.map((step) => <StepRow key={step.id} step={step} />);
+    if (steps.length === 1) return <div className="step-group lone">{rows}</div>;
+    const failed = failedCount(steps);
+    const took = groupDuration(steps);
+    return (
+      <div className="step-group">
+        <Line className="group-line" open={open} onToggle={() => setOpen((o) => !o)}>
+          <span className="group-what">{groupSummary(steps)}</span>
+          {failed > 0 && <span className="step-status error">{failed} failed</span>}
+          {took != null && took >= WORTH_TIMING && <span className="step-note elapsed">{formatElapsed(took)}</span>}
+        </Line>
+        {open && <div className="steps">{rows}</div>}
+      </div>
+    );
+  },
+  (a, b) => sameSteps(a.steps, b.steps),
+);
+
+/** The running step on the status line. Opened, it shows what a finished step's
+ *  row does; closed, the newest lines of what it prints once it has run a while,
+ *  so a simulation's progress shows and a file read never gets far enough to. */
+function RunningStep({ step, clock }: { step: ToolStep; clock: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ran = useElapsed(step.startedAt, true);
+  return (
+    <>
+      <Line className="status-line" open={open} onToggle={() => setOpen((o) => !o)}>
+        <span className="spinner" />
+        <span className="status-label">{step.label || step.name}</span>
+        <span className="step-what">{argPreview(step.args)}</span>
+        {clock}
+      </Line>
+      {open ? (
+        <StepDetail step={step} />
+      ) : step.output && ran != null && ran >= WORTH_TIMING ? (
+        <div className="live-tail">
+          <TerminalOutput raw={step.output} />
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/** The status line: what the agent is doing now and how long the turn has run.
+ *  It is the last thing in the thread for the whole turn, so a quiet stretch
+ *  never reads as a hang. `steps` are the turn's newest group, if it ends in one. */
+export const Status = memo(
+  function Status({ steps }: { steps: Step[] }) {
+    const since = useSel((s) => s.turnStartedAt);
+    const elapsed = useElapsed(since, true);
+    const { label, what, step } = liveActivity(steps);
+    const clock =
+      elapsed != null ? <span className="step-note elapsed">{formatElapsed(elapsed)}</span> : null;
+    return (
+      <div className="status">
+        {step ? (
+          <RunningStep key={step.id} step={step} clock={clock} />
+        ) : (
+          <div className="line status-line">
+            <span className="spinner" />
+            <span className="status-label">{label}</span>
+            {what && <span className="step-what prose">{what}</span>}
+            {clock}
+          </div>
+        )}
+      </div>
+    );
+  },
+  (a, b) => sameSteps(a.steps, b.steps),
+);
+
+/** The agent's plan, shown once while it works and updated in place. */
+export function Plan({ todos }: { todos: Todo[] }) {
+  return (
+    <div className="plan">
+      <Todos todos={todos} />
+    </div>
+  );
+}
 
 // --- canvas references ------------------------------------------------------
 

@@ -1381,6 +1381,8 @@ class TUIApp(App[None]):
             self._set_status("thinking…")
 
     async def _render_tool_event(self, msg: TurnToolEvent) -> None:
+        if msg.event == "composing":
+            return  # the card is mounted when the call arrives whole
         await self._flush_stream()
         if msg.event == "delta":
             block = self._matching_tool_block(

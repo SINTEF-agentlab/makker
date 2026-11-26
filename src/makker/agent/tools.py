@@ -13,8 +13,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from langchain_core.tools import tool
+from langchain_core.tools import ToolException, tool
 
+from makker.agent.tool_output import error_reply_tool
 from makker.juliakernel.result import OnChunk, OutputChunk
 from makker.paths import resolve_in_workspace, workspace_root
 from makker.session import Session
@@ -81,8 +82,8 @@ _MODULE_DESYNC_HINT = (
 
 
 def make_run_julia_tool(session: Session):
-    @tool
-    async def run_julia(code: str) -> str:
+    @error_reply_tool
+    async def run_julia(code: str, description: str = "") -> str:
         """Evaluate Julia code in a persistent REPL session.
 
         State (variables, functions, loaded packages) persists across calls.
@@ -90,6 +91,8 @@ def make_run_julia_tool(session: Session):
 
         Args:
             code: Julia code to evaluate. Can be multi-line.
+            description: What this run does, in a few words. The user sees it in
+                place of the code.
 
         Returns:
             REPL-style output: printed output plus the return value, or an
@@ -126,13 +129,15 @@ def make_run_julia_tool(session: Session):
             text += _PRECOMPILE_FAIL_HINT
         if _MODULE_DESYNC_RE.search(text):
             text += _MODULE_DESYNC_HINT
+        if result.error:
+            raise ToolException(text)
         return text
 
     return run_julia
 
 
 def make_reset_julia_tool(session: Session):
-    @tool
+    @error_reply_tool
     async def reset_julia() -> str:
         """Restart Julia with a fresh, empty session.
 

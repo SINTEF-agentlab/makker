@@ -45,7 +45,9 @@ export type ServerMessage =
   | { type: "reasoning"; text: string }
   | {
       type: "tool";
-      event: "requested" | "started" | "delta" | "finished" | "error";
+      /** `composing`: the model has begun writing the call; its arguments come
+       *  with `requested`. */
+      event: "composing" | "requested" | "started" | "delta" | "finished" | "error";
       name: string | null;
       label?: string;
       tool_call_id: string | null;
@@ -53,6 +55,8 @@ export type ServerMessage =
       content?: string | null;
       /** A delta carries the full terminal-rendered output so far: replace, not append. */
       replace?: boolean;
+      /** When a replayed event happened (epoch ms); a live one is timed as it arrives. */
+      at?: number;
     }
   | {
       type: "interrupt";
@@ -125,6 +129,10 @@ export type ServerMessage =
       model: string | null;
       /** Its context meter; null before an agent was built. */
       context?: ContextMeter | null;
+      /** While busy: when the turn began, and when this was sent (epoch ms, the
+       *  server's clock, as a turn message's `at` is). */
+      started_at?: number;
+      now?: number;
     }
   /** A model switch took effect: the session now runs `model`. */
   | { type: "model"; model: string | null };

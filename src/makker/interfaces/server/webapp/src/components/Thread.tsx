@@ -1,11 +1,12 @@
-// The conversation pane: the welcome screen when empty, otherwise the ordered
-// thread items, the "thinking" indicator, and any pending approval. Keeps the view
-// pinned to the bottom while streaming unless the user has scrolled up to read.
+// The conversation pane: the welcome screen when empty, otherwise the thread (the
+// agent's steps condensed into groups), the plan and status line while a turn runs,
+// and any pending approval. Keeps the view pinned to the bottom while streaming
+// unless the user has scrolled up to read.
 
-import { memo, useLayoutEffect, useRef } from "react";
+import { memo, useLayoutEffect, useMemo, useRef } from "react";
 
 import { useController, useSel } from "../context";
-import type { ThreadItem } from "../store";
+import { currentPlan, groupSteps, isRunning, type Block, type Step } from "../steps";
 import { Approval } from "./Approval";
 import { ErrorBoundary } from "./ErrorBoundary";
 import {
@@ -14,13 +15,16 @@ import {
   AssistantMessage,
   ErrorCard,
   HelpCard,
-  ReasoningBlock,
+  Plan,
+  Status,
+  StepGroup,
   SysNote,
-  ToolCard,
   UiNote,
   UserBubble,
   VizChip,
 } from "./messages";
+
+const NO_STEPS: Step[] = [];
 
 const DEFAULT_EXAMPLES = [
   "Set up a small simulation and show me the interactive result.",
@@ -61,16 +65,14 @@ function Welcome() {
   );
 }
 
-const ThreadItemView = memo(function ThreadItemView({ item }: { item: ThreadItem }) {
+type Item = Extract<Block, { kind: "item" }>["item"];
+
+const ThreadItemView = memo(function ThreadItemView({ item }: { item: Item }) {
   switch (item.kind) {
     case "user":
       return <UserBubble text={item.text} />;
     case "assistant":
       return <AssistantMessage text={item.text} />;
-    case "reasoning":
-      return <ReasoningBlock text={item.text} live={item.live} />;
-    case "tool":
-      return <ToolCard item={item} />;
     case "viz-chip":
       return <VizChip viewId={item.viewId} title={item.title} viewKind={item.viewKind} />;
     case "artifact-image":
@@ -88,21 +90,17 @@ const ThreadItemView = memo(function ThreadItemView({ item }: { item: ThreadItem
   }
 });
 
-function Working() {
-  return (
-    <div className="working">
-      <span />
-      <span />
-      <span />
-    </div>
-  );
-}
-
 export function Thread() {
   const items = useSel((s) => s.items);
-  const working = useSel((s) => s.working);
+  const busy = useSel((s) => s.busy);
   const pending = useSel((s) => s.pending);
   const bottomPin = useSel((s) => s.bottomPin);
+  const blocks = useMemo(() => groupSteps(items), [items]);
+  // While the turn runs, the steps still under way belong to the status line at
+  // the bottom; a group shows them once they are done.
+  const last = blocks[blocks.length - 1];
+  const live = busy && last?.kind === "group" ? last.steps : NO_STEPS;
+  const plan = useMemo(() => (busy ? currentPlan(items) : null), [busy, items]);
 
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -115,7 +113,7 @@ export function Thread() {
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [items, working, pending]);
+  }, [items, busy, pending]);
   // Force the view to the bottom when the user sends a message, even if they had
   // scrolled up, so their prompt and the incoming reply are visible.
   useLayoutEffect(() => {
@@ -131,13 +129,33 @@ export function Thread() {
         {items.length === 0 ? (
           <Welcome />
         ) : (
-          items.map((item) => (
-            <ErrorBoundary key={item.id} what="item">
-              <ThreadItemView item={item} />
-            </ErrorBoundary>
-          ))
+          blocks.map((block) => {
+            if (block.kind === "item") {
+              return (
+                <ErrorBoundary key={block.item.id} what="item">
+                  <ThreadItemView item={block.item} />
+                </ErrorBoundary>
+              );
+            }
+            // The turn's newest group is still being added to: its steps under
+            // way are on the status line (or on the approval card, while one
+            // waits there), and a thought alone is not a line yet (the steps
+            // that follow it would replace it with their summary).
+            const open = (busy || pending !== null) && block === last;
+            const steps = open ? block.steps.filter((step) => !isRunning(step)) : block.steps;
+            return steps.some((step) => !open || step.kind === "tool") ? (
+              <ErrorBoundary key={block.id} what="item">
+                <StepGroup steps={steps} />
+              </ErrorBoundary>
+            ) : null;
+          })
         )}
-        {working ? <Working /> : null}
+        {busy ? (
+          <ErrorBoundary what="item">
+            {plan ? <Plan todos={plan} /> : null}
+            <Status steps={live} />
+          </ErrorBoundary>
+        ) : null}
         {pending ? <Approval /> : null}
       </div>
     </main>

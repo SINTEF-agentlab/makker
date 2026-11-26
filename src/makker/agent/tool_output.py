@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 from typing import Any
 
 from langchain_core.messages import ToolMessage
+from langchain_core.tools import ToolException, tool
+from langgraph.types import Command
 
 from makker.trace.messages import content_to_str
 
@@ -19,6 +22,26 @@ _TOOL_MESSAGE_CONTENT = re.compile(
 )
 
 
+def error_reply_tool(fn):
+    """``@tool`` for a tool that says it failed by replying ``ERROR: …``.
+
+    The model reads the reply unchanged. Raising it gives the result the error
+    status the framework's own tools set, which is how a front end knows the call
+    failed. A tool whose error follows other output raises ``ToolException`` itself.
+    """
+
+    @functools.wraps(fn)
+    async def run(*args: Any, **kwargs: Any) -> Any:
+        reply = await fn(*args, **kwargs)
+        if isinstance(reply, str) and reply.startswith("ERROR:"):
+            raise ToolException(reply)
+        return reply
+
+    built = tool(run)
+    built.handle_tool_error = True
+    return built
+
+
 def normalize_tool_output(value: Any) -> str:
     """Return human-readable tool output for display."""
 
@@ -26,6 +49,12 @@ def normalize_tool_output(value: Any) -> str:
         return ""
     if isinstance(value, ToolMessage):
         return normalize_tool_output(value.content)
+    if isinstance(value, Command):
+        # A tool that updates state answers with a command; its reply to the
+        # model is the tool message in the update.
+        update = value.update if isinstance(value.update, dict) else {}
+        messages = [m for m in update.get("messages") or () if isinstance(m, ToolMessage)]
+        return normalize_tool_output(messages)
     if isinstance(value, list):
         if value and all(isinstance(item, ToolMessage) for item in value):
             parts = [normalize_tool_output(item) for item in value]

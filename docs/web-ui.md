@@ -27,9 +27,15 @@ the simulator; see the [CLI reference](cli.md) for the full set of options.
 The interface has two panes.
 
 The conversation is on the left. You type a prompt, the agent runs the simulator,
-writes and runs Julia, and streams its work back as text, collapsible reasoning,
-and tool cards (the code it ran, file edits as diffs, a plan as a checklist, and
-captured output).
+writes and runs Julia, and streams back what it says. Its work in between (the
+files it read, the code it ran, its reasoning) folds into one line, such as "Read
+4 files, ran Julia", marked when a step failed. Click the line for the steps, and
+a step for its code, diff and output.
+
+While the agent works, a status line at the bottom says what it is doing and for
+how long, above it the plan when the agent has made one. A step that runs for a
+while shows the last lines it printed, so you can follow a simulation; click the
+status line for the full output.
 
 The canvas is on the right. Interactive plots and written reports are pinned here
 as tabs, so results stay visible while the conversation continues. The canvas opens
