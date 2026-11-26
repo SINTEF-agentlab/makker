@@ -19,10 +19,12 @@ from typing import Any, Literal
 # waste the window.
 ASSUMED_WINDOW = 200_000
 
-# Compaction runs at this share of the window, and earlier when the conversation
+# Compaction runs at this share of the window (in percent; the user config's
+# ``compact_at`` sets another within the range), and earlier when the conversation
 # would not leave room for the model's output allowance within 95% of it (the
 # summarizer refuses to send a request past that point anyway).
-_COMPACT_FRACTION = 0.85
+DEFAULT_COMPACT_PERCENT = 85
+COMPACT_PERCENT_RANGE = (50, 95)
 _INPUT_FRACTION = 0.95
 _OUTPUT_LIMIT_KEYS = ("max_tokens", "max_completion_tokens", "max_output_tokens")
 # Older tool results move to files once the context reaches this share of the
@@ -45,17 +47,19 @@ class ContextBudget:
     ``source`` is ``provider`` (the provider's model data or API), ``ollama`` (what
     the Ollama daemon reports or loads) or ``assumed`` (no source knew).
     ``output_reserve`` is the model's configured output allowance, which the
-    summarizer keeps free.
+    summarizer keeps free. ``compact_percent`` is the share of the window at which
+    compaction runs.
     """
 
     window: int
     source: WindowSource
     output_reserve: int = 0
+    compact_percent: int = DEFAULT_COMPACT_PERCENT
 
     @property
     def compact_at(self) -> int:
         """The context size at which automatic compaction runs."""
-        at = int(self.window * _COMPACT_FRACTION)
+        at = self.window * self.compact_percent // 100
         if self.output_reserve:
             at = min(at, int(self.window * _INPUT_FRACTION) - self.output_reserve)
         return max(0, at)
@@ -83,7 +87,7 @@ def least_window(output_reserve: int, least: int) -> int:
     window smaller than that plus the agent's own prompt no turn can run."""
     if not output_reserve:
         return least
-    return math.ceil((least * _COMPACT_FRACTION + output_reserve) / _INPUT_FRACTION)
+    return math.ceil((least * DEFAULT_COMPACT_PERCENT / 100 + output_reserve) / _INPUT_FRACTION)
 
 
 def context_budget(model_id: str | None, model: Any = None) -> ContextBudget:
@@ -119,7 +123,38 @@ def context_budget(model_id: str | None, model: Any = None) -> ContextBudget:
         window = value if isinstance(value, int) and value > 0 else None
     if not window:
         window, source = ASSUMED_WINDOW, "assumed"
-    return ContextBudget(window=window, source=source, output_reserve=reserve)
+    return ContextBudget(
+        window=window,
+        source=source,
+        output_reserve=reserve,
+        compact_percent=compact_percent(),
+    )
+
+
+def compact_percent() -> int:
+    """The share of the window, in percent, at which compaction runs: the user
+    config's ``compact_at`` when it is in range, else the default."""
+    from makker.user_config import load_user_config
+
+    chosen = load_user_config().compact_at
+    low, high = COMPACT_PERCENT_RANGE
+    return chosen if chosen is not None and low <= chosen <= high else DEFAULT_COMPACT_PERCENT
+
+
+def save_compact_percent(percent: int) -> None:
+    """Save the compaction point in the user config; the default is not stored.
+
+    A running agent keeps its budget until it is rebuilt (a model switch, or the
+    web UI's ``set_model`` with the same model)."""
+    from dataclasses import replace
+
+    from makker.user_config import load_user_config, write_user_config
+
+    low, high = COMPACT_PERCENT_RANGE
+    if not low <= percent <= high:
+        raise ValueError(f"The compaction point must be between {low}% and {high}%.")
+    chosen = None if percent == DEFAULT_COMPACT_PERCENT else percent
+    write_user_config(replace(load_user_config(), compact_at=chosen))
 
 
 def _output_reserve(model: Any) -> int:

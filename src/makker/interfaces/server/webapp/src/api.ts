@@ -233,6 +233,9 @@ export const api = {
 
   measureModel: (model: string) => postJSON<ModelSettings>("/models/measure", { model }),
 
+  saveContextSettings: (settings: { compact_percent: number }) =>
+    postJSON<{ compact_percent: number }>("/context/settings", settings),
+
   credentials: async (): Promise<CredentialInfo[]> => {
     const data = await getJSON<{ path: string; providers: CredentialInfo[] }>(
       "/credentials",

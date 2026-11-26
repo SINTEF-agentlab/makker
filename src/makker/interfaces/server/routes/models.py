@@ -127,6 +127,10 @@ class MeasureRequest(BaseModel):
     model: str
 
 
+class ContextSettingsRequest(BaseModel):
+    compact_percent: int
+
+
 @router.get("/models/settings")
 def get_model_settings(model: str) -> dict[str, Any]:
     """The settings ``model`` supports, each with its choices, default and current
@@ -175,6 +179,20 @@ def model_window(model: str | None = None) -> dict[str, Any]:
         "window_source": budget.source,
         "compact_at": budget.compact_at,
     }
+
+
+@router.post("/context/settings")
+def set_context_settings(req: ContextSettingsRequest) -> dict[str, Any]:
+    """Save where automatic compaction runs, in percent of the window, for every
+    session. A running session picks it up when its agent is rebuilt (the
+    ``set_model`` command, sent again with the same model)."""
+    from makker.context_budget import compact_percent, save_compact_percent
+
+    try:
+        save_compact_percent(req.compact_percent)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"compact_percent": compact_percent()}
 
 
 @router.get("/credentials")

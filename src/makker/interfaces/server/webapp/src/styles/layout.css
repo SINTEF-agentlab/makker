@@ -865,6 +865,50 @@ body.canvas-resizing iframe {
 .ctx-moved {
   margin-top: 0.7rem;
 }
+.ctx-setting {
+  margin-top: 0.7rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.ctx-setting-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.ctx-setting-row .ctx-expand {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.ctx-choices {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  margin-top: 0.4rem;
+}
+.ctx-choices button {
+  padding: 0.15rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.ctx-choices button:hover:not(:disabled),
+.ctx-choices button:focus-visible {
+  background: var(--surface-2);
+}
+.ctx-choices button[aria-checked="true"] {
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+.ctx-choices button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
 
 /* --- Update dialog --------------------------------------------------------- */
 

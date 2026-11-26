@@ -93,8 +93,8 @@ function ContextView() {
       ref.current?.parentElement?.querySelector<HTMLElement>(".ctx-ring")?.focus();
     };
     const onClick = (e: MouseEvent) => {
-      // The Send button that ran /context is gone by the time its click gets
-      // here; that click opened the view, it is not one outside it.
+      // A click on something gone from the page by the time it gets here came from
+      // inside: the Send button that ran /context, or a choice that closed its list.
       const target = e.target as HTMLElement | null;
       if (!target?.isConnected || target.closest(".ctx-control")) return;
       controller.closeContext();
@@ -215,7 +215,50 @@ function ReportBody({ report }: { report: ContextReport }) {
         </table>
       ) : null}
       <Moved report={report} />
+      {report.compact_percent ? <CompactAt percent={report.compact_percent} /> : null}
     </>
+  );
+}
+
+/** Where auto-compaction runs, in percent of the window. */
+const COMPACT_CHOICES = [50, 60, 70, 80, 85, 90];
+
+/** The compaction point, and its choices on a click. A choice is saved for every
+ *  session and applies to this one at once. */
+function CompactAt({ percent }: { percent: number }) {
+  const controller = useController();
+  const busy = useSel((s) => s.busy);
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="ctx-setting">
+      <div className="ctx-setting-row">
+        <span>Auto-compact at</span>
+        <button type="button" className="ctx-expand" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          {percent}%
+          <span className="ctx-chevron" aria-hidden="true" />
+        </button>
+      </div>
+      {open ? (
+        <div className="ctx-choices" role="radiogroup" aria-label="Auto-compact at">
+          {COMPACT_CHOICES.map((choice) => (
+            <button
+              key={choice}
+              type="button"
+              role="radio"
+              aria-checked={choice === percent}
+              disabled={busy}
+              title={busy ? "Available when the turn has finished" : undefined}
+              onClick={() => {
+                setOpen(false);
+                void controller.setCompactPercent(choice);
+              }}
+            >
+              {choice}%
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -248,7 +291,7 @@ function Bar({ report, total, compactAt }: { report: ContextReport; total: numbe
         <span
           className="ctx-mark"
           style={{ left: `${(compactAt / total) * 100}%` }}
-          title={`Compacts at ${formatTokens(compactAt)}`}
+          title={`Auto-compacts at ${formatTokens(compactAt)}`}
         />
       ) : null}
     </div>

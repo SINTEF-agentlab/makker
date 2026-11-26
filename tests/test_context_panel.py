@@ -212,6 +212,8 @@ def test_the_report_has_the_split_and_what_moved_out(tmp_path: Path) -> None:
     assert "| Free space | 108k | 54% |" in text
     assert "| Compaction buffer | 30k | 15% |" in text
     assert "Moved out: 4 tool results to files, 1 compaction." in text
+    assert report["compact_percent"] == 85
+    assert text.endswith("Auto-compacts at 85% of the window.")
 
 
 def test_a_call_recorded_without_parts_shows_one_total(tmp_path: Path) -> None:

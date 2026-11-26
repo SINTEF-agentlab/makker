@@ -35,6 +35,8 @@ export interface ContextReport {
   largest: { label: string; tokens: number }[];
   /** Tool results moved to files, and compactions, so far. */
   moved: { results: number; compactions: number };
+  /** The setting for where compaction runs, in percent of the window. */
+  compact_percent?: number;
 }
 
 /** Messages the server streams to the client over the WebSocket. */

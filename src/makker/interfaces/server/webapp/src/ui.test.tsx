@@ -291,6 +291,38 @@ describe("context ring and view", () => {
     expect(screen.getByRole("dialog", { name: "Context" })).toBeInTheDocument();
   });
 
+  it("changes where auto-compaction runs from the foot of the view", async () => {
+    vi.spyOn(api, "context").mockResolvedValue({
+      meter,
+      breakdown: [{ key: "system", label: "System prompt", tokens: 12_000 }],
+      largest: [],
+      moved: { results: 0, compactions: 0 },
+      compact_percent: 85,
+    });
+    const save = vi.spyOn(api, "saveContextSettings").mockResolvedValue({ compact_percent: 70 });
+    const { store, controller } = renderWithStore(<Composer />);
+    const send = vi.spyOn(controller.transport, "send").mockReturnValue(true);
+    vi.spyOn(controller.transport, "isOpen").mockReturnValue(true);
+    act(() => store.setState({ sessionId: "s1", context: meter, model: "openai:gpt-6" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Context:/ }));
+    const setting = await screen.findByRole("button", { name: "85%" });
+    // The choices show only when asked for.
+    expect(screen.queryByRole("radiogroup", { name: "Auto-compact at" })).toBeNull();
+    fireEvent.click(setting);
+    const choice = within(screen.getByRole("radiogroup", { name: "Auto-compact at" })).getByRole("radio", { name: "70%" });
+    // In a browser React removes the list before the click reaches the document;
+    // the view must not take that for a click outside it.
+    document.body.addEventListener("click", () => choice.remove(), { once: true });
+    fireEvent.click(choice);
+
+    expect(save).toHaveBeenCalledWith({ compact_percent: 70 });
+    expect(await screen.findByRole("button", { name: "70%" })).toBeInTheDocument();
+    // The view stays open, and the session rebuilds on the same model to pick it up.
+    expect(screen.getByRole("dialog", { name: "Context" })).toBeInTheDocument();
+    expect(send).toHaveBeenCalledWith({ type: "command", command: "set_model", arg: "openai:gpt-6" });
+  });
+
   it("shows an empty ring before the first model call", () => {
     const { store } = renderWithStore(<Composer />);
     act(() => store.setState({ context: { ...meter, used: null } }));

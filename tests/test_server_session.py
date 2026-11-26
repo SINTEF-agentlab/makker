@@ -181,6 +181,17 @@ def test_model_settings_over_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert load_settings("openai:x").effort == "high"
 
 
+def test_the_compaction_point_over_http(tmp_path: Path) -> None:
+    from makker.context_budget import compact_percent
+
+    with _client(echo_agent, tmp_path) as client:
+        assert client.post("/context/settings", json={"compact_percent": 70}).json() == {
+            "compact_percent": 70
+        }
+        assert client.post("/context/settings", json={"compact_percent": 30}).status_code == 422
+    assert compact_percent() == 70
+
+
 def test_a_new_session_counts_as_a_recent_use_of_its_model(tmp_path: Path) -> None:
     from makker.recent_models import load_recent_models
 
