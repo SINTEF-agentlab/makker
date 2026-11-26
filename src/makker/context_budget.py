@@ -7,6 +7,7 @@ every model switch. The summarizer, the tool-result offloading, the status bar a
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -75,6 +76,16 @@ class ContextBudget:
         return 3 if self.window < _SMALL_WINDOW else 6
 
 
+def least_window(output_reserve: int, least: int) -> int:
+    """The smallest window for a model that keeps ``output_reserve`` free for its
+    reply: one that leaves it as much room to work in as a window of ``least``
+    leaves a model keeping nothing free. Anthropic models keep 24K free, and in a
+    window smaller than that plus the agent's own prompt no turn can run."""
+    if not output_reserve:
+        return least
+    return math.ceil((least * _COMPACT_FRACTION + output_reserve) / _INPUT_FRACTION)
+
+
 def context_budget(model_id: str | None, model: Any = None) -> ContextBudget:
     """The budget for ``model_id``, or for a model instance passed in directly.
 
@@ -82,12 +93,13 @@ def context_budget(model_id: str | None, model: Any = None) -> ContextBudget:
     without an id (tests, the lab) answers from its own profile. Either way an
     instance contributes its output allowance.
     """
-    from makker.models import context_window, provider_of
+    from makker.models import context_window, is_ollama_cloud, provider_of
 
     window: int | None = None
     source: WindowSource = "provider"
+    reserve = _output_reserve(model)
     if model_id:
-        from makker.model_settings import load_settings
+        from makker.model_settings import MIN_CONTEXT, load_settings
 
         window = context_window(model_id)
         if provider_of(model_id) == "ollama":
@@ -96,6 +108,10 @@ def context_budget(model_id: str | None, model: Any = None) -> ContextBudget:
         # with it, and any model is compacted against it.
         chosen = load_settings(model_id).context
         if chosen:
+            if source != "ollama" or is_ollama_cloud(model_id):
+                # A hosted model's cap is ours alone, so one saved before the
+                # output allowance grew is raised to the least that still works.
+                chosen = max(chosen, least_window(reserve, MIN_CONTEXT))
             window = min(window, chosen) if window else chosen
     elif model is not None:
         profile = getattr(model, "profile", None)
@@ -103,7 +119,7 @@ def context_budget(model_id: str | None, model: Any = None) -> ContextBudget:
         window = value if isinstance(value, int) and value > 0 else None
     if not window:
         window, source = ASSUMED_WINDOW, "assumed"
-    return ContextBudget(window=window, source=source, output_reserve=_output_reserve(model))
+    return ContextBudget(window=window, source=source, output_reserve=reserve)
 
 
 def _output_reserve(model: Any) -> int:

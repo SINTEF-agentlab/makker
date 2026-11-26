@@ -180,19 +180,26 @@ def _cloud_context_options(model_id: str) -> dict[str, Any] | None:
     """A hosted model's context sizes. Choosing one caps the window Makker
     compacts against (it is not sent to the provider), for a cheaper session or
     to see compaction sooner."""
-    from makker.models import context_window
+    from makker.context_budget import least_window
+    from makker.models import context_window, provider_of
 
     maximum = context_window(model_id)
     if not maximum:
         return None
+    # The model's reply needs its room too, so a model that keeps some free
+    # (Anthropic's, or one given an output length) starts at a larger size.
+    reserve = load_settings(model_id).output or DEFAULT_OUTPUT.get(provider_of(model_id), 0)
+    least = min(least_window(reserve, MIN_CONTEXT), maximum)
     choices = [
-        {"tokens": t, "memory": None, "on_gpu": None, "too_large": False} for t in _sizes(maximum)
+        {"tokens": t, "memory": None, "on_gpu": None, "too_large": False}
+        for t in _sizes(maximum)
+        if t >= least
     ]
     return {
         "local": False,
         "choices": choices,
         "auto": maximum,
-        "min": MIN_CONTEXT,
+        "min": least,
         "max": maximum,
         "measured": False,
     }

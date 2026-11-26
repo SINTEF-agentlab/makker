@@ -56,6 +56,23 @@ def test_effort_offers_the_models_levels_and_its_default() -> None:
     assert options("openrouter:vendor/model")["effort"] is None
 
 
+def test_a_hosted_model_offers_only_context_sizes_its_reply_fits_in(monkeypatch) -> None:
+    from makker import models
+    from makker.model_settings import MIN_CONTEXT
+
+    monkeypatch.setattr(models, "context_window", lambda model_id: 1_000_000)
+    # Anthropic models keep 24K free for the reply: 32K would leave no room to work in.
+    anthropic = options("anthropic:claude-test")["context"]
+    assert anthropic["min"] == 39_923
+    assert [c["tokens"] for c in anthropic["choices"]][:2] == [65_536, 131_072]
+    openai = options("openai:gpt-test")["context"]
+    assert openai["min"] == MIN_CONTEXT
+    assert openai["choices"][0]["tokens"] == 32_768
+    # An output length chosen for a model is room it keeps free as well.
+    save_settings("openai:gpt-test", ModelSettings(output=32_768))
+    assert options("openai:gpt-test")["context"]["choices"][0]["tokens"] == 65_536
+
+
 def test_output_limits_stop_at_the_models_maximum() -> None:
     output = options("anthropic:claude-test")["output"]
     assert output == {"choices": [8_192, 16_384, 32_768, 64_000], "default": 24_000}

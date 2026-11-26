@@ -35,7 +35,9 @@ Each model can be set to run differently, with only the settings it supports:
   [local models](#local-models-ollama)). For a hosted model, a smaller size caps
   the window Makker compacts against (nothing is sent to the provider), for a
   cheaper session or to see compaction sooner. Any size from 16K up to the
-  model's maximum can be typed in.
+  model's maximum can be typed in. A model that keeps room free for its reply
+  starts higher (about 40K for Anthropic models, which keep 24K), so that the
+  conversation still has room to work in.
 - **Output length:** the most the model may write in one reply, its reasoning
   included. Left alone, a model may write up to its maximum (Anthropic models,
   which need a limit, get 24K). Raise it if long replies are cut off, or lower it
