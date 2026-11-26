@@ -1,10 +1,9 @@
 """makker command-line entrypoint package.
 
-``main`` is the public surface used by ``__main__.py`` and tests. The
-subcommand modules (``init.py``, ``run.py``, ``transcript.py``) handle
-one ``argv[0]`` each; ``_helpers.py`` holds shared argparse plumbing.
+``main.main`` is the entry point ``__main__.py`` and the tests use. The
+subcommand modules (``init.py``, ``run.py``, ``transcript.py``) handle one
+``argv[0]`` each; ``_helpers.py`` holds shared argparse plumbing.
+
+Nothing is imported here, so the light helpers load without the commands, which
+import LangChain (``makker mcp`` must start in seconds).
 """
-
-from makker.interfaces.cli.main import main
-
-__all__ = ["main"]

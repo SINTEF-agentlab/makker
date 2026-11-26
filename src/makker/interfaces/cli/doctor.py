@@ -19,14 +19,13 @@ from makker.display import (
 )
 from makker.interfaces.cli._helpers import (
     add_workspace_flags,
-    known_packages_map,
+    folder_simulator,
 )
 from makker.julia.requirements import MIN_JULIA_VERSION, check_julia
 from makker.models import key_env_var, provider_info, provider_of
 from makker.paths import workspace_root
 from makker.simulators import registry
 from makker.workspace import (
-    auto_detect_simulator,
     env_declares_warm_packages,
     load_workspace_config,
     newer_env_packages,
@@ -75,7 +74,7 @@ class _Report:
 def run(args: argparse.Namespace) -> int:
     ws = workspace_root()
     config = load_workspace_config(ws)
-    sim_name = args.sim or config.simulator or auto_detect_simulator(known_packages_map(), ws)
+    sim_name = folder_simulator(args.sim, ws)
 
     report = _Report()
     print(f"makker doctor - workspace: {ws}\n")

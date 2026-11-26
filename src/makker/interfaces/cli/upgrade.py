@@ -129,11 +129,9 @@ def workspace_env_status(ws: Path):
     workspace, or whose Julia project the user owns, has nothing to update here.
     """
 
-    from makker.interfaces.cli._helpers import known_packages_map
+    from makker.interfaces.cli._helpers import folder_simulator
     from makker.simulators import registry
     from makker.workspace import (
-        auto_detect_simulator,
-        load_workspace_config,
         outdated_env_packages,
         resolve_julia_project,
         user_owns_root_project,
@@ -142,7 +140,7 @@ def workspace_env_status(ws: Path):
     project = resolve_julia_project(ws)
     if user_owns_root_project(ws) or not (project / "Project.toml").exists():
         return None
-    sim = load_workspace_config(ws).simulator or auto_detect_simulator(known_packages_map(), ws)
+    sim = folder_simulator(None, ws)
     if sim is None:
         return None
     try:

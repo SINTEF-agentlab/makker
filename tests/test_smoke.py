@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from makker.interfaces.cli import main
+from makker.interfaces.cli.main import main
 
 
 def test_help_exits_zero_subprocess() -> None:

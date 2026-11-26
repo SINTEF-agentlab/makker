@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from makker.interfaces.cli import main
+from makker.interfaces.cli.main import main
 from makker.paths import set_state_home, set_workspace_root, workspace_state_dir
 
 

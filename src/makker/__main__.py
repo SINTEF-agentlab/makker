@@ -17,7 +17,7 @@ warnings.filterwarnings(
     category=UserWarning,
 )
 
-from makker.interfaces.cli import main  # noqa: E402
+from makker.interfaces.cli.main import main  # noqa: E402
 
 if __name__ == "__main__":
     sys.exit(main())

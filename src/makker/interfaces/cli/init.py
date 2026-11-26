@@ -9,13 +9,12 @@ from pathlib import Path
 
 from makker.interfaces.cli._helpers import (
     add_workspace_flags,
-    known_packages_map,
+    folder_simulator,
 )
 from makker.paths import workspace_root
 from makker.simulators import registry
 from makker.workspace import (
     WorkspaceConfig,
-    auto_detect_simulator,
     load_workspace_config,
     merge_simulator_config,
     workspace_config_path,
@@ -100,7 +99,7 @@ def run(args: argparse.Namespace) -> int:
     ws = workspace_root()
     config = load_workspace_config(ws)
 
-    sim_name = args.sim or config.simulator or auto_detect_simulator(known_packages_map(), ws)
+    sim_name = folder_simulator(args.sim, ws)
     if sim_name is None:
         print(
             "error: no simulator specified. Use --sim <name> or add a Project.toml "
