@@ -96,6 +96,10 @@ def test_resolve_in_workspace_keeps_only_workspace_files(tmp_path: Path) -> None
     assert resolve_in_workspace("/experiments/report.html") is None
     assert resolve_in_workspace("/workspace/experiments/report.html") is None
     assert resolve_in_workspace(str(tmp_path / "elsewhere.txt")) is None
+    # Backslashes are separators, as the file tools read them: a path spelt with
+    # them is the same file, so one outside the workspace stays outside.
+    assert resolve_in_workspace("x\\y.html") == inside
+    assert resolve_in_workspace(str(tmp_path / "elsewhere.txt").replace("/", "\\")) is None
     # `..` escapes are rejected whatever their form.
     assert resolve_in_workspace("../outside/secret.txt") is None
     assert resolve_in_workspace("/../outside/secret.txt") is None
