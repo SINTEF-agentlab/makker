@@ -5,11 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from textual.widgets import Markdown
 
 from _tui import submit_prompt
 from makker.agent.builder import build_agent
 from makker.interfaces.tui import TUIApp
+from makker.interfaces.tui.steps import StepGroup
 from makker.interfaces.tui.widgets import MessageBlock, ToolBlock
 from makker.lab.fakes import (
     FakeJulia,
@@ -53,21 +53,20 @@ async def test_multi_tool_turn_renders_full_block_sequence(
         blocks = list(app.query(MessageBlock))
         titles = [b.border_title for b in blocks]
         tool_blocks = list(app.query(ToolBlock))
-        markdown_count = len(list(app.query(Markdown)))
+        group_sizes = [len(group.rows) for group in app.query(StepGroup)]
         assistant_text = "\n".join(b._content for b in blocks if b.has_class("assistant"))
 
     assert "Welcome" in titles
     assert "You" in titles
     assert "Assistant" in titles
-    assert [block.border_title for block in tool_blocks] == [
-        "Julia",
-        "Julia",
-    ]
-    assert markdown_count >= 4
+    assert [block.label for block in tool_blocks] == ["Julia", "Julia"]
+    # Both runs follow "Let me compute that." with nothing said between them:
+    # one stretch of work, one line.
+    assert group_sizes == [2]
     assert "2 + 2" in julia.calls
 
     # The pkgdir path is a distinctive tool result the assistant never echoes;
-    # it must surface only in the tool cards, never dumped into an Assistant
+    # it must surface only in the tool steps, never dumped into an Assistant
     # block. (The "2 + 2" -> "4" result is intentionally not checked here: the
     # assistant legitimately *says* "Result is 4" in its own prose.)
     pkg_path = str(julia._pkgdir["FakePkg"])

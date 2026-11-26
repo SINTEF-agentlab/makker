@@ -88,8 +88,8 @@ provider:
 
 - OpenAI: `reasoning={"effort": "medium", "summary": "auto"}`, or the effort
   chosen in the [settings](#settings). The model
-  reasons when a task warrants it and the summary streams into the TUI's
-  reasoning card while it thinks. The `-chat` hybrids, which reject the
+  reasons when a task warrants it and the summary streams into the status
+  line while it thinks. The `-chat` hybrids, which reject the
   effort parameter, are excluded by the same profile data (they keep
   temperature support; true reasoning models do not).
 - Anthropic: extended thinking with a 10k-token budget (output capped at
@@ -114,9 +114,8 @@ Because the capability check is profile data shipped with the provider
 packages, new models are covered by upgrading the package, and there is no
 model list to maintain here. A model whose profile is missing (or a
 session without the provider key at build time) falls back to the plain
-spec string and simply runs without visible reasoning. Reasoning cards
-appear only when the model actually reasons: trivial prompts legitimately
-produce none.
+spec string and simply runs without visible reasoning. Reasoning shows only
+when the model actually reasons: trivial prompts legitimately produce none.
 
 The same profile data supplies the context window for `/context` and the
 auto-compaction trigger, read without building the model; Gemini models

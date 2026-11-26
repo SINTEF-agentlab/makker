@@ -170,6 +170,13 @@ are below.
 makker tui
 ```
 
+The agent's work between two things it says folds into one line, such as "Read
+4 files, ran Julia", marked when a step failed. Click the line for the steps, and
+a step for its code, diff and output. A plot or report gets a line of its own
+that opens the file. While the agent works, the line above the prompt says what
+it is doing and for how long, with the last lines a long step prints, and its
+plan shows above that.
+
 | Command | Effect |
 |---|---|
 | `/model` | Open the model selector (or `/model <provider:model>`) |
@@ -189,7 +196,7 @@ makker tui
 |---|---|
 | `Ctrl+C` | Interrupt the running turn. With text selected, copy. Twice when idle, exit |
 | `Ctrl+G` | Cancel the in-flight turn (resets Julia if needed) |
-| `Ctrl+O` | Toggle tool and reasoning cards between preview and full output |
+| `Ctrl+O` | Show every step and its full output, or fold them again |
 | `Ctrl+L` | Clear the visible log |
 | `Shift+Tab` | Cycle approval mode |
 | `Ctrl+P` / `↑` | Previous history entry |

@@ -1,8 +1,9 @@
 """Interactive TUI for Makker built on Textual.
 
 The interface keeps the runtime seam in ``TurnRunner`` and focuses on local
-presentation: a scrollable conversation log, grouped tool cards, inline
-approval cards, and a compact input bar.
+presentation: a scrollable conversation log where the agent's work folds into
+one line per stretch of steps (``tui.steps``), inline approval cards, and an
+input bar with the status line and plan above it.
 
 Slash commands typed into the input box:
 
@@ -24,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -76,6 +78,15 @@ from makker.interfaces.tui.model_menu import (
     OllamaPullModal,
 )
 from makker.interfaces.tui.prompt import PromptTextArea
+from makker.interfaces.tui.steps import (
+    Activity,
+    ArtifactLine,
+    ConversationLog,
+    LiveStatus,
+    PlanView,
+    StepGroup,
+    current_activity,
+)
 from makker.interfaces.tui.widgets import (
     ApprovalBlock,
     MessageBlock,
@@ -85,17 +96,19 @@ from makker.interfaces.tui.widgets import (
     ToolBlock,
     WelcomeBlock,
     display_session_id,
+    parse_todos,
 )
 from makker.open_file import open_path, reveal_path
 from makker.paths import workspace_root
 from makker.recent_models import record_recent_model
 from makker.session import Session
 from makker.session_host import SessionHost
+from makker.tool_labels import tool_label
 from makker.trace import TraceLog, schema
 from makker.transcript import render_html, render_markdown
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
     from textual.timer import Timer
 
@@ -152,6 +165,11 @@ class _AssistantStream:
         async with self._lock:
             block = self.prose
             if block is None:
+                # The answer has started, so the thought before it is complete:
+                # its line shows now, above the answer, not later above text
+                # already on screen.
+                if self.reasoning is not None and self.reasoning.under_way:
+                    await self.reasoning.finish()
                 block = MessageBlock("Assistant", "assistant", "", markdown=True)
                 self.prose = block
                 await log.mount(block)
@@ -159,24 +177,28 @@ class _AssistantStream:
                 await block._mounted_event.wait()
             await block.append_content(text)
 
-    async def append_reasoning(self, log: VerticalScroll, text: str) -> None:
+    async def append_reasoning(
+        self,
+        text: str,
+        group_for: Callable[[Any], Awaitable[StepGroup]],
+        *,
+        verbose: bool = False,
+    ) -> None:
+        """Add to the thought under way, a step in the current group of steps."""
         if not text:
             return
         async with self._lock:
             block = self.reasoning
             if block is None:
-                block = ReasoningBlock()
+                block = ReasoningBlock(verbose=verbose)
                 self.reasoning = block
                 # Reasoning belongs above the answer it precedes. Text and
                 # reasoning are drained concurrently, so a stray text delta can
                 # mount the prose block first; anchor the reasoning above it
                 # rather than letting arrival order decide.
-                if self.prose is not None and self.prose.is_mounted:
-                    await log.mount(block, before=self.prose)
-                else:
-                    await log.mount(block)
-            elif not block.is_mounted:
-                await block._mounted_event.wait()
+                before = self.prose if self.prose is not None and self.prose.is_mounted else None
+                group = await group_for(before)
+                await group.add(block)
             await block.append_content(text)
 
     async def flush(self, *, reasoning_expanded: bool = False) -> None:
@@ -291,6 +313,11 @@ class TUIApp(App[None]):
         self._pending_interrupts: list[TurnInterrupt] = []
         self._tool_blocks: list[ToolBlock] = []
         self._tools_expanded = False
+        # When the running turn started, for the clock on the status line.
+        self._turn_started: float | None = None
+        # The newest trace event whose artifact is on screen: what a tool makes
+        # (a figure, a report) after it gets a line of its own.
+        self._artifact_mark = session.trace.max_id()
         self._active_approval_blocks: list[ApprovalBlock] = []
         # The transient "approval is pending" log line, cleared on decision so
         # it never lingers as a stale instruction after the turn moves on.
@@ -324,9 +351,11 @@ class TUIApp(App[None]):
             model_label=self._model_label,
             id="status",
         )
-        with VerticalScroll(id="log"):
+        with ConversationLog(id="log"):
             yield WelcomeBlock(simulator_label=self._session_label)
         with Vertical(id="input-panel"):
+            yield PlanView(id="plan")
+            yield LiveStatus(self._live_activity, id="live-status")
             yield ApprovalMenu(id="approval-menu")
             with Horizontal(id="input-row"):
                 yield Static(">", id="prompt-glyph", markup=False)
@@ -629,24 +658,27 @@ class TUIApp(App[None]):
         await self._resume_pending(option.decision)
 
     def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
-        """Open file:// links in the OS default application.
-
-        Only a document (an image, PDF, page, table or text) inside the workspace
-        or the session's output. The model writes these links and the files they
-        point at, so anything else is revealed in its folder instead: a click
-        never launches a program.
-        """
+        """Open file:// links in the OS default application (see ``_open_file``)."""
         href = event.href
         if href.startswith("file://"):
-            path = Path(urllib.request.url2pathname(urllib.parse.urlparse(href).path))
-            target = path.resolve()
-            roots = (workspace_root(), self._session.output_dir)
-            inside = any(target.is_relative_to(root.resolve()) for root in roots)
-            if inside and target.suffix.lower() in _VIEWABLE_SUFFIXES:
-                open_path(target)
-            else:
-                reveal_path(target)
+            self._open_file(Path(urllib.request.url2pathname(urllib.parse.urlparse(href).path)))
             event.prevent_default()
+
+    def on_artifact_line_opened(self, event: ArtifactLine.Opened) -> None:
+        self._open_file(event.path)
+
+    def _open_file(self, path: Path) -> None:
+        """Open a document (an image, PDF, page, table or text) inside the
+        workspace or the session's output in the OS default application. The
+        model writes these links and the files they point at, so anything else
+        is revealed in its folder instead: a click never launches a program."""
+        target = path.resolve()
+        roots = (workspace_root(), self._session.output_dir)
+        inside = any(target.is_relative_to(root.resolve()) for root in roots)
+        if inside and target.suffix.lower() in _VIEWABLE_SUFFIXES:
+            open_path(target)
+        else:
+            reveal_path(target)
 
     def on_resize(self, _event: events.Resize) -> None:
         if self._resize_timer is not None:
@@ -748,6 +780,8 @@ class TUIApp(App[None]):
         self._session.adopt_title(text)
         self._prompt.disabled = True
         self._busy = True
+        self._turn_started = time.monotonic()
+        self.query_one("#plan", PlanView).set_plan(None)
         self._cancel_requested = False
         self._cancel_rendered = False
         self._julia_running_on_cancel = False
@@ -1255,8 +1289,11 @@ class TUIApp(App[None]):
                 worker.cancel()
 
     def _has_running_julia_tool(self) -> bool:
+        # A call the model is still writing has not reached Julia.
         return any(
-            block.status == "running" and block.tool_name in {"run_julia", "plot_julia"}
+            block.status == "running"
+            and block.started
+            and block.tool_name in {"run_julia", "plot_julia"}
             for block in self._tool_blocks
         )
 
@@ -1318,8 +1355,19 @@ class TUIApp(App[None]):
         self._cancel_requested = False
         self._julia_running_on_cancel = False
         self._busy = False
+        self._turn_started = None
+        if not self._pending_interrupts:
+            # A step that never heard its end (the stream dropped it) has ended
+            # with the turn; under way, it would stay out of sight for good.
+            for block in self._tool_blocks:
+                if block.under_way:
+                    await block.set_result("")
+        for group in self._log.query(StepGroup):
+            if group.live:
+                group.settle()
         self._set_status("approval required" if self._pending_interrupts else "ready")
         if not self._pending_interrupts:
+            self.query_one("#plan", PlanView).set_plan(None)
             # Settle duties (report sidecar refresh) run in the host's turn
             # loop; here only the UI reset and the one-time title upgrade.
             task = self._host.maybe_title()
@@ -1365,6 +1413,9 @@ class TUIApp(App[None]):
 
         if isinstance(msg, TurnToolEvent):
             await self._render_tool_event(msg)
+            # A step ending moves into the log at once; the status line follows
+            # in the same frame rather than on its next tick.
+            self.query_one("#live-status", LiveStatus).refresh_activity()
             return
 
         if isinstance(msg, TurnCompaction):
@@ -1376,29 +1427,40 @@ class TUIApp(App[None]):
             self._refresh_context_status()
 
     async def _render_reasoning_delta(self, msg: TurnReasoningDelta) -> None:
-        await self._stream.append_reasoning(self._log, msg.text)
+        await self._stream.append_reasoning(
+            msg.text, self._step_group, verbose=self._tools_expanded
+        )
         if msg.text:
             self._set_status("thinking…")
 
     async def _render_tool_event(self, msg: TurnToolEvent) -> None:
-        if msg.event == "composing":
-            return  # the card is mounted when the call arrives whole
-        await self._flush_stream()
+        if msg.tool_name == "write_todos":
+            # The plan is shown as the plan, above the status line, not as a step.
+            todos = parse_todos((msg.args or {}).get("todos"))
+            if todos is not None:
+                self.query_one("#plan", PlanView).set_plan(todos)
+            return
+        if msg.event != "composing":
+            # The message is whole: what the model thought or said before the
+            # call is complete. While it still writes the call, more of that may
+            # be arriving, and belongs where it started.
+            await self._flush_stream()
         if msg.event == "delta":
             block = self._matching_tool_block(
                 tool_call_id=msg.tool_call_id,
                 tool_name=msg.tool_name,
             )
             if block is None:
-                block = self._new_tool_block(msg.tool_name, tool_call_id=msg.tool_call_id)
-                self._tool_blocks.append(block)
-                await self._log.mount(block)
+                block = await self._add_tool_block(msg.tool_name, tool_call_id=msg.tool_call_id)
             await block.append_output(msg.content)
             return
 
-        if msg.event in {"requested", "started"}:
+        if msg.event in {"composing", "requested", "started"}:
+            # Announced while the model writes it (``composing``), complete with
+            # its arguments (``requested``), then run (``started``): one step.
             await self._mount_tool_call(
-                {"name": msg.tool_name, "args": msg.args or {}, "id": msg.tool_call_id}
+                {"name": msg.tool_name, "args": msg.args or {}, "id": msg.tool_call_id},
+                started=msg.event == "started",
             )
             return
 
@@ -1407,35 +1469,86 @@ class TUIApp(App[None]):
             tool_name=msg.tool_name,
         )
         if block is None:
-            block = self._new_tool_block(msg.tool_name, tool_call_id=msg.tool_call_id)
-            await self._log.mount(block)
-            self._tool_blocks.append(block)
+            block = await self._add_tool_block(msg.tool_name, tool_call_id=msg.tool_call_id)
         await block.set_result(msg.content, is_error=msg.event == "error")
+        await self._show_new_artifacts()
         self._set_status("thinking…")
+
+    async def _show_new_artifacts(self) -> None:
+        """Give each figure, image or report a tool has just made a line of its
+        own in the log, as the web UI gives it a card."""
+        for event in self._session.trace.events_after(
+            self._artifact_mark, kinds=(schema.ARTIFACT,)
+        ):
+            self._artifact_mark = event.id
+            payload = event.payload
+            if not payload.get("path"):
+                continue
+            await self._log.mount(
+                ArtifactLine(
+                    self._session.output_dir / str(payload["path"]),
+                    kind=payload.get("kind"),
+                    mime=payload.get("mime"),
+                    caption=str(payload.get("caption") or ""),
+                )
+            )
 
     async def _flush_stream(self) -> None:
         await self._stream.flush(reasoning_expanded=self._tools_expanded)
 
-    async def _mount_tool_call(self, call: dict[str, Any]) -> None:
+    async def _mount_tool_call(self, call: dict[str, Any], *, started: bool = False) -> None:
         name = call.get("name") or "tool"
         tool_call_id = str(call.get("id")) if call.get("id") else None
+        args = call.get("args") if isinstance(call.get("args"), dict) else None
         existing = self._matching_tool_block(tool_call_id=tool_call_id, tool_name=name)
         if existing is not None:
+            existing.set_args(args)
+            if started and existing.status == "running":
+                existing.mark_started()
             return
+        block = await self._add_tool_block(name, args, tool_call_id=tool_call_id)
+        if started:
+            block.mark_started()
+        self._set_status(f"running {tool_label(name)}…")
 
-        block = self._new_tool_block(
-            name,
-            call.get("args") if isinstance(call.get("args"), dict) else None,
-            tool_call_id=tool_call_id,
-        )
-        # Append before awaiting mount so concurrent emitters (e.g. the
+    async def _add_tool_block(
+        self,
+        name: str,
+        args: dict[str, Any] | None = None,
+        *,
+        tool_call_id: str | None = None,
+    ) -> ToolBlock:
+        block = self._new_tool_block(name, args, tool_call_id=tool_call_id)
+        # Listed before awaiting the mount so concurrent emitters (e.g. the
         # ``requested`` event from the message stream racing the ``started``
         # event from the tool-call projection) see the block and dedupe.
         self._tool_blocks.append(block)
-        await self._log.mount(block)
-        if name in {"run_julia", "plot_julia"}:
-            block.start_elapsed_timer()
-        self._set_status("updating plan…" if name == "write_todos" else f"running {name}…")
+        group = await self._step_group()
+        await group.add(block)
+        return block
+
+    async def _step_group(self, before: Any = None) -> StepGroup:
+        """The group the next step joins: the one it follows directly in the log
+        (just above ``before``, else at the end), or a new one."""
+        children = list(self._log.children)
+        at = children.index(before) if before in children else len(children)
+        previous = children[at - 1] if at else None
+        if isinstance(previous, StepGroup):
+            return previous
+        group = StepGroup(verbose=self._tools_expanded)
+        await self._log.mount(group, before=before)
+        return group
+
+    def _live_activity(self) -> Activity | None:
+        """What the status line above the prompt says, while a turn runs."""
+        if not self._busy:
+            return None
+        return current_activity(
+            self._tool_blocks,
+            self._stream.reasoning,
+            since=self._turn_started,
+            cancelling=self._cancel_requested,
+        )
 
     async def _render_interrupts(self, interrupts: list[TurnInterrupt]) -> None:
         self._active_approval_blocks = []
@@ -1486,6 +1599,7 @@ class TUIApp(App[None]):
         self._pending_interrupts = []
         self._prompt.disabled = True
         self._busy = True
+        self._turn_started = time.monotonic()
         self._cancel_requested = False
         self._cancel_rendered = False
         self._julia_running_on_cancel = False
@@ -1499,12 +1613,10 @@ class TUIApp(App[None]):
         await self._clear_visible_log()
 
     async def action_toggle_tool_output(self) -> None:
-        """Ctrl+O: toggle verbose output for every tool and reasoning card."""
+        """Ctrl+O: every step and what it showed, in full; again to condense."""
         self._tools_expanded = not self._tools_expanded
-        for block in list(self._tool_blocks):
-            await block.set_expanded(self._tools_expanded)
-        for reasoning in self._log.query(ReasoningBlock):
-            await reasoning.set_expanded(self._tools_expanded)
+        for group in list(self._log.query(StepGroup)):
+            await group.set_open(self._tools_expanded, verbose=self._tools_expanded)
         self._set_status(self._status_text)
 
     async def _clear_visible_log(self) -> None:
@@ -1545,7 +1657,8 @@ class TUIApp(App[None]):
         if self._pending_interrupts:
             return "approval required"
         if self._busy:
-            return self._status_text
+            # The status line above the prompt says what the agent is doing.
+            return ""
         return "ready"
 
     def _compute_prompt_guide(self) -> str:
@@ -1568,9 +1681,9 @@ class TUIApp(App[None]):
         if value.startswith("/"):
             return self._command_guide(value)
         if self._tools_expanded:
-            tool_hint = " · Ctrl+O collapse tool output"
+            tool_hint = " · Ctrl+O condense steps"
         elif any(block.expandable for block in self._tool_blocks):
-            tool_hint = " · Ctrl+O expand tool output"
+            tool_hint = " · Ctrl+O show all steps"
         else:
             tool_hint = ""
         # The current mode lives in the top status bar (always visible); the
@@ -1625,7 +1738,7 @@ class TUIApp(App[None]):
         *,
         tool_call_id: str | None = None,
     ) -> ToolBlock:
-        """Construct a tool card that honours the current verbose mode."""
+        """A step for a tool call, open in full when Ctrl+O has shown every step."""
         return ToolBlock(name, args, tool_call_id=tool_call_id, expanded=self._tools_expanded)
 
     def _matching_tool_block(
