@@ -93,7 +93,11 @@ function ContextView() {
       ref.current?.parentElement?.querySelector<HTMLElement>(".ctx-ring")?.focus();
     };
     const onClick = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement)?.closest(".ctx-control")) controller.closeContext();
+      // The Send button that ran /context is gone by the time its click gets
+      // here; that click opened the view, it is not one outside it.
+      const target = e.target as HTMLElement | null;
+      if (!target?.isConnected || target.closest(".ctx-control")) return;
+      controller.closeContext();
     };
     window.addEventListener("keydown", onKey);
     document.addEventListener("click", onClick);

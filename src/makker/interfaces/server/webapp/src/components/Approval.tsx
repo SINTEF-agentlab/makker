@@ -15,10 +15,11 @@ export function Approval() {
   const ref = useRef<HTMLDivElement>(null);
 
   // An approval needs attention, so bring it into view even if the user had
-  // scrolled up — otherwise it can land below the fold.
+  // scrolled up — otherwise it can land below the fold. Its end, where the
+  // buttons are: a card showing a whole file is taller than the window.
   useEffect(() => {
     // Optional-call: not every environment implements scrollIntoView (jsdom).
-    ref.current?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    ref.current?.scrollIntoView?.({ behavior: "smooth", block: "end" });
   }, []);
 
   if (!pending) return null;
