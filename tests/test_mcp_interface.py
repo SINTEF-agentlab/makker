@@ -205,10 +205,11 @@ async def test_an_interrupt_while_the_session_starts_says_so(tmp_path) -> None:
 
 
 async def test_an_interrupt_passes_over_a_finished_call_nobody_collected(tmp_path) -> None:
-    release = asyncio.Event()
+    started, release = asyncio.Event(), asyncio.Event()
 
     async def evaluate(code: str) -> EvalResult:
         if code == "slow()":
+            started.set()
             await release.wait()
         return EvalResult(output=f"done: {code}")
 
@@ -217,6 +218,7 @@ async def test_an_interrupt_passes_over_a_finished_call_nobody_collected(tmp_pat
         with pytest.raises(TimeoutError):  # finishes, but its caller has gone
             await asyncio.wait_for(client.call_tool("run_julia", {"code": "quick()"}), 0.001)
         await client.call_tool("run_julia", {"code": "slow()"})
+        await started.wait()
         stopped = await client.call_tool("julia_interrupt", {})
 
     assert "Interrupted job-2 (run_julia)" in _text(stopped)
@@ -327,7 +329,10 @@ async def test_progress_carries_the_last_line_of_output(monkeypatch) -> None:
     relay = ProgressRelay(report)
     relay.write("Step 1\nStep ")
     relay.write("2 of 10\r\x1b[2KStep 3 of 10\n\n")
-    await asyncio.sleep(0.2)
+    async with asyncio.timeout(5):
+        while not seen:
+            await asyncio.sleep(0.01)
+    await asyncio.sleep(0.05)  # a few more ticks, with nothing new to send
     relay.close()
 
     # Only what is new is sent: the last line that says something.
