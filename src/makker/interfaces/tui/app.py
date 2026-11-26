@@ -1116,6 +1116,15 @@ class TUIApp(App[None]):
         the conversation continues; ``/add-dir`` folders are re-applied.
         """
         dirs = [entry.path for entry in added_dirs(self._backend)] if self._backend else []
+        # A local model not used here before is loaded to see what fits this
+        # machine; off the event loop, so the screen stays alive meanwhile.
+        name = model_id.partition(":")[2] or model_id
+        await self._host.measure_model(
+            model_id,
+            on_wait=lambda: self._note(
+                f"Measuring what context size `{name}` can run with on this machine…"
+            ),
+        )
         try:
             agent, backend = self._agent_factory(model_id, dirs)
         except Exception as exc:

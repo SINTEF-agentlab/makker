@@ -202,6 +202,12 @@ class Calibration:
     loads: dict[int, tuple[int, int] | None]
 
 
+# What this process has measured, or tried to. A measurement that could not be
+# stored (the daemon gives no version or digest to store it under) and one that
+# failed would otherwise be repeated for every agent build, each loading the model.
+_tried: dict[str, Calibration | None] = {}
+
+
 def calibration(
     name: str, *, maximum: int | None = None, sizes: tuple[int, ...] = (), measure: bool = True
 ) -> Calibration | None:
@@ -216,10 +222,15 @@ def calibration(
     if maximum is None:
         return None
     key = _key(name)
+    here = key or f"{host()} {name}"
     stored = _measured().get(key) if key else None
-    found = _parse(stored) if isinstance(stored, dict) else None
+    found = _parse(stored) if isinstance(stored, dict) else _tried.get(here)
     wanted = [n for n in sizes if found is None or n not in found.loads]
     if not measure or (found is not None and found.fits is not None and not wanted):
+        return found
+    if not sizes and here in _tried:
+        # Tried in this process and the daemon did not answer. Every agent build
+        # asks, so stay with what is known until the user asks for sizes again.
         return found
     loads = dict(found.loads) if found else {}
     fits = found.fits if found else None
@@ -229,8 +240,9 @@ def calibration(
         for size in wanted:
             _record(name, size, loads)
     except Exception:
+        _tried[here] = found
         return found  # the daemon stopped answering: keep what is known
-    result = Calibration(fits, loads)
+    result = _tried[here] = Calibration(fits, loads)
     if key:
         loaded = {str(n): list(v) if v else None for n, v in sorted(loads.items())}
         _remember(key, {"fits": fits, "loads": loaded})

@@ -12,6 +12,7 @@ supplies the LangChain integration.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import os
 import re
@@ -190,6 +191,19 @@ def local_context(model_id: str, *, measure: bool = True) -> int | None:
         maximum = ollama_client.context_window(name)
         return min(chosen, maximum) if maximum else chosen
     return ollama_client.num_ctx(name, measure=measure)
+
+
+def measure_local_context(model_id: str | None) -> None:
+    """Find out what an unmeasured local model can be loaded with.
+
+    That loads the model, several times for one that does not fit the GPU whole,
+    so it takes seconds to minutes. Building an agent asks for the same figure,
+    on whatever thread builds it; run this first, off the event loop, and the
+    build finds the answer known. A no-op for any other model.
+    """
+    if model_id and provider_of(model_id) == "ollama" and not is_ollama_cloud(model_id):
+        with contextlib.suppress(Exception):
+            local_context(model_id)
 
 
 @cache

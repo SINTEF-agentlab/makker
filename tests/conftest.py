@@ -65,6 +65,15 @@ def _fresh_julia_check():
 
 
 @pytest.fixture(autouse=True)
+def _fresh_ollama_measurements():
+    """What a process has measured of a local model is kept for its lifetime; a
+    test that fakes the daemon must not see another test's answer."""
+    from makker import ollama_client
+
+    ollama_client._tried.clear()
+
+
+@pytest.fixture(autouse=True)
 def _offline_titling(monkeypatch):
     """Session titling fires after first turns; unit tests must stay off the network.
 

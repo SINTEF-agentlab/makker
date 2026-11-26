@@ -82,3 +82,47 @@ async def test_maybe_title_skips_later_turns(tmp_path: Path) -> None:
 
     assert host.maybe_title() is None
     assert host.titled is False  # never claimed, so a fresh host could still title
+
+
+async def test_a_local_model_is_sized_off_the_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sizing an unmeasured local model loads it, for seconds to minutes. On the
+    event loop that stopped every session and the whole interface meanwhile."""
+    import asyncio
+    import threading
+    import time
+
+    from makker import models, session_host
+
+    sized: list[threading.Thread] = []
+
+    def slow_sizing(model_id: str, **_kwargs) -> int:
+        sized.append(threading.current_thread())
+        time.sleep(0.3)
+        return 32_768
+
+    monkeypatch.setattr(models, "local_context", slow_sizing)
+    monkeypatch.setattr(session_host, "_MEASURE_NOTE_AFTER_S", 0.05)
+    notes: list[str] = []
+    turns = 0
+
+    async def note() -> None:
+        notes.append("measuring")
+
+    async def keep_turning() -> None:
+        nonlocal turns
+        while True:
+            await asyncio.sleep(0.01)
+            turns += 1
+
+    loop_alive = asyncio.create_task(keep_turning())
+    await SessionHost.measure_model("ollama:qwen3.8:27b", on_wait=note)
+    loop_alive.cancel()
+
+    assert [thread is threading.current_thread() for thread in sized] == [False]
+    assert turns >= 10  # the loop kept turning while the model was sized
+    assert notes == ["measuring"]  # and the wait got its one word
+
+    # A hosted model, or another provider's, has nothing to size.
+    await SessionHost.measure_model("ollama:glm-5.1:cloud", on_wait=note)
+    await SessionHost.measure_model("openai:gpt-test", on_wait=note)
+    assert len(sized) == 1 and notes == ["measuring"]
