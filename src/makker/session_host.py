@@ -33,6 +33,11 @@ if TYPE_CHECKING:
     from makker.simulators.base import SimulatorAdapter
 
 
+# Sizing a local model is worth a note once it has taken this long: a model
+# measured before, or any other model, is through in milliseconds.
+_MEASURE_NOTE_AFTER_S = 1.5
+
+
 class SessionHost:
     """A live session plus its agent and turn runner."""
 
@@ -217,6 +222,27 @@ class SessionHost:
         self.agent, self.backend = agent, backend
         self._model = new_model
         self._runner = None  # rebuilt lazily against the new agent
+
+    @staticmethod
+    async def measure_model(
+        model_id: str | None, *, on_wait: Callable[[], Awaitable[Any]] | None = None
+    ) -> None:
+        """Size a local model before an agent is built on it, off the event loop.
+
+        An unmeasured local model is loaded to find the context that fits this
+        machine, which can take minutes. The build asks for that figure on the
+        loop's own thread, where it would stop every session and front end; done
+        here first, the build finds it known. ``on_wait`` is called once the
+        measuring has gone on long enough to deserve a word.
+        """
+        from makker.models import measure_local_context
+
+        measuring = asyncio.ensure_future(asyncio.to_thread(measure_local_context, model_id))
+        if on_wait is not None:
+            done, _ = await asyncio.wait({measuring}, timeout=_MEASURE_NOTE_AFTER_S)
+            if not done:
+                await on_wait()
+        await measuring
 
     def set_host_context(self, context: dict[str, Any] | None, *, rebuild: bool = True) -> bool:
         """Adopt the host application's selection; return whether it changed.
@@ -648,6 +674,7 @@ class SessionHost:
                 # rebuilds through ``reconfigure``.
                 agent, backend = None, None
             else:
+                await cls.measure_model(resolved_model)
                 agent, backend = build_agent(
                     session,
                     model=resolved_model,

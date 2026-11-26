@@ -296,6 +296,36 @@ def test_num_ctx_without_a_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
     assert ollama_client._measured() == {}
 
 
+def test_a_model_is_not_measured_again_for_every_agent_build(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every agent build asks for the size, and measuring loads the model. A
+    daemon that gives no version leaves nothing to store the answer under, and
+    one that stops answering leaves no answer: neither is asked again and again."""
+    _local_model(monkeypatch, version=None)
+    loads: list[int] = []
+    monkeypatch.setattr(ollama_client, "_load", _gpu_holding(10**9, loads))
+    assert ollama_client.num_ctx("qwen3.8:27b") == 262_144
+    assert ollama_client.num_ctx("qwen3.8:27b") == 262_144
+    assert loads == [262_144]
+    assert ollama_client._measured() == {}  # known to this process only
+
+    _local_model(monkeypatch)
+    tries: list[int] = []
+
+    def gone(name: str, num_ctx: int):
+        tries.append(num_ctx)
+        raise ConnectionError("down")
+
+    monkeypatch.setattr(ollama_client, "_load", gone)
+    assert ollama_client.num_ctx("other") == ollama_client.MIN_NUM_CTX
+    assert ollama_client.num_ctx("other") == ollama_client.MIN_NUM_CTX
+    assert len(tries) == 1
+    # Asking for the sizes (the settings menu) is a reason to try again.
+    ollama_client.calibration("other", sizes=(32_768,))
+    assert len(tries) == 2
+
+
 def test_load_and_modelfile_read_the_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 

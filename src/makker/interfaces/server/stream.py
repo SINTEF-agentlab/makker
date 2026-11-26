@@ -88,6 +88,11 @@ def _stream_of(host: SessionHost) -> _SessionStream:
 
 # What a turn sends that the conversation shows, kept for a socket that attaches
 # before the turn ends. The rest answers the socket that asked, or ends the turn.
+def _measuring_note(model_id: str) -> str:
+    name = model_id.partition(":")[2] or model_id
+    return f"Measuring what context size {name} can run with on this machine…"
+
+
 _TURN_CONTENT = frozenset({"text", "reasoning", "tool", "viz", "artifact", "ui"})
 
 
@@ -291,6 +296,12 @@ class _SessionStream:
                 if problem is not None:
                     await self._send(protocol.error_to_wire(problem))
                     return
+                # A local model not used here before is loaded to see what fits
+                # this machine. The rebuild would do that on the event loop and
+                # stop every session meanwhile, so it is done first, off it.
+                await self._host.measure_model(
+                    arg, on_wait=lambda: self._send(protocol.notice_to_wire(_measuring_note(arg)))
+                )
                 self._host.reconfigure(model=arg)
                 from makker.model_choices import remember_model
                 from makker.paths import workspace_root
