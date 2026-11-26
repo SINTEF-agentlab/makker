@@ -672,6 +672,8 @@ class _SessionStream:
             return
         payload = build_resume_payload(self._pending, {"type": "approve"})
         self._pending = []
+        # The page still shows the card, and nothing it sent answered it.
+        await self._send(protocol.interrupt_resolved_to_wire())
         runner = self._host.runner
         self._spawn(lambda: runner.resume(payload, on_message=self._on_message))
 

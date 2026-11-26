@@ -61,6 +61,9 @@ export type ServerMessage =
       allowed_decisions: string[];
       allowlist: string[];
     }
+  /** The pending approval was resolved without a decision from this page (a
+   *  change of mode now allows it): the card goes and the turn runs on. */
+  | { type: "interrupt_resolved" }
   /** The context meter, after every model call, a turn's end, a compaction and a
    *  model switch. */
   | ({ type: "context" } & ContextMeter)

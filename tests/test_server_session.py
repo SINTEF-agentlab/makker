@@ -2493,6 +2493,8 @@ def test_set_approval_auto_resolves_a_pending_interrupt(tmp_path: Path) -> None:
             assert _drain_turn(ws)[-1]["type"] == "interrupt"
             ws.send_json({"type": "command", "command": "set_approval", "arg": "auto"})
             events = _drain_turn(ws)
+    # The page is told its card is answered before the turn's own messages come.
+    assert events[0] == {"type": "interrupt_resolved"}
     assert events[-1]["type"] == "turn_end"
     assert events[-1]["text"] == "approval handled"
 

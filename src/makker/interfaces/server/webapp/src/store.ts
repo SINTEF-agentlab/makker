@@ -602,6 +602,9 @@ export function createSessionStore() {
             return onArtifact(msg);
           case "interrupt":
             return onInterrupt(msg);
+          case "interrupt_resolved":
+            // As after a decision of our own: the card goes, the turn is running.
+            return set({ pending: null, busy: true, working: true });
           case "context":
             return onContext(msg);
           case "turn_end":
