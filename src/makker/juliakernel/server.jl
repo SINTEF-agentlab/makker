@@ -99,17 +99,20 @@ end
 
 Base.exit_on_sigint(false)   # SIGINT -> InterruptException instead of process exit
 
-# Whether `task` is suspended waiting for something to wake it (`true`), as
-# opposed to queued to run, already woken (`false`). Only a waiting task may be
-# woken with an exception by another: one queued to run would be pulled out of
-# the scheduler's queue, which other threads add to under a lock this cannot
-# take. Called on the task's own thread, so the task is not running. Reads
-# scheduler internals: if they are not as expected, `nothing` (cannot tell).
+# Whether `task` is parked in a wait queue for something to wake it (`true`), as
+# opposed to queued to run or being woken right now (`false`). Only a parked
+# task may be woken with an exception by another: one queued to run would be
+# pulled out of the scheduler's queue, which other threads add to under a lock
+# this cannot take, and one in no queue at all is being woken by another thread
+# already, which would schedule it a second time. Called on the task's own
+# thread, so the task is not running. Reads scheduler internals: if they are not
+# as expected, `nothing` (cannot tell). Like Julia's own handling of an
+# exception in `wait`, the unlink takes no lock on the condition.
 function waiting(task::Task)
     try
         task._state === Base.task_state_runnable || return false
         q = task.queue
-        return q === nothing || q !== Base.workqueue_for(Threads.threadid()).queue
+        return q !== nothing && q !== Base.workqueue_for(Threads.threadid()).queue
     catch
         return nothing
     end
