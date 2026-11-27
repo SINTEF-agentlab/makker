@@ -39,11 +39,12 @@ class JuliaSession(Protocol):
         """
         ...
 
-    async def restart(self) -> None:
+    async def restart(self, reason: str = "it was restarted") -> None:
         """Force the runtime down and start fresh, without relying on it responding.
 
         The hard recovery for when an evaluation can't be interrupted and the
         runtime is wedged (the TUI's cancel path). Unlike ``reset``, it must not
-        depend on the current session being responsive.
+        depend on the current session being responsive. ``reason`` completes
+        "Julia restarted because ...".
         """
         ...
