@@ -90,8 +90,9 @@ makker upgrade --check  # just report what's installed, what's latest, and the f
 `upgrade` does the right thing for how you installed: a tool install runs
 `uv tool upgrade makker`; a dev checkout is told to `git pull && uv sync`.
 Then, run in a workspace, it brings that folder's Julia environment up to the
-simulator versions the installed Makker supports (`--env-only` does just
-this part).
+simulator versions the installed Makker supports, with the new Makker's own
+Julia packages, and precompiles it, so the first session after the update
+starts without that wait (`--env-only` does just this part).
 On Windows the running executable can't replace itself, so the upgrade runs in
 a new console window and Makker exits to release the file; reopen it when
 that window finishes.
