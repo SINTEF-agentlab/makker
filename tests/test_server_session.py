@@ -637,7 +637,8 @@ async def test_start_wires_surface_and_capability_dependencies(
 
 async def test_teardown_stops_the_warmup_a_restart_started(monkeypatch, tmp_path: Path) -> None:
     """A restart warms the fresh process again, so the warm-up the host reports, and
-    stops before the kernel closes, is whichever is current, not the first."""
+    stops before the kernel closes, is whichever is current, not the first. And
+    a restart that stopping it causes starts no warm-up of its own."""
     import makker.juliakernel as juliakernel_mod
     from makker.agent import builder as builder_mod
     from makker.agent import capabilities as capabilities_mod
@@ -646,9 +647,18 @@ async def test_teardown_stops_the_warmup_a_restart_started(monkeypatch, tmp_path
 
     kernel = FakeJulia()
     warmups: list[asyncio.Task[None]] = []
+    closing = False
+
+    async def _warm() -> None:
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            if closing:  # mid-eval, which ignores the interrupt: the kernel restarts
+                await kernel.restart()
+            raise
 
     def _start_warmup(*_args: Any, **_kwargs: Any) -> asyncio.Task[None]:
-        warmups.append(asyncio.create_task(asyncio.sleep(3600)))
+        warmups.append(asyncio.create_task(_warm()))
         return warmups[-1]
 
     monkeypatch.setattr(requirements_mod, "require_julia", lambda *a, **kw: None)
@@ -669,8 +679,11 @@ async def test_teardown_stops_the_warmup_a_restart_started(monkeypatch, tmp_path
     await host.session.julia.reset()
     assert host.warmup_task is warmups[1]
     assert warmups[0].cancelled() or warmups[0].cancelling()
+    await asyncio.sleep(0)  # the new warm-up gets going
+    closing = True
     await host.aclose()
     assert warmups[1].cancelled()
+    assert kernel.restart_count == 1 and len(warmups) == 2
 
 
 async def test_a_session_that_fails_to_start_leaves_nothing_to_resume(
