@@ -249,7 +249,8 @@ describe("context ring and view", () => {
     // The largest results show only when asked for.
     expect(screen.queryByText("Read · src/model.jl")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Tool results" }));
-    expect(screen.getByText("Read · src/model.jl")).toBeInTheDocument();
+    // A path wraps after its slashes, not inside a name.
+    expect(screen.getByText("Read · src/model.jl").querySelectorAll("wbr")).toHaveLength(1);
 
     // The ring, or a click anywhere else, closes it.
     fireEvent.click(ring);
