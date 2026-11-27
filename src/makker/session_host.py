@@ -100,6 +100,8 @@ class SessionHost:
         # Background Julia warm-up (load warm package, set GLMakie offscreen); held
         # so it can be cancelled on teardown. Set by ``start``.
         self._warmup_task: Any | None = None
+        # Stops the warm-up from running again after a restart; set by ``start``.
+        self._stop_rewarming: Callable[[], None] = lambda: None
 
     def attach(self) -> bool:
         """Claim this session for a connection; ``False`` if one already holds it."""
@@ -444,6 +446,7 @@ class SessionHost:
 
     async def aclose(self) -> None:
         """Tear down the kernel and checkpointer, then close the session."""
+        self._stop_rewarming()
         if self._warmup_task is not None and not self._warmup_task.done():
             self._warmup_task.cancel()
             # Await the cancellation before closing the kernel: warm-up may be mid-eval,
@@ -758,9 +761,9 @@ class SessionHost:
                 return past_loading(host._warmup_task, abandonable)
 
             warm()
-            # The stack unwinds in reverse, so this stops listening before the
-            # kernel closes: a restart during teardown can't start a warm-up.
-            stack.callback(kernel.on_restart(rewarm))
+            # Removed first thing in ``aclose``, before the warm-up is cancelled: a
+            # restart that cancel causes must not start another warm-up.
+            host._stop_rewarming = kernel.on_restart(rewarm)
         return host
 
 
