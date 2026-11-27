@@ -354,7 +354,10 @@ def _bootstrap_workspace_unlocked(
         # env) instead of at launch. The kernel server is stdlib-only, so a
         # trivial eval is the right probe.
         verify_julia_runs(project)
-        mark_env_precompiled(project)  # so launch skips a redundant bake
+        # So launch skips a redundant bake: the env is precompiled, against no
+        # capability packages, which is what a launch without any checks it for.
+        mark_env_precompiled(project)
+        mark_dependency_source(project, None)
         _settle_warm_package(project)
 
     return project
@@ -558,6 +561,38 @@ def prepare_workspace_env(
         _prepare_workspace_env_unlocked(adapter, workspace, julia_project, sim_name, dependencies)
 
 
+def pending_env_preparation(
+    adapter: SimulatorAdapter, workspace: Path, julia_project: Path
+) -> str | None:
+    """What :func:`prepare_workspace_env` would still do to a managed env before its
+    first session: ``"packages"`` when its packages are to change (the in-env Makker
+    runtime or the template moved on, or the simulator is not resolved yet),
+    ``"bake"`` when only the precompile is due, ``None`` when nothing is.
+
+    An update asks this so it can do that work itself, where waiting is expected,
+    rather than call the env current and leave minutes of it to the first session.
+    Checks markers and files only, plus which Julia is installed when a warm package
+    is on record as failing. Capability packages are not covered: only a launch knows
+    them.
+    """
+
+    if user_owns_root_project(workspace) or not env_declares_warm_packages(julia_project):
+        return None
+    template = adapter.julia_env_template_path
+    if (
+        not warm_source_is_current(julia_project, template)
+        or env_template_drifted(julia_project, template)
+        or not manifest_has_package(julia_project, adapter.primary_package)
+    ):
+        return "packages"
+    if not env_precompile_is_current(julia_project):
+        return "bake"
+    failed = (julia_project / WARM_FAILURE_MARKER).exists()
+    if failed and not warm_failure_is_current(julia_project):
+        return "bake"
+    return None
+
+
 @contextmanager
 def _workspace_env_lock(workspace: Path):
     """Serialize env preparation across sessions and processes sharing a workspace."""
@@ -675,19 +710,25 @@ def upgrade_env(
 ) -> None:
     """Move a managed env forward to the installed template, keeping added packages.
 
-    Brings in deps the template added, raises the ``[compat]`` of each package
-    outside the template's range to the template's, then updates and precompiles.
-    Other bounds stay, including the one a local simulator checkout removed. A
-    failed resolve restores the ``Project.toml`` and points at the clean rebuild.
+    Brings in deps the template added and the installed Makker runtime, raises the
+    ``[compat]`` of each package outside the template's range to the template's,
+    then updates and precompiles. Other bounds stay, including the one a local
+    simulator checkout removed. A failed resolve restores the ``Project.toml`` and
+    points at the clean rebuild.
     """
 
     with _workspace_env_lock(workspace):
         project_toml = julia_project / "Project.toml"
         before = project_toml.read_text(encoding="utf-8")
         template = adapter.julia_env_template_path
+        runtime_copied = False
         try:
             legacy.convert_env(julia_project)  # temporary: an env from before the rename
             sync_julia_env_with_template(template, workspace=workspace)
+            # The runtime comes along in this one bake. Left to the first launch, it
+            # would be copied there and the whole env baked a second time.
+            if not warm_source_is_current(julia_project, template):
+                runtime_copied = recopy_warm_sources(julia_project, template)
             data = tomllib.loads(project_toml.read_text(encoding="utf-8"))
             outdated = outdated_env_packages(julia_project, template)
             data.setdefault("compat", {}).update({pkg: spec for pkg, _, spec in outdated})
@@ -702,6 +743,8 @@ def upgrade_env(
                 f"from scratch instead:\n    {rebuild}"
             ) from exc
         write_env_template_stamp(julia_project, template, simulator=adapter.name)
+        if runtime_copied:
+            mark_warm_source(julia_project, template)
 
 
 def _foreign_simulator(julia_project: Path, adapter: SimulatorAdapter) -> str | None:

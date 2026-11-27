@@ -124,6 +124,100 @@ def test_recopy_ignores_paths_the_env_names_itself(tmp_path, template, shared_pk
     assert (env / "MakkerSim" / "src" / "warm.jl").read_text() == "# warm v1\n"
 
 
+def _adapter(template: Path, monkeypatch: pytest.MonkeyPatch) -> SimulatorAdapter:
+    monkeypatch.setattr(
+        SimulatorAdapter, "julia_env_template_path", property(lambda _self: template)
+    )
+    return SimulatorAdapter(
+        name="test",
+        display_name="Test",
+        module_dir=template.parent,
+        package_imports=("MakkerSim",),
+        primary_package="MakkerSim",
+        domain_hints="",
+    )
+
+
+def _declare_and_resolve(env: Path) -> None:
+    """Declare the warm packages, resolve them, then mark the bake done."""
+    project = (env / "Project.toml").read_text(encoding="utf-8")
+    (env / "Project.toml").write_text(
+        project.replace("[deps]\n", '[deps]\nMakker = "u1"\nMakkerSim = "u2"\n'),
+        encoding="utf-8",
+    )
+    (env / "Manifest.toml").write_text(
+        '[[deps.Makker]]\npath = "Makker"\n\n[[deps.MakkerSim]]\npath = "MakkerSim"\n',
+        encoding="utf-8",
+    )
+    (env / PRECOMPILE_MARKER).touch()
+
+
+def test_pending_preparation_names_what_a_launch_would_still_do(
+    tmp_path: Path, template: Path, shared_pkg: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An update asks this to do the launch's work itself; "up to date" used to leave
+    # a new Makker runtime and its minutes-long bake to the first session.
+    adapter = _adapter(template, monkeypatch)
+    env = _make_env(tmp_path, template, shared_pkg)
+    _declare_and_resolve(env)
+    assert env_setup.pending_env_preparation(adapter, tmp_path, env) is None
+
+    (shared_pkg / "src" / "ensemble.jl").write_text("# v2 changed\n", encoding="utf-8")
+    assert env_setup.pending_env_preparation(adapter, tmp_path, env) == "packages"
+
+    recopy_warm_sources(env, template)
+    mark_warm_source(env, template)
+    assert env_setup.pending_env_preparation(adapter, tmp_path, env) == "bake"
+    (env / PRECOMPILE_MARKER).touch()
+    assert env_setup.pending_env_preparation(adapter, tmp_path, env) is None
+
+    # A warm package on record as failing is tried again once what it failed
+    # against has changed (Julia, here), as a launch would.
+    (env / workspace.WARM_FAILURE_MARKER).write_text("older attempt", encoding="utf-8")
+    monkeypatch.setattr(env_setup, "warm_failure_is_current", lambda _env: False)
+    assert env_setup.pending_env_preparation(adapter, tmp_path, env) == "bake"
+    monkeypatch.setattr(env_setup, "warm_failure_is_current", lambda _env: True)
+    assert env_setup.pending_env_preparation(adapter, tmp_path, env) is None
+
+    (env / "Manifest.toml").write_text("", encoding="utf-8")  # the simulator unresolved
+    assert env_setup.pending_env_preparation(adapter, tmp_path, env) == "packages"
+
+
+def test_pending_preparation_leaves_an_env_without_warm_packages_alone(
+    tmp_path: Path, template: Path, shared_pkg: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter = _adapter(template, monkeypatch)
+    env = _make_env(tmp_path, template, shared_pkg)
+    (env / WARM_SOURCE_MARKER).unlink()
+    assert env_setup.pending_env_preparation(adapter, tmp_path, env) is None
+
+
+def test_an_update_copies_the_new_runtime_before_its_one_bake(
+    tmp_path: Path, template: Path, shared_pkg: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Left to the first launch, the copy would make it bake the whole env again.
+    adapter = _adapter(template, monkeypatch)
+    ws = tmp_path / "ws"
+    env = ws / ".makker" / "julia-env"
+    env.parent.mkdir(parents=True)
+    _make_env(tmp_path, template, shared_pkg).rename(env)
+    _declare_and_resolve(env)
+    (shared_pkg / "src" / "ensemble.jl").write_text("# v2 changed\n", encoding="utf-8")
+    baked_with: list[str] = []
+    monkeypatch.setattr(
+        env_setup,
+        "update_env",
+        lambda project: baked_with.append(
+            (project / "Makker" / "src" / "ensemble.jl").read_text(encoding="utf-8")
+        ),
+    )
+
+    env_setup.upgrade_env(adapter, ws, env, "test")
+
+    assert baked_with == ["# v2 changed\n"]
+    assert warm_source_is_current(env, template) is True
+
+
 def test_failed_refresh_restores_previous_sources_and_markers(
     tmp_path: Path, template: Path, shared_pkg: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -409,6 +409,11 @@ def test_precompile_runs_instantiate_and_precompile(
     assert any("Pkg.precompile()" in cmd for cmd in captured)
     # The post-precompile boot probe still runs.
     assert any("print(1 + 1)" in cmd for cmd in captured)
+    # Baked against no capability packages, as recorded, so a launch without any
+    # does not bake it all over again.
+    from makker.workspace import dependency_source_is_current
+
+    assert dependency_source_is_current(workspace_julia_env(workspace), None)
 
 
 def test_bootstrap_raises_when_julia_missing(

@@ -217,6 +217,63 @@ def test_env_step_leaves_a_current_environment(monkeypatch, capsys) -> None:
     assert "up to date" in capsys.readouterr().out
 
 
+def _pending(monkeypatch, pending: str | None) -> list[Path]:
+    """Stub what a launch would still do, and record the preparations run."""
+    from makker.simulators import env_setup
+
+    monkeypatch.setattr(env_setup, "pending_env_preparation", lambda *_a: pending)
+    prepared: list[Path] = []
+    monkeypatch.setattr(
+        env_setup,
+        "prepare_workspace_env",
+        lambda adapter, *, workspace, julia_project, sim_name: prepared.append(julia_project),
+    )
+    return prepared
+
+
+def test_env_step_does_the_work_a_new_makker_runtime_leaves(monkeypatch, capsys) -> None:
+    # No package is behind, but the env holds the previous Makker's Julia runtime.
+    # Calling it current left a minutes-long re-copy and bake to the first session.
+    _fake_status(monkeypatch, [])
+    monkeypatch.setattr(upgrade_cmd, "upgrade_workspace", lambda *a, **k: pytest.fail("no bump"))
+    prepared = _pending(monkeypatch, "packages")
+    images = []
+    monkeypatch.setattr(
+        upgrade_cmd, "decide_sysimage", lambda *a, **k: images.append(k["choice"]) or False
+    )
+
+    assert upgrade_cmd.run(_args(env_only=True, sysimage="off")) == 0
+    out = capsys.readouterr().out
+    assert "needs updating for this version of Makker; doing it now" in out
+    assert "Updated the JutulDarcy environment" in out
+    assert "up to date" not in out
+    assert len(prepared) == 1
+    assert images == ["off"]  # new packages make an image stale, so it is asked about
+
+
+def test_env_step_bakes_without_asking_about_the_image(monkeypatch, capsys) -> None:
+    _fake_status(monkeypatch, [])
+    prepared = _pending(monkeypatch, "bake")
+    monkeypatch.setattr(upgrade_cmd, "decide_sysimage", lambda *a, **k: pytest.fail("unchanged"))
+
+    assert upgrade_cmd.run(_args(env_only=True)) == 0
+    assert "needs precompiling; doing it now" in capsys.readouterr().out
+    assert len(prepared) == 1
+
+
+def test_check_reports_work_left_for_the_first_session(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(upgrade_cmd, "install_info", lambda: InstallInfo("registry"))
+    monkeypatch.setattr(upgrade_cmd, "refresh_cache", lambda force=False: "0.0.0")
+    _fake_status(monkeypatch, [])
+    prepared = _pending(monkeypatch, "packages")
+
+    assert upgrade_cmd.run(_args(check=True)) == 0
+    out = capsys.readouterr().out
+    assert "needs updating for this version of Makker" in out
+    assert "makker upgrade --env-only" in out
+    assert prepared == []  # a check changes nothing
+
+
 def test_a_newer_environment_is_left_alone(tmp_path, monkeypatch, capsys) -> None:
     # A simulator developer trying an unreleased or just-released version: it runs,
     # and nothing moves it back.

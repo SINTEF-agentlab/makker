@@ -166,7 +166,15 @@ def _current_or_newer(adapter, ws: Path, project: Path) -> str:
     return f"{note[0].upper()}{note[1:]} Nothing to update."
 
 
+_PENDING = {
+    "packages": "This folder's Julia environment needs updating for this version of Makker",
+    "bake": "This folder's Julia environment needs precompiling",
+}
+
+
 def _report_workspace_env(ws: Path) -> None:
+    from makker.simulators.env_setup import pending_env_preparation
+
     status = workspace_env_status(ws)
     if status is None:
         return
@@ -177,6 +185,10 @@ def _report_workspace_env(ws: Path) -> None:
             f"This folder's Julia environment has {found}; this version needs {needed}. "
             "Update it with `makker upgrade`."
         )
+        return
+    pending = pending_env_preparation(adapter, ws, project)
+    if pending is not None:
+        print(f"{_PENDING[pending]}. Do it now with `makker upgrade --env-only`.")
     else:
         print(_current_or_newer(adapter, ws, project))
 
@@ -194,13 +206,28 @@ def update_workspace_env(ws: Path, *, sysimage: str | None = None) -> int:
         return 0
     adapter, project, sim, outdated = status
     if not outdated:
+        from makker.simulators.env_setup import pending_env_preparation
+
         # Temporary: an environment from before the rename has no outdated package
-        # in it, yet needs the renamed ones. Bring them in now, with the update,
-        # where waiting is expected, not at the first session after it.
+        # in it, yet needs the renamed ones.
         if legacy.env_predates_rename(project):
-            return _carry_env_over(adapter, ws, project, sim, sysimage)
-        print(_current_or_newer(adapter, ws, project))
-        return 0
+            print(
+                "This folder's Julia environment was set up by jutul-agent; "
+                "preparing it for Makker.",
+                flush=True,
+            )
+            return _prepare_env_now(adapter, ws, project, sim, sysimage, packages_change=True)
+        # Nothing to move forward, but the first session may still have minutes of
+        # work to do before it can start (a new Makker runtime to bake, above all).
+        # Do it here, with the update, where waiting is expected.
+        pending = pending_env_preparation(adapter, ws, project)
+        if pending is None:
+            print(_current_or_newer(adapter, ws, project))
+            return 0
+        print(f"{_PENDING[pending]}; doing it now, which takes a few minutes.", flush=True)
+        return _prepare_env_now(
+            adapter, ws, project, sim, sysimage, packages_change=pending == "packages"
+        )
     found, needed = _describe(outdated)
     # Flush before Julia writes to the same output, or a log shows this line last.
     print(f"This folder's Julia environment has {found}; updating it to {needed}.", flush=True)
@@ -208,18 +235,22 @@ def update_workspace_env(ws: Path, *, sysimage: str | None = None) -> int:
     return 0 if upgrade_workspace(adapter, ws, project, sim, sysimage=rebuild_image) else 1
 
 
-def _carry_env_over(adapter, ws: Path, project: Path, sim: str, sysimage: str | None) -> int:
-    """Prepare an environment jutul-agent set up for Makker, keeping its versions."""
+def _prepare_env_now(
+    adapter, ws: Path, project: Path, sim: str, sysimage: str | None, *, packages_change: bool
+) -> int:
+    """Do the environment work a launch would do, keeping its versions.
+
+    A change to its packages makes a system image stale, so the image question is
+    asked first, before minutes of work, as for any other update.
+    """
 
     from makker.interfaces.cli.init import _build_sysimage
     from makker.simulators.env_setup import EnvSetupError, prepare_workspace_env
     from makker.workspace import load_workspace_config
 
-    print(
-        "This folder's Julia environment was set up by jutul-agent; preparing it for Makker.",
-        flush=True,
+    rebuild_image = packages_change and decide_sysimage(
+        ws, interactive=sys.stdin.isatty(), choice=sysimage
     )
-    rebuild_image = decide_sysimage(ws, interactive=sys.stdin.isatty(), choice=sysimage)
     try:
         prepare_workspace_env(adapter, workspace=ws, julia_project=project, sim_name=sim)
     except EnvSetupError as exc:
