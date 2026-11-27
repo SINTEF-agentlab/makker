@@ -40,8 +40,9 @@ from .text import render_terminal_output
 
 _SERVER_JL = Path(__file__).resolve().parent / "server.jl"
 # A cancelled eval is first interrupted through the server, which wakes a waiting
-# eval at once; one still running after this long is computing, and gets SIGINT.
-_INTERRUPT_SIGNAL_DELAY = 1.0
+# eval within milliseconds; one still running after this long is computing, and
+# gets SIGINT. Every cancel of a computing eval waits this long first.
+_INTERRUPT_SIGNAL_DELAY = 0.25
 # After interrupting a cancelled eval we wait this long for its result frame;
 # past this we treat it as wedged and restart.
 _INTERRUPT_DRAIN_TIMEOUT = 10.0
