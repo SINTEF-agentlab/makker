@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shlex
 import sys
 from pathlib import Path
 
@@ -48,10 +47,9 @@ def test_julia_launch_env_withholds_credentials(secrets: None) -> None:
 def test_shell_commands_run_without_credentials(secrets: None, tmp_path: Path) -> None:
     from makker.agent.builder import build_backend
 
-    names = ", ".join(repr(name) for name in _SECRETS)
-    probe = f"import os; print(sorted(set(os.environ) & {{{names}}}))"
-    result = build_backend(workspace=tmp_path).execute(
-        f"{shlex.quote(sys.executable)} -c {shlex.quote(probe)}"
-    )
+    # A script file and double quotes, which both cmd.exe and sh read the same way.
+    probe = tmp_path / "probe.py"
+    probe.write_text(f"import os\nprint(sorted(set(os.environ) & {set(_SECRETS)!r}))\n")
+    result = build_backend(workspace=tmp_path).execute(f'"{sys.executable}" "{probe}"')
     assert result.exit_code == 0, result.output
     assert result.output.strip() == "[]"
