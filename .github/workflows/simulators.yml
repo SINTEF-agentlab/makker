@@ -14,7 +14,17 @@ on:
 
 jobs:
   julia-kernel:
-    runs-on: ubuntu-latest
+    name: julia-kernel (${{ matrix.os }}, Julia ${{ matrix.julia }})
+    # The kernel reads Julia's scheduler internals to interrupt an eval, and
+    # interrupts differently on Windows: so the oldest supported Julia, and Windows.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, julia: "1.12" }
+          - { os: ubuntu-latest, julia: "1.10" }
+          - { os: windows-latest, julia: "1.12" }
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
@@ -25,7 +35,7 @@ jobs:
       - name: Set up Julia
         uses: julia-actions/setup-julia@v2
         with:
-          version: "1.12"
+          version: ${{ matrix.julia }}
       # Base Julia only: no simulator depot to cache or precompile.
       - name: Test JuliaKernel backend
         run: uv run pytest tests/test_juliakernel.py -v

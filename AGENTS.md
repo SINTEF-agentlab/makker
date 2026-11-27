@@ -48,7 +48,8 @@ GitHub Actions workflows:
   to pick (`pytest -m "not integration" -n 2 --dist loadfile`, no Julia);
   `web-ui` (`npm ci`, typecheck, tests, build, then fails if the committed
   `web_dist` differs from the build).
-- `simulators.yml`: runs JuliaKernel and all four simulator integration jobs
+- `simulators.yml`: runs JuliaKernel (Linux on Julia 1.12 and 1.10, and
+  Windows) and all four simulator integration jobs
   on every PR and push to `main`, plus weekly Monday and manual runs. The
   JutulDarcy smoke job also runs real plot tests. Each smoke job instantiates
   its env from current upstream, precompiles, and runs `test_simulators_smoke.py`.
