@@ -623,6 +623,51 @@ async def test_an_interrupt_that_comes_early_or_late_is_handled() -> None:
         assert result.output == "42"
 
 
+_ORPHAN_PARENT = """
+import asyncio, sys
+from makker.juliakernel import JuliaKernel, KernelConfig
+
+async def main():
+    async with JuliaKernel(KernelConfig()) as k:
+        task = asyncio.create_task(k.eval(sys.argv[1]))
+        await asyncio.sleep(1.0)
+        print("running", flush=True)
+        await task
+
+asyncio.run(main())
+"""
+
+
+@pytest.mark.integration
+@needs_julia
+def test_julia_stops_when_its_parent_dies_mid_eval(tmp_path: Path) -> None:
+    """A front end that is killed outright can't stop its Julia, which would run
+    the eval to the end, for a simulation hours later. Julia ends itself once the
+    eval next yields, as code that prints its progress does."""
+    import json
+    import subprocess
+    import sys
+
+    beat = tmp_path / "beat"
+    code = (
+        f"let s = 0.0; while true; s += sum(rand(10^6)); write({json.dumps(str(beat))}, "
+        'string(s)); println("step"); end; end'
+    )
+    parent = subprocess.Popen(
+        [sys.executable, "-c", _ORPHAN_PARENT, code], stdout=subprocess.PIPE, text=True
+    )
+    try:
+        assert parent.stdout is not None and parent.stdout.readline().strip() == "running"
+        parent.kill()  # no cleanup runs, as when a client kills its server
+        parent.wait()
+        time.sleep(3)
+        last = beat.stat().st_mtime_ns
+        time.sleep(2)
+        assert beat.stat().st_mtime_ns == last, "Julia ran on after its parent died"
+    finally:
+        parent.kill()
+
+
 @pytest.mark.integration
 @needs_julia
 async def test_reset_and_restart_clear_state() -> None:
