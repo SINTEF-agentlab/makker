@@ -703,9 +703,9 @@ class FakeJulia:
         self._restarted("it was reset")
         return EvalResult(output="reset")
 
-    async def restart(self) -> None:
+    async def restart(self, reason: str = "it was restarted") -> None:
         self.restart_count += 1
-        self._restarted("it was restarted")
+        self._restarted(reason)
 
 
 def make_fake_adapter(
