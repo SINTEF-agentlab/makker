@@ -133,7 +133,11 @@ export type ServerMessage =
        *  server's clock, as a turn message's `at` is). */
       started_at?: number;
       now?: number;
+      /** Julia is still warming up; a `warm` message follows once it is done. */
+      warming?: boolean;
     }
+  /** The warm-up a snapshot reported has ended. */
+  | { type: "warm" }
   /** A model switch took effect: the session now runs `model`. */
   | { type: "model"; model: string | null };
 

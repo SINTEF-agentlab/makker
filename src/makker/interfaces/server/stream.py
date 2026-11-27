@@ -152,6 +152,8 @@ class _SessionStream:
         self._deferred_host_context: tuple[dict[str, Any] | None] | None = None
         # In-flight refit evals (see ``_refit``): held so they aren't collected.
         self._refits: set[asyncio.Task[None]] = set()
+        # Waits for the Julia warm-up a snapshot reported; see ``_tell_when_warm``.
+        self._warm_watch: asyncio.Task[None] | None = None
 
     async def handle(self, message: dict[str, Any]) -> None:
         kind = message.get("type")
@@ -601,6 +603,8 @@ class _SessionStream:
         snapshot = self._snapshot()
         self._ws = websocket
         await _safe_send(websocket, snapshot)
+        if snapshot["warming"] and (self._warm_watch is None or self._warm_watch.done()):
+            self._warm_watch = asyncio.create_task(self._tell_when_warm())
         # Read back from the graph state when this stream has none in hand: the
         # session was resumed from disk, or paused before this server started.
         if not self._pending and not self._busy():
@@ -613,6 +617,20 @@ class _SessionStream:
         """Stop sending to ``websocket``; a running turn carries on regardless."""
         if self._ws is websocket:
             self._ws = None
+
+    def _warming(self) -> bool:
+        task = self._host.warmup_task
+        return task is not None and not task.done()
+
+    async def _tell_when_warm(self) -> None:
+        """Send ``warm`` once Julia's warm-up has ended, however it ended.
+
+        A Julia restart cancels the warm-up and starts another, which is waited
+        for in turn.
+        """
+        while self._warming():
+            await asyncio.wait([self._host.warmup_task])
+        await self._send(protocol.warm_to_wire())
 
     def _snapshot(self) -> dict[str, Any]:
         """The session as a newly attached socket should show it.
@@ -645,6 +663,7 @@ class _SessionStream:
             model=self._host.model,
             context=context_meter(session.trace),
             started_at=self._turn_started_at,
+            warming=self._warming(),
         )
 
     async def _send_context(self) -> None:
