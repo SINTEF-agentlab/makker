@@ -520,7 +520,7 @@ class SessionHost:
         from makker.juliakernel import JuliaKernel, KernelConfig
         from makker.models import provider_key_vars, resolve_model
         from makker.paths import workspace_root
-        from makker.session import Session, default_session_id, session_dir
+        from makker.session import Session, open_session_dir, session_dir
         from makker.simulators.env_setup import note_warm_load_failure, prepare_workspace_env
         from makker.user_config import load_user_config
         from makker.workspace import (
@@ -593,9 +593,7 @@ class SessionHost:
         for note in sysimage_decision.notes:
             print(f"note: {note}", file=sys.stderr)
 
-        sid = session_id or default_session_id()
-        sdir = session_dir(sid, state_root=state_root)
-        sdir.mkdir(parents=True, exist_ok=True)
+        sid, sdir = open_session_dir(session_id, state_root=state_root)
 
         compute_threads = resolve_compute_threads(threads)
         env = {

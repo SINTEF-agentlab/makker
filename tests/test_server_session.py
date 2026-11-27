@@ -44,9 +44,8 @@ def _manager(
         *, sim, model, approval_mode, workspace, resume, session_id, extensions=()
     ) -> SessionHost:
         adapter = make_fake_adapter(tmp_path)
-        sid = session_id or default_session_id()
         session = Session.create(
-            julia=FakeJulia(), simulator=adapter, session_id=sid, state_root=tmp_path
+            julia=FakeJulia(), simulator=adapter, session_id=session_id, state_root=tmp_path
         )
         return SessionHost(session=session, agent=agent_factory())
 
@@ -470,9 +469,8 @@ def test_default_approval_mode_applies_when_request_omits_it(tmp_path: Path) -> 
     ) -> SessionHost:
         seen.append(approval_mode)
         adapter = make_fake_adapter(tmp_path)
-        sid = session_id or default_session_id()
         session = Session.create(
-            julia=FakeJulia(), simulator=adapter, session_id=sid, state_root=tmp_path
+            julia=FakeJulia(), simulator=adapter, session_id=session_id, state_root=tmp_path
         )
         return SessionHost(session=session, agent=echo_agent())
 
@@ -496,9 +494,8 @@ def test_default_model_applies_when_request_omits_it(tmp_path: Path) -> None:
     ) -> SessionHost:
         seen.append(model)
         adapter = make_fake_adapter(tmp_path)
-        sid = session_id or default_session_id()
         session = Session.create(
-            julia=FakeJulia(), simulator=adapter, session_id=sid, state_root=tmp_path
+            julia=FakeJulia(), simulator=adapter, session_id=session_id, state_root=tmp_path
         )
         return SessionHost(session=session, agent=echo_agent())
 
@@ -811,9 +808,8 @@ def test_reattach_leaves_the_live_host_as_is(tmp_path: Path) -> None:
         *, sim, model, approval_mode, workspace, resume, session_id, extensions=()
     ) -> SessionHost:
         adapter = make_fake_adapter(tmp_path)
-        sid = session_id or default_session_id()
         session = Session.create(
-            julia=FakeJulia(), simulator=adapter, session_id=sid, state_root=tmp_path
+            julia=FakeJulia(), simulator=adapter, session_id=session_id, state_root=tmp_path
         )
         return SessionHost(session=session, agent=echo_agent(), model=model)
 

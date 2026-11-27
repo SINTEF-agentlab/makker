@@ -191,6 +191,30 @@ def session_dir(session_id: str, *, state_root: Path | None = None) -> Path:
     return sessions_root(state_root) / session_id
 
 
+def open_session_dir(
+    session_id: str | None = None, *, state_root: Path | None = None
+) -> tuple[str, Path]:
+    """The id and state folder of the given session, or of a new one.
+
+    A new session claims a folder that did not exist yet (``mkdir`` fails on one
+    that does, in any process), so two sessions started the same minute never
+    share a folder, even when their random suffixes match.
+    """
+    if session_id is not None:
+        dir_ = session_dir(session_id, state_root=state_root)
+        dir_.mkdir(parents=True, exist_ok=True)
+        return session_id, dir_
+    sessions_root(state_root).mkdir(parents=True, exist_ok=True)
+    while True:
+        sid = default_session_id()
+        dir_ = session_dir(sid, state_root=state_root)
+        try:
+            dir_.mkdir()
+        except FileExistsError:
+            continue
+        return sid, dir_
+
+
 def last_session_path(state_root: Path | None = None) -> Path:
     base = state_root if state_root is not None else workspace_state_dir()
     return base / "last-session"
@@ -354,9 +378,7 @@ class Session:
         open_windows: bool = False,
         surface: str = "tui",
     ) -> Session:
-        sid = session_id or default_session_id()
-        dir_ = session_dir(sid, state_root=state_root)
-        dir_.mkdir(parents=True, exist_ok=True)
+        sid, dir_ = open_session_dir(session_id, state_root=state_root)
 
         out_dir = session_output_dir(sid)
         try:

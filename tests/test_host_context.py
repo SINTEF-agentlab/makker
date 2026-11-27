@@ -36,7 +36,6 @@ from makker.lab.fakes import (
 from makker.session import (
     HOST_CONTEXT_FILENAME,
     Session,
-    default_session_id,
     read_host_context,
 )
 from makker.session_host import SessionHost
@@ -70,10 +69,9 @@ def _manager(
         *, sim, model, approval_mode, workspace, resume, session_id, extensions=()
     ) -> SessionHost:
         adapter = make_fake_adapter(tmp_path)
-        sid = session_id or default_session_id()
         maker = Session.resume if resume else Session.create
         # The default sessions root, where the server looks for a session to resume.
-        session = maker(julia=FakeJulia(), simulator=adapter, session_id=sid)
+        session = maker(julia=FakeJulia(), simulator=adapter, session_id=session_id)
         return SessionHost(session=session, agent=agent_factory(), extensions=extensions)
 
     return SessionManager(host_factory=host_factory, max_live=max_live)
