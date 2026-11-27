@@ -230,6 +230,8 @@ function main()
     # the root's thread (by the root task and the interrupter), so need no lock.
     evaluating = Ref("")
     cancelled = Ref("")
+    # Whether an eval is running, for the control reader on another thread.
+    computing = Threads.Atomic{Bool}(false)
     # An EXE as "id\ncode": a Channel{String} is already compiled into Julia's
     # system image, where a channel of tuples took a tenth of a second to compile.
     requests = Channel{String}(Inf)
@@ -260,6 +262,14 @@ function main()
         finally
             close(requests)
             close(interrupts)
+            # The parent has gone, so nobody will read this eval's result or can
+            # interrupt it: end the process now rather than when the code ends,
+            # which for a simulation can be hours. `_exit` works from this thread
+            # while the eval's thread computes, where `exit` would wait for it.
+            # The EOF is only seen once the eval yields (printing does), as the
+            # socket is served by the event loop: a loop that never yields still
+            # runs to its end.
+            computing[] && ccall(:_exit, Cvoid, (Cint,), 0)
         end
     end
 
@@ -375,10 +385,12 @@ function main()
             # An INT that came before its eval started cancels it outright.
             cancelled[] == id && throw(InterruptException())
             evaluating[] = id
+            computing[] = true
             val = try
                 Core.eval(Main, rewrite_includes!(Meta.parseall(code)))
             finally
                 evaluating[] = ""
+                computing[] = false
             end
             payload = value_repr(val)
         catch e
