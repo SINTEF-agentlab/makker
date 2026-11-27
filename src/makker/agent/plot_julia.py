@@ -392,6 +392,9 @@ def _plot_id_of(payload: dict[str, Any]) -> str:
 REFIT_TIMEOUT_S = 20.0
 # How often a re-fit checks whether the kernel has come free.
 _IDLE_POLL_S = 0.25
+# The newest re-fit asked of each view (session, route): one still waiting for the
+# kernel when a newer one arrives is dropped, since only the last size matters.
+_latest_refit: dict[tuple[int, str], object] = {}
 
 
 async def refit_web(
@@ -409,16 +412,26 @@ async def refit_web(
     their time too, and so could expire just as the resize began: cancelling
     then interrupts Julia mid-resize, for nothing. Waiting is checked and the
     eval entered in one step (no await in between), so nothing can queue ahead.
+    A view resized again while its re-fit waits drops the older one, so a run
+    with many resizes leaves one re-fit for the end of it, at the latest size.
     """
 
     route = jl.viz_route(route_id, session.web_plot_secret or "")
     call = jl.resize_web_fig_call(route, *size, authored=authored)
-    while getattr(session.julia, "busy", False):
-        await asyncio.sleep(_IDLE_POLL_S)
+    view = (id(session), route_id)
+    mine = _latest_refit[view] = object()
     try:
-        result = await asyncio.wait_for(session.julia.eval(call), REFIT_TIMEOUT_S)
-    except TimeoutError:
-        return "the resize did not finish in time", None
+        while getattr(session.julia, "busy", False):
+            await asyncio.sleep(_IDLE_POLL_S)
+            if _latest_refit.get(view) is not mine:
+                return "a newer resize of this view replaced it", None
+        try:
+            result = await asyncio.wait_for(session.julia.eval(call), REFIT_TIMEOUT_S)
+        except TimeoutError:
+            return "the resize did not finish in time", None
+    finally:
+        if _latest_refit.get(view) is mine:
+            del _latest_refit[view]
     if result.error:
         return f"the resize failed: {_truncate(result.error, 200)}", None
     echoed = _parse_size(result.output)

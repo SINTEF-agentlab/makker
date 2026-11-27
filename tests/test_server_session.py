@@ -1659,6 +1659,27 @@ async def test_a_refit_deadline_counts_only_the_resize(tmp_path: Path) -> None:
     assert echoed == [900, 600]
 
 
+async def test_a_newer_refit_replaces_one_still_waiting(tmp_path: Path) -> None:
+    # A view resized again and again during a long run must not queue a re-fit
+    # per resize, to run one after another at stale sizes once the run ends: only
+    # the latest size is applied.
+    from makker.agent.plot_julia import refit_web
+
+    _st, _ws, session = _plot_state(tmp_path)
+    session.julia.busy = True  # a long eval holds the kernel
+    older = asyncio.create_task(refit_web(session, "res", [700, 500]))
+    await asyncio.sleep(0.05)
+    newer = asyncio.create_task(refit_web(session, "res", [900, 600]))
+    other_view = asyncio.create_task(refit_web(session, "res--pop1", [800, 800]))
+    err, _ = await asyncio.wait_for(older, timeout=5)
+    assert err is not None and "newer resize" in err
+    session.julia.busy = False
+    assert await asyncio.wait_for(newer, timeout=5) == (None, [900, 600])
+    assert (await asyncio.wait_for(other_view, timeout=5))[0] is None
+    resizes = [code for code in session.julia.calls if "resize!" in code]
+    assert len(resizes) == 2 and not any("700" in code for code in resizes)
+
+
 async def test_refit_queues_behind_a_running_turn_without_blocking(tmp_path: Path) -> None:
     # A refit during a simulation must neither be dropped (the stage would stay
     # letterboxed with nothing to retry it) nor block the WebSocket loop (a
