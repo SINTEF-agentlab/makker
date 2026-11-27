@@ -61,8 +61,9 @@ Two test workflows:
   run test files in parallel; the workflow installs no Julia. A `web-ui` job
   typechecks, tests and builds the web UI, and fails if the committed
   `web_dist` is not what the source builds.
-- `simulators.yml`: runs the live JuliaKernel and all four simulator jobs
-  on every PR and push. The JutulDarcy job also runs GLMakie plot integration
+- `simulators.yml`: runs the live JuliaKernel (Linux on Julia 1.12 and the
+  oldest supported 1.10, and Windows) and all four simulator jobs on every PR
+  and push. The JutulDarcy job also runs GLMakie plot integration
   tests, sharing its setup and precompile. Weekly and manually dispatched
   runs check the same environments against the latest compatible upstream
   releases. Every run resolves from `Project.toml` and `[sources]`, just like
