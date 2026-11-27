@@ -43,6 +43,30 @@ def test_default_session_id_is_dated_and_sortable() -> None:
     assert sorted([later, earlier]) == [earlier, later]
 
 
+def test_a_new_session_never_reuses_a_taken_folder(tmp_path: Path, monkeypatch) -> None:
+    # Two sessions started the same minute whose random suffixes match: the second
+    # gets a fresh id rather than writing into the first one's folder.
+    import makker.session as session_mod
+    from makker.lab.fakes import FakeJulia, make_fake_adapter
+
+    ids = iter(["2026-06-12-0905-aaaa", "2026-06-12-0905-aaaa", "2026-06-12-0905-bbbb"])
+    monkeypatch.setattr(session_mod, "default_session_id", lambda: next(ids))
+    adapter = make_fake_adapter(tmp_path)
+    first = Session.create(julia=FakeJulia(), simulator=adapter, state_root=tmp_path)
+    second = Session.create(julia=FakeJulia(), simulator=adapter, state_root=tmp_path)
+    first.finalize()
+    second.finalize()
+
+    assert first.session_id == "2026-06-12-0905-aaaa"
+    assert second.session_id == "2026-06-12-0905-bbbb"
+    assert first.state_dir != second.state_dir
+    # A session asked for by id (a resume) still opens its own folder.
+    assert session_mod.open_session_dir(first.session_id, state_root=tmp_path) == (
+        first.session_id,
+        first.state_dir,
+    )
+
+
 def test_session_output_dir_is_named_by_the_session_id(tmp_path: Path) -> None:
     from makker.paths import session_output_dir
 
