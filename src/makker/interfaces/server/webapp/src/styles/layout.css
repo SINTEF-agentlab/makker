@@ -814,7 +814,7 @@ body.canvas-resizing iframe {
 .ctx-table td:nth-child(2),
 .ctx-table td:nth-child(3) {
   text-align: right;
-  width: 5.5rem;
+  width: 4.5rem;
 }
 .ctx-table td:nth-child(3) {
   color: var(--muted);

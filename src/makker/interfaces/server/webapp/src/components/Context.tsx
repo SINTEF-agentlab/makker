@@ -2,11 +2,21 @@
 // how full the context is and what fills it. The figures come from the server
 // (`context_panel.py`), which the terminal's /context renders too.
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 
 import { useController, useSel } from "../context";
 import { formatTokens } from "../format";
 import type { ContextMeter as Meter, ContextReport } from "../protocol";
+
+/** A label that wraps after each "/" of a path, not inside a name. */
+function breakAfterSlashes(label: string) {
+  return label.split("/").map((part, i) => (
+    <Fragment key={i}>
+      {i > 0 ? <>/<wbr /></> : null}
+      {part}
+    </Fragment>
+  ));
+}
 
 /** Share of the window, 0..1, or null before the first model call. */
 function fraction(meter: Meter | null): number | null {
@@ -183,7 +193,7 @@ function ReportBody({ report }: { report: ContextReport }) {
                 expandable && toolsOpen
                   ? report.largest.map((item, i) => (
                       <tr key={`largest-${i}`} className="ctx-detail">
-                        <td>{item.label}</td>
+                        <td>{breakAfterSlashes(item.label)}</td>
                         <td>{formatTokens(item.tokens)}</td>
                         <td />
                       </tr>
