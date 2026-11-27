@@ -1888,6 +1888,7 @@ def test_every_connection_opens_with_the_session_as_it_stands(tmp_path: Path) ->
         "busy": False,
         "model": None,
         "context": None,
+        "warming": False,
     }
     assert again["type"] == "snapshot" and again["busy"] is False
     assert {"type": "user", "text": "hi"} in again["messages"]
@@ -2892,6 +2893,33 @@ async def test_cancel_answers_even_with_no_turn_running(tmp_path: Path) -> None:
     await st.cancel_turn()
     assert [m["type"] for m in ws.sent] == ["turn_end"]
     assert ws.sent[0]["cancelled"] is True
+
+
+async def test_a_page_hears_when_the_warm_up_it_was_shown_ends(tmp_path: Path) -> None:
+    # The page shows "warming up Julia" from the snapshot. An idle session sends
+    # nothing else, so without `warm` the hint stayed until the next turn.
+    st, _ws, _session = _plot_state(tmp_path)
+    loop = asyncio.get_running_loop()
+    first = loop.create_future()
+    st._host._warmup_task = first
+    ws = _FakeWS()
+    await st.attach(ws)
+    assert ws.sent[0]["type"] == "snapshot" and ws.sent[0]["warming"] is True
+
+    # A Julia restart cancels the warm-up and starts another: wait for that one.
+    second = loop.create_future()
+    st._host._warmup_task = second
+    first.cancel()
+    for _ in range(3):
+        await asyncio.sleep(0)
+    assert [m["type"] for m in ws.sent] == ["snapshot"]
+    second.set_result(None)
+    await st._warm_watch
+    assert ws.sent[-1] == {"type": "warm"}
+
+    later = _FakeWS()
+    await st.attach(later)
+    assert later.sent[0]["warming"] is False
 
 
 async def test_a_reattached_socket_can_stop_the_turn_but_not_start_another(

@@ -140,7 +140,8 @@ Messages from the server to the front end:
 
 | Message | Carries |
 | --- | --- |
-| `snapshot` | The first message on every connection: `messages`, the conversation replayed as `/sessions/{id}/messages` gives it; `busy`, whether a turn is running; `turn`, the messages that turn has sent so far, to apply as if they had arrived live; `model`, the model the session runs (`null` for the server's default); `context`, its context meter (`null` before an agent was built); and while busy `started_at` and `now`, when the turn began and when the snapshot was sent (epoch ms on the server's clock, as a `tool` message's `at` is) |
+| `snapshot` | The first message on every connection: `messages`, the conversation replayed as `/sessions/{id}/messages` gives it; `busy`, whether a turn is running; `turn`, the messages that turn has sent so far, to apply as if they had arrived live; `model`, the model the session runs (`null` for the server's default); `context`, its context meter (`null` before an agent was built); and while busy `started_at` and `now`, when the turn began and when the snapshot was sent (epoch ms on the server's clock, as a `tool` message's `at` is); and `warming`, whether Julia is still warming up |
+| `warm` | The warm-up a `snapshot` reported has ended |
 | `text` | A piece of the assistant's reply |
 | `reasoning` | A piece of the assistant's reasoning |
 | `tool` | A step in a tool call: composing (the model has begun writing it), requested (with its arguments), started, finished, or failed. One replayed, or kept for a page that attaches mid-turn, carries `at`, when it happened (epoch ms) |

@@ -382,6 +382,19 @@ describe("snapshot", () => {
     expect(byKind("user")[0].text).toBe("hi");
     expect(state().busy).toBe(false);
   });
+
+  it("shows the warm-up hint only while the server says Julia is warming", () => {
+    const snapshot = { type: "snapshot" as const, messages: [], turn: [], model: null };
+    state().handle({ ...snapshot, busy: false });
+    expect(state().warming).toBe(false); // a reconnect to a warm session
+
+    state().handle({ ...snapshot, busy: true, warming: true });
+    state().handle({ type: "text", text: "Reading the examples" });
+    expect(state().warming).toBe(true); // a turn's output is not the warm-up ending
+    state().handle({ type: "warm" });
+    expect(state().warming).toBe(false);
+    expect(state().busy).toBe(true);
+  });
 });
 
 describe("reset", () => {

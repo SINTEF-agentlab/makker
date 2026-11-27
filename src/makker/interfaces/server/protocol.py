@@ -50,6 +50,7 @@ __all__ = [
     "turn_end_to_wire",
     "ui_command",
     "viz_to_wire",
+    "warm_to_wire",
 ]
 
 # Bumped when a message kind or field changes shape incompatibly. Front ends
@@ -332,6 +333,7 @@ def snapshot_to_wire(
     model: str | None,
     context: dict[str, Any] | None = None,
     started_at: float | None = None,
+    warming: bool = False,
 ) -> dict[str, Any]:
     """The session as a newly connected front end finds it; the first message.
 
@@ -343,7 +345,8 @@ def snapshot_to_wire(
     ``context`` its context meter (see ``context_to_wire``). ``started_at`` is
     when the running turn began and ``now`` when this was sent (epoch ms, the
     server's clock, as is a turn message's ``at``), so the front end can time
-    the turn from its own clock.
+    the turn from its own clock. ``warming`` says Julia is still warming up; a
+    ``warm`` message follows once it is done.
     """
 
     wire: dict[str, Any] = {
@@ -353,11 +356,18 @@ def snapshot_to_wire(
         "busy": busy,
         "model": model,
         "context": context,
+        "warming": warming,
     }
     if busy and started_at is not None:
         wire["started_at"] = started_at
         wire["now"] = time.time() * 1000
     return wire
+
+
+def warm_to_wire() -> dict[str, Any]:
+    """The Julia warm-up a snapshot reported has finished."""
+
+    return {"type": "warm"}
 
 
 def model_to_wire(model: str | None) -> dict[str, Any]:

@@ -65,9 +65,6 @@ export class Transport {
       this.onDrop();
     };
     this.ws = ws;
-    // The kernel warms in the background on a fresh/resumed session until the
-    // first turn lands; show the hint until any message arrives.
-    this.store.getState().setWarming(true);
   }
 
   close(): void {

@@ -227,7 +227,6 @@ export interface SessionActions {
   setModelMenu: (state: SessionState["modelMenu"]) => void;
   setContextView: (patch: Partial<SessionState["contextView"]>) => void;
   setHistory: (history: HistoryEntry[]) => void;
-  setWarming: (on: boolean) => void;
   setCredentials: (credentials: CredentialInfo[]) => void;
   openApiKeys: (required: CredentialPrompt | null) => void;
   closeApiKeys: () => void;
@@ -572,9 +571,9 @@ export function createSessionStore() {
     // replaces what the page showed (a reconnect or a switch rebuilds from it), and
     // a running turn carries on from where it has got to.
     const onSnapshot = (msg: Extract<ServerMessage, { type: "snapshot" }>) => {
-      const { sessionId, meta, warming } = get();
+      const { sessionId, meta } = get();
       get().reset();
-      set({ sessionId, meta, warming, context: msg.context ?? null });
+      set({ sessionId, meta, warming: !!msg.warming, context: msg.context ?? null });
       get().replay(msg.messages);
       if (!msg.busy) return;
       get().beginWorking();
@@ -592,11 +591,12 @@ export function createSessionStore() {
 
       handle(msg) {
         if (msg.type === "snapshot") return onSnapshot(msg);
+        // Julia's warm-up has ended; nothing else changes.
+        if (msg.type === "warm") return set({ warming: false });
         // Anything but a side output means the agent produced content, so the
         // "thinking" indicator clears. Side outputs (a plot, a context tick) arrive
         // mid-turn while the agent keeps working, so they must not clear it.
         if (!SIDE_OUTPUT_TYPES.has(msg.type)) set({ working: false });
-        if (get().warming) set({ warming: false });
         switch (msg.type) {
           case "text":
             return onText(msg.text);
@@ -672,7 +672,6 @@ export function createSessionStore() {
       setModelMenu: (modelMenu) => set({ modelMenu }),
       setContextView: (patch) => set((s) => ({ contextView: { ...s.contextView, ...patch } })),
       setHistory: (history) => set({ history }),
-      setWarming: (on) => set({ warming: on }),
       setCredentials: (credentials) => set({ credentials }),
       openApiKeys: (required) => set({ apiKeys: { open: true, required } }),
       closeApiKeys: () => set({ apiKeys: { open: false, required: null } }),
